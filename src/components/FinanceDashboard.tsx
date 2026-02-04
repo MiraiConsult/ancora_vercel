@@ -755,7 +755,7 @@ const newRecords: FinancialRecord[] = [];
                     rubricId: chartOfAccounts.find(c => c.rubricName.toUpperCase() === cols[categoryIdx]?.toUpperCase())?.id,
                     companyId: foundCompany?.id,
                     revenueTypeId: foundRevenueType?.id,
-                    
+                    category: cols[categoryIdx] || '',
                 };
                 newRecords.push(mainRecord);
             }

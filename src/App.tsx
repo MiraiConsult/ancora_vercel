@@ -654,7 +654,7 @@ const App: React.FC = () => {
       case 'contacts':
         return <ContactsModule contacts={contacts} setContacts={setContacts} companies={companies} />;
       case 'appointments':
-         return <AppointmentsModule tasks={tasks} setTasks={setTasks} companies={companies} users={allUsers} generalNotes={generalNotes} setGeneralNotes={setGeneralNotes} taskStages={taskStages} setTaskStages={setTaskStages} tags={tags} currentUser={user} />;
+         return <AppointmentsModule tasks={tasks} setTasks={setTasks} companies={companies} users={allUsers} generalNotes={generalNotes} setGeneralNotes={setGeneralNotes} taskStages={taskStages} setTaskStages={setTaskStages} currentUser={user} />;
       case 'finance':
         return isAdmin ? <FinanceDashboard records={financeRecords} setRecords={setFinanceRecords} revenueTypes={revenueTypes} setRevenueTypes={setRevenueTypes} banks={banks} setBanks={setBanks} chartOfAccounts={chartOfAccounts} setChartOfAccounts={setChartOfAccounts} companies={companies} setCompanies={setCompanies} currentUser={user} /> : <AccessDenied />;
       case 'settings':

@@ -116,11 +116,11 @@ export const PerformanceModule: React.FC<PerformanceModuleProps> = ({
       
       // Tarefas do responsável (filtradas por data)
       const userTasks = tasks.filter(t => 
-        t.responsible_users?.includes(user.id) && filterByDate(t.createdAt)
+        t.assigned_to?.includes(user.id) && filterByDate(t.createdAt)
       );
       
       // Calcular valores
-      const wonStage = dealStages.find(s => s.is_won);
+      const wonStage = dealStages.find(s => s.name === 'Fechado (Ganho)');
       const lostStage = dealStages.find(s => s.name === 'Perdido');
       
       const wonDeals = userDeals.filter(d => d.stage === wonStage?.id);
@@ -145,9 +145,9 @@ export const PerformanceModule: React.FC<PerformanceModuleProps> = ({
       // Top tipos de receita
       const revenueMap = new Map<string, { value: number; count: number }>();
       wonDeals.forEach(deal => {
-        if (deal.revenue_type) {
-          const existing = revenueMap.get(deal.revenue_type) || { value: 0, count: 0 };
-          revenueMap.set(deal.revenue_type, {
+        if (deal.revenueTypeId) {
+          const existing = revenueMap.get(deal.revenueTypeId) || { value: 0, count: 0 };
+          revenueMap.set(deal.revenueTypeId, {
             value: existing.value + (deal.value || 0),
             count: existing.count + 1
           });
@@ -174,9 +174,9 @@ export const PerformanceModule: React.FC<PerformanceModuleProps> = ({
         userEmail: user.email,
         userRole: user.role,
         totalClients: userCompanies.length,
-        activeClients: userCompanies.filter(c => c.status === 'active').length,
-        prospectClients: userCompanies.filter(c => c.status === 'prospect').length,
-        churnedClients: userCompanies.filter(c => c.status === 'churned').length,
+        activeClients: userCompanies.filter(c => c.status === 'Active').length,
+        prospectClients: userCompanies.filter(c => c.status === 'Prospect').length,
+        churnedClients: userCompanies.filter(c => c.status === 'Churned').length,
         totalDeals: userDeals.length,
         openDeals: openDeals.length,
         wonDeals: wonDeals.length,
@@ -635,12 +635,12 @@ export const PerformanceModule: React.FC<PerformanceModuleProps> = ({
                             <p className="text-sm text-gray-500">{company.segment}</p>
                           </div>
                           <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            company.status === 'active' ? 'bg-green-100 text-green-800' :
-                            company.status === 'prospect' ? 'bg-yellow-100 text-yellow-800' :
+                            company.status === 'Active' ? 'bg-green-100 text-green-800' :
+                            company.status === 'Prospect' ? 'bg-yellow-100 text-yellow-800' :
                             'bg-red-100 text-red-800'
                           }`}>
-                            {company.status === 'active' ? 'Ativo' :
-                             company.status === 'prospect' ? 'Prospect' : 'Churned'}
+                            {company.status === 'Active' ? 'Ativo' :
+                             company.status === 'Prospect' ? 'Prospect' : 'Churned'}
                           </span>
                         </div>
                       </div>
@@ -678,7 +678,7 @@ export const PerformanceModule: React.FC<PerformanceModuleProps> = ({
                           <div className="flex justify-between items-start">
                             <div>
                               <h4 className="font-semibold text-gray-900">{deal.title}</h4>
-                              <p className="text-sm text-gray-500">{companies.find(c => c.id === deal.company)?.name}</p>
+                              <p className="text-sm text-gray-500">{companies.find(c => c.id === deal.companyId)?.name}</p>
                             </div>
                             <div className="text-right">
                               <p className="font-semibold text-gray-900">{formatCurrency(deal.value || 0)}</p>

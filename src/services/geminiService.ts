@@ -124,15 +124,17 @@ Por favor, forneça:
 // Alias for compatibility with FinanceDashboard
 export const generateFinancialInsight = generateFinancialInsights;
 
-// New function for KanbanBoard
-export const analyzeDealRisks = async (deal: any): Promise<string> => {
+// Function for KanbanBoard - accepts deal and company name
+export const analyzeDealRisks = async (deal: any, companyName?: string): Promise<string> => {
   if (!ai) {
     return "Funcionalidade de IA não configurada. Configure a variável VITE_GEMINI_API_KEY para ativar.";
   }
 
   try {
     const prompt = `Analise o seguinte negócio e identifique riscos potenciais:
-    
+
+Cliente: ${companyName || 'Não informado'}
+Dados do Negócio:
 ${JSON.stringify(deal, null, 2)}
 
 Por favor, forneça:
@@ -153,7 +155,7 @@ Por favor, forneça:
   }
 };
 
-// New function for TasksModule
+// Function for TasksModule
 export const prioritizeTasksAI = async (tasks: any[]): Promise<string> => {
   // Alias to generateTaskPriorities
   return generateTaskPriorities(tasks);

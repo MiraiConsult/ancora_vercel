@@ -673,7 +673,7 @@ const handleChooseNewMeeting = () => {
   };
 
   const clearFilters = () => {
-      setFilterCompany('all'); setFilterPriority('all'); setFilterStatus('all'); setFilterResponsible('all'); setFilterDateStart(''); setFilterDateEnd('');
+      setFilterCompany('all'); setFilterPriority('all'); setFilterStatus('all'); setFilterResponsible([]); setFilterDateStart(''); setFilterDateEnd('');
   };
 
   const getCollaboratorAvatars = (ids: string[] | undefined, authorName?: string) => {
@@ -988,18 +988,13 @@ const renderTasks = () => (
                     <button onClick={() => setTaskViewMode('LIST')} className={`flex items-center px-3 py-1 text-xs font-bold rounded ${taskViewMode === 'LIST' ? 'bg-white shadow' : ''}`}><List size={14} className="mr-1.5"/> Lista</button>
                 </div>
                 {/* Filtro de Responsável */}
-                <div className="flex items-center gap-2">
-                    <UserIcon size={14} className="text-gray-400" />
-                    <select 
-                        value={filterResponsible} 
-                        onChange={e => setFilterResponsible(e.target.value)}
-                        className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-mcsystem-500 focus:border-mcsystem-500"
-                    >
-                        <option value="all">Todos os responsáveis</option>
-                        {users.map(u => (
-                            <option key={u.id} value={u.id}>{u.name}</option>
-                        ))}
-                    </select>
+                <div className="w-64">
+                    <MultiSelectResponsible
+                        users={users}
+                        selectedIds={filterResponsible}
+                        onChange={setFilterResponsible}
+                        placeholder="Todos os responsáveis"
+                    />
                 </div>
             </div>
             <button

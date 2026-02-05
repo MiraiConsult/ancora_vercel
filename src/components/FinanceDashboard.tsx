@@ -136,6 +136,10 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const importMenuRef = useRef<HTMLInputElement>(null);
 
+  // Dashboard Date Filters
+  const [dashboardFilterStartDate, setDashboardFilterStartDate] = useState<string>('');
+  const [dashboardFilterEndDate, setDashboardFilterEndDate] = useState<string>('');
+
   // Reconciliation Filters & Bulk Selection
   const [reconFilterType, setReconFilterType] = useState<TransactionType | 'ALL'>('ALL');
   const [reconFilterStatus, setReconFilterStatus] = useState<TransactionStatus | 'ALL'>('ALL');
@@ -1580,7 +1584,27 @@ const newRecords: FinancialRecord[] = [];
       let totalIncome = 0; let totalExpense = 0; let totalPendingIncome = 0; let totalPendingExpense = 0;
       primaryPeriod.months.forEach(m => { const key = `${primaryPeriod.year}-${String(m).padStart(2, '0')}`; monthMap.set(key, { month: monthNames[m-1], income: 0, expense: 0, balance: 0 }); });
       let accumulatedBalance = 0;
-      const filtered = validRecords.filter(r => { const d = r.dueDate; if (!d) return false; const [y, m] = d.split('-'); const year = parseInt(y); const month = parseInt(m); return year === primaryPeriod.year && primaryPeriod.months.includes(month); });
+      
+      // Aplicar filtros de data do dashboard
+      let filtered = validRecords.filter(r => { 
+          const d = r.dueDate; 
+          if (!d) return false; 
+          const [y, m] = d.split('-'); 
+          const year = parseInt(y); 
+          const month = parseInt(m); 
+          return year === primaryPeriod.year && primaryPeriod.months.includes(month); 
+      });
+      
+      // Filtrar por data de início e fim
+      if (dashboardFilterStartDate || dashboardFilterEndDate) {
+          filtered = filtered.filter(r => {
+              if (!r.dueDate) return false;
+              const recordDate = new Date(r.dueDate).getTime();
+              const startMatch = !dashboardFilterStartDate || recordDate >= new Date(dashboardFilterStartDate).getTime();
+              const endMatch = !dashboardFilterEndDate || recordDate <= new Date(dashboardFilterEndDate + 'T23:59:59').getTime();
+              return startMatch && endMatch;
+          });
+      }
       filtered.forEach(r => {
           const key = r.dueDate.slice(0, 7);
           if (r.status === TransactionStatus.PAID) {
@@ -1596,7 +1620,7 @@ const newRecords: FinancialRecord[] = [];
       const categoryData = Array.from(categoryMap.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 6);
       const statusData = [ { name: 'Receitas', Pago: totalIncome, Pendente: totalPendingIncome }, { name: 'Despesas', Pago: totalExpense, Pendente: totalPendingExpense } ];
       return { evolutionData, categoryData, statusData, totalIncome, totalExpense, balance: totalIncome - totalExpense, totalPendingIncome, totalPendingExpense };
-  }, [validRecords, primaryPeriod]);
+  }, [validRecords, primaryPeriod, dashboardFilterStartDate, dashboardFilterEndDate]);
 
   const buildHierarchy = (mode: 'DRE' | 'CASHFLOW') => {
       const primaryKeys = primaryPeriod.months.map(m => `${primaryPeriod.year}-${String(m).padStart(2, '0')}`);
@@ -2141,6 +2165,46 @@ const newRecords: FinancialRecord[] = [];
         
         {activeTab === 'DASHBOARD' && (
             <div className="space-y-6 animate-in fade-in">
+                {/* Filtros de Data */}
+                <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
+                    <div className="flex items-center gap-4 flex-wrap">
+                        <div className="flex items-center gap-2">
+                            <Calendar size={16} className="text-gray-400" />
+                            <span className="text-sm font-bold text-gray-700">Período:</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <label className="text-xs text-gray-500 font-medium">De:</label>
+                            <input
+                                type="date"
+                                value={dashboardFilterStartDate}
+                                onChange={(e) => setDashboardFilterStartDate(e.target.value)}
+                                className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-mcsystem-500 focus:border-mcsystem-500"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <label className="text-xs text-gray-500 font-medium">Até:</label>
+                            <input
+                                type="date"
+                                value={dashboardFilterEndDate}
+                                onChange={(e) => setDashboardFilterEndDate(e.target.value)}
+                                className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-mcsystem-500 focus:border-mcsystem-500"
+                            />
+                        </div>
+                        {(dashboardFilterStartDate || dashboardFilterEndDate) && (
+                            <button
+                                onClick={() => {
+                                    setDashboardFilterStartDate('');
+                                    setDashboardFilterEndDate('');
+                                }}
+                                className="text-xs text-gray-500 hover:text-red-500 font-medium flex items-center gap-1 transition-colors"
+                            >
+                                <X size={14} />
+                                Limpar Filtros
+                            </button>
+                        )}
+                    </div>
+                </div>
+                
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                     <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100"><p className="text-gray-500 text-xs font-bold uppercase tracking-wide">Receitas (Mês)</p><h3 className="text-2xl font-bold mt-2 text-green-600">R$ {(dashboardChartsData.totalIncome || 0).toLocaleString('pt-BR')}</h3><p className="text-xs text-green-600 mt-1 flex items-center"><TrendingUp size={12} className="mr-1" /> Entrada Bruta</p></div>
                     <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100"><p className="text-gray-500 text-xs font-bold uppercase tracking-wide">Despesas (Mês)</p><h3 className="text-2xl font-bold mt-2 text-red-500">R$ {(dashboardChartsData.totalExpense || 0).toLocaleString('pt-BR')}</h3><p className="text-xs text-red-500 mt-1 flex items-center"><TrendingDown size={12} className="mr-1" /> Saída Total</p></div>

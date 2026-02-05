@@ -434,51 +434,116 @@ const App: React.FC = () => {
       setCurrentTenant(updatedTenant);
       await supabase.from('organization_settings').upsert(updatedTenant);
   };
-  
-  const handleAddUser = async (newUser: User) => {
-    if (!newUser.password || newUser.password.length < 6) {
-      alert("A senha deve ter no mínimo 6 caracteres.");
+
+const handleAddUser = async (newUser: User) => {
+  // Validação de sessão de admin
+  if (!user || user.role !== 'admin') {
+    alert("Sessão de administrador inválida. Por favor, faça o login novamente.");
+    return;
+  }
+
+  try {
+    // Gerar senha temporária
+    const generatePassword = () => {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
+      let pwd = '';
+      for (let i = 0; i < 12; i++) {
+        pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return pwd;
+    };
+
+    const tempPassword = newUser.password || generatePassword();
+
+    // Criar cliente admin com Service Role Key
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    );
+
+    // Verificar se email já existe
+    const { data: existingUser } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('email', newUser.email)
+      .single();
+
+    if (existingUser) {
+      alert('Este email já está cadastrado no sistema.');
       return;
     }
 
-    const { data: { session: adminSession } } = await supabase.auth.getSession();
-    if (!adminSession || !user) {
-      alert("Sessão de administrador inválida. Por favor, faça o login novamente.");
-      return;
+    // Criar usuário com API Admin
+    const { data: createdUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+      email: newUser.email,
+      password: tempPassword,
+      email_confirm: true, // Email já confirmado
+      user_metadata: {
+        name: newUser.name
+      },
+      app_metadata: {
+        tenant_id: user.tenant_id,
+        provider: 'email',
+        providers: ['email']
+      }
+    });
+
+    if (createError) {
+      console.error('Erro ao criar usuário:', createError);
+      throw new Error(`Erro ao criar usuário: ${createError.message}`);
     }
 
-    try {
-      // Usar RPC invite_user ao invés de auth.signUp para garantir tenant_id correto
-      const { data, error } = await supabase.rpc('invite_user', {
-        user_email: newUser.email,
-        user_password: newUser.password,
-        user_name: newUser.name,
-        user_role: newUser.role,
-        user_permissions: newUser.role === 'collaborator' ? (newUser.permissions || {}) : {}
-      });
+    if (!createdUser?.user) {
+      throw new Error('Erro ao criar usuário: resposta inválida do servidor');
+    }
 
-      if (error) throw error;
-      if (!data) throw new Error("Criação do usuário falhou.");
-
-      // Adicionar usuário à lista local
-      const newUserProfile: User = {
-        id: data.id,
+    // Criar perfil na tabela profiles
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .insert({
+        id: createdUser.user.id,
         tenant_id: user.tenant_id,
         name: newUser.name,
         email: newUser.email,
         role: newUser.role,
         permissions: newUser.role === 'collaborator' ? (newUser.permissions || {}) : {},
         avatar: newUser.name.substring(0, 2).toUpperCase()
-      };
+      });
 
-      setAllUsers(prev => [...prev, newUserProfile]);
-      alert("Colaborador cadastrado com sucesso!");
-
-    } catch (error: any) {
-      console.error("Error creating user:", error);
-      alert(`Erro ao criar usuário: ${error.message || 'Verifique os dados e tente novamente.'}`);
+    if (profileError) {
+      console.error('Erro ao criar perfil:', profileError);
+      // Deletar usuário se perfil falhar
+      await supabaseAdmin.auth.admin.deleteUser(createdUser.user.id);
+      throw new Error(`Erro ao criar perfil: ${profileError.message}`);
     }
-  };
+
+    // Adicionar usuário à lista local
+    const newUserProfile: User = {
+      id: createdUser.user.id,
+      tenant_id: user.tenant_id,
+      name: newUser.name,
+      email: newUser.email,
+      role: newUser.role,
+      permissions: newUser.role === 'collaborator' ? (newUser.permissions || {}) : {},
+      avatar: newUser.name.substring(0, 2).toUpperCase()
+    };
+
+    setAllUsers(prev => [...prev, newUserProfile]);
+    
+    // Mostrar senha temporária ao admin
+    alert(`Colaborador cadastrado com sucesso!\n\nEmail: ${newUser.email}\nSenha temporária: ${tempPassword}\n\nAnote essa senha e envie ao usuário.`);
+
+  } catch (error: any) {
+    console.error("Error creating user:", error);
+    alert(`Erro ao criar usuário: ${error.message || 'Verifique os dados e tente novamente.'}`);
+  }
+};
 
   const handleUpdateUser = async (userToUpdate: User) => {
     const { password, tenant_id, id, ...updateData } = userToUpdate;

@@ -25,6 +25,7 @@ const permissionableModules = [
   { id: 'lists', label: 'Cadastros' },
   { id: 'analysis', label: 'Dashboard' },
   { id: 'database', label: 'Banco de Dados' },
+  { id: 'performance', label: 'Performance' }, // ✅ ADICIONADO
 ];
 
 export const SettingsModule: React.FC<SettingsModuleProps> = ({ tenant, users, onAddUser, onUpdateUser, onDeleteUser, onUpdateTenant, onOpenHelp, currentUser }) => {

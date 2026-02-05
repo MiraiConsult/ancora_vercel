@@ -686,57 +686,199 @@ const handleAddUser = async (newUser: User) => {
   const isAdmin = user.role === 'admin';
   const unreadNotifications = notifications.filter(n => !n.read).length;
 
+  // CORREÇÃO 2: Corrigir lógica de controle de acesso no App.tsx
+//
+// No arquivo src/App.tsx, na função renderContent()
+// Substitua as linhas 690-743 por este código:
+
   const renderContent = () => {
+    // Função auxiliar para verificar permissões
+    const hasPermission = (moduleId: string): boolean => {
+      // Admin sempre tem acesso
+      if (user.role === 'admin') return true;
+      
+      // Colaborador precisa ter a permissão específica
+      return user.permissions?.[moduleId] === true;
+    };
+
     switch (currentPage) {
       case 'dashboard':
-        return <DashboardModule deals={deals} tasks={tasks} financeRecords={financeRecords} companies={companies} onNavigate={setCurrentPage} />;
+        return hasPermission('dashboard') ? (
+          <DashboardModule deals={deals} tasks={tasks} financeRecords={financeRecords} companies={companies} onNavigate={setCurrentPage} />
+        ) : <AccessDenied />;
+        
       case 'deals':
-        return <KanbanBoard 
-          deals={deals} 
-          setDeals={setDeals} 
-          companies={companies} 
-          setCompanies={setCompanies}
-          contacts={contacts} 
-          allUsers={allUsers} 
-          segments={segments}
-          revenueTypes={revenueTypes} 
-          setRevenueTypes={setRevenueTypes}
-          chartOfAccounts={chartOfAccounts}
-          onDealWon={handleDealWon}
-          tasks={tasks}
-          financeRecords={financeRecords}
-          generalNotes={generalNotes}
-          setTasks={setTasks}
-          setFinanceRecords={setFinanceRecords}
-          setGeneralNotes={setGeneralNotes}
-          currentUser={user}
-          onOpenHelp={openHelp}
-          dealStages={dealStages}
-          setDealStages={setDealStages}
-        />;
+        return hasPermission('deals') ? (
+          <KanbanBoard 
+            deals={deals} 
+            setDeals={setDeals} 
+            companies={companies} 
+            setCompanies={setCompanies}
+            contacts={contacts} 
+            allUsers={allUsers} 
+            segments={segments}
+            revenueTypes={revenueTypes} 
+            setRevenueTypes={setRevenueTypes}
+            chartOfAccounts={chartOfAccounts}
+            onDealWon={handleDealWon}
+            tasks={tasks}
+            financeRecords={financeRecords}
+            generalNotes={generalNotes}
+            setTasks={setTasks}
+            setFinanceRecords={setFinanceRecords}
+            setGeneralNotes={setGeneralNotes}
+            currentUser={user}
+            onOpenHelp={openHelp}
+            dealStages={dealStages}
+            setDealStages={setDealStages}
+          />
+        ) : <AccessDenied />;
+        
       case 'companies':
-        return <CompaniesModule companies={companies} setCompanies={setCompanies} contacts={contacts} setContacts={setContacts} deals={deals} setDeals={setDeals} tasks={tasks} setTasks={setTasks} financeRecords={financeRecords} setFinanceRecords={setFinanceRecords} generalNotes={generalNotes} setGeneralNotes={setGeneralNotes} segments={segments} setSegments={setSegments} revenueTypes={revenueTypes} banks={banks} allUsers={allUsers} currentUser={user} onOpenHelp={openHelp} />;
+        return hasPermission('companies') ? (
+          <CompaniesModule 
+            companies={companies} 
+            setCompanies={setCompanies} 
+            contacts={contacts} 
+            setContacts={setContacts} 
+            deals={deals} 
+            setDeals={setDeals} 
+            tasks={tasks} 
+            setTasks={setTasks} 
+            financeRecords={financeRecords} 
+            setFinanceRecords={setFinanceRecords} 
+            generalNotes={generalNotes} 
+            setGeneralNotes={setGeneralNotes} 
+            segments={segments} 
+            setSegments={setSegments} 
+            revenueTypes={revenueTypes} 
+            banks={banks} 
+            allUsers={allUsers} 
+            currentUser={user} 
+            onOpenHelp={openHelp} 
+          />
+        ) : <AccessDenied />;
+        
       case 'contacts':
         return <ContactsModule contacts={contacts} setContacts={setContacts} companies={companies} />;
+        
       case 'appointments':
-         return <AppointmentsModule tasks={tasks} setTasks={setTasks} companies={companies} users={allUsers} generalNotes={generalNotes} setGeneralNotes={setGeneralNotes} taskStages={taskStages} setTaskStages={setTaskStages} currentUser={user} />;
+        return hasPermission('appointments') ? (
+          <AppointmentsModule 
+            tasks={tasks} 
+            setTasks={setTasks} 
+            companies={companies} 
+            users={allUsers} 
+            generalNotes={generalNotes} 
+            setGeneralNotes={setGeneralNotes} 
+            taskStages={taskStages} 
+            setTaskStages={setTaskStages} 
+            currentUser={user} 
+          />
+        ) : <AccessDenied />;
+        
       case 'finance':
-        return isAdmin ? <FinanceDashboard records={financeRecords} setRecords={setFinanceRecords} revenueTypes={revenueTypes} setRevenueTypes={setRevenueTypes} banks={banks} setBanks={setBanks} chartOfAccounts={chartOfAccounts} setChartOfAccounts={setChartOfAccounts} companies={companies} setCompanies={setCompanies} currentUser={user} /> : <AccessDenied />;
+        return hasPermission('finance') ? (
+          <FinanceDashboard 
+            records={financeRecords} 
+            setRecords={setFinanceRecords} 
+            revenueTypes={revenueTypes} 
+            setRevenueTypes={setRevenueTypes} 
+            banks={banks} 
+            setBanks={setBanks} 
+            chartOfAccounts={chartOfAccounts} 
+            setChartOfAccounts={setChartOfAccounts} 
+            companies={companies} 
+            setCompanies={setCompanies} 
+            currentUser={user} 
+          />
+        ) : <AccessDenied />;
+        
       case 'settings':
-        return isAdmin ? <SettingsModule tenant={currentTenant} users={allUsers} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onUpdateTenant={handleUpdateTenant} onOpenHelp={openHelp} currentUser={user} /> : <AccessDenied />;
+        return isAdmin ? (
+          <SettingsModule 
+            tenant={currentTenant} 
+            users={allUsers} 
+            onAddUser={handleAddUser} 
+            onUpdateUser={handleUpdateUser} 
+            onDeleteUser={handleDeleteUser} 
+            onUpdateTenant={handleUpdateTenant} 
+            onOpenHelp={openHelp} 
+            currentUser={user} 
+          />
+        ) : <AccessDenied />;
+        
       case 'alerts':
-        return <AlertsModule notifications={notifications} setNotifications={setNotifications} users={allUsers} currentUser={user} />;
+        return hasPermission('alerts') ? (
+          <AlertsModule 
+            notifications={notifications} 
+            setNotifications={setNotifications} 
+            users={allUsers} 
+            currentUser={user} 
+          />
+        ) : <AccessDenied />;
+        
       case 'lists':
-        // FIX: Cast props to 'any' to resolve complex type mismatch between parent and child component.
-        return isAdmin ? <ListsModule revenueTypes={revenueTypes} setRevenueTypes={setRevenueTypes} banks={banks} setBanks={setBanks} segments={segments} setSegments={setSegments} dealStages={dealStages} setDealStages={setDealStages} taskStages={taskStages} setTaskStages={setTaskStages} tags={tags} setTags={setTags} currentUser={user} /> : <AccessDenied />;
+        return hasPermission('lists') ? (
+          <ListsModule 
+            revenueTypes={revenueTypes} 
+            setRevenueTypes={setRevenueTypes} 
+            banks={banks} 
+            setBanks={setBanks} 
+            segments={segments} 
+            setSegments={setSegments} 
+            dealStages={dealStages} 
+            setDealStages={setDealStages} 
+            taskStages={taskStages} 
+            setTaskStages={setTaskStages} 
+            tags={tags} 
+            setTags={setTags} 
+            currentUser={user} 
+          />
+        ) : <AccessDenied />;
+        
       case 'analysis':
-        return <AIAnalysisDashboard deals={deals} tasks={tasks} financeRecords={financeRecords} companies={companies} users={allUsers} />;
+        return hasPermission('analysis') ? (
+          <AIAnalysisDashboard 
+            deals={deals} 
+            tasks={tasks} 
+            financeRecords={financeRecords} 
+            companies={companies} 
+            users={allUsers} 
+          />
+        ) : <AccessDenied />;
+        
       case 'tutorials':
-        return <TutorialsModule onNavigate={setCurrentPage} />;
+        return hasPermission('tutorials') ? (
+          <TutorialsModule onNavigate={setCurrentPage} />
+        ) : <AccessDenied />;
+        
       case 'database':
-        return isAdmin ? <DataExportModule companies={companies} contacts={contacts} deals={deals} tasks={tasks} financeRecords={financeRecords} chartOfAccounts={chartOfAccounts} users={allUsers} /> : <AccessDenied />;
+        return hasPermission('database') ? (
+          <DataExportModule 
+            companies={companies} 
+            contacts={contacts} 
+            deals={deals} 
+            tasks={tasks} 
+            financeRecords={financeRecords} 
+            chartOfAccounts={chartOfAccounts} 
+            users={allUsers} 
+          />
+        ) : <AccessDenied />;
+        
       case 'performance':
-        return <PerformanceModule users={allUsers} deals={deals} companies={companies} tasks={tasks} financeRecords={financeRecords} revenueTypes={revenueTypes} dealStages={dealStages} />;
+        return hasPermission('performance') ? (
+          <PerformanceModule 
+            users={allUsers} 
+            deals={deals} 
+            companies={companies} 
+            tasks={tasks} 
+            financeRecords={financeRecords} 
+            revenueTypes={revenueTypes} 
+            dealStages={dealStages} 
+          />
+        ) : <AccessDenied />;
+        
       default:
         return <div>Página não encontrada</div>;
     }

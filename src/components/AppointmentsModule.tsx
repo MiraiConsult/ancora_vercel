@@ -37,6 +37,7 @@ import {
   StickyNote,
   View
 } from 'lucide-react';
+import { MultiSelectResponsible } from './MultiSelectResponsible';
 import { supabase } from '../lib/supabaseClient';
 import { 
   BarChart, 
@@ -82,7 +83,7 @@ export const AppointmentsModule: React.FC<AppointmentsModuleProps> = ({ tasks, s
   const [filterCompany, setFilterCompany] = useState<string>('all');
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [filterResponsible, setFilterResponsible] = useState<string>('all');
+  const [filterResponsible, setFilterResponsible] = useState<string[]>([]);
   const [filterDateStart, setFilterDateStart] = useState<string>('');
   const [filterDateEnd, setFilterDateEnd] = useState<string>('');
   const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
@@ -141,7 +142,7 @@ export const AppointmentsModule: React.FC<AppointmentsModuleProps> = ({ tasks, s
           const matchesCompany = filterCompany === 'all' || t.relatedTo === filterCompany;
           const matchesPriority = filterPriority === 'all' || t.priority === filterPriority;
           const matchesStatus = filterStatus === 'all' || t.status === filterStatus;
-          const matchesResponsible = filterResponsible === 'all' || (t.assigned_to && t.assigned_to.includes(filterResponsible));
+          const matchesResponsible = filterResponsible.length === 0 || (t.assigned_to && filterResponsible.some(id => t.assigned_to?.includes(id)));
           
           let matchesDate = true;
           if (filterDateStart || filterDateEnd) {
@@ -158,7 +159,7 @@ export const AppointmentsModule: React.FC<AppointmentsModuleProps> = ({ tasks, s
 
           return matchesCompany && matchesPriority && matchesStatus && matchesResponsible && matchesDate && isArchivedMatch;
       });
-  }, [tasks, filterCompany, filterPriority, filterStatus, filterResponsible, filterDateStart, filterDateEnd, showArchived]);
+  }, [tasks, filterCompany, filterPriority, filterStatus, filterResponsible.join(','), filterDateStart, filterDateEnd, showArchived]);
 
   const visibleTasks = filteredData.filter(t => t.type !== TaskType.MEETING);
   const onlyMeetings = filteredData.filter(t => t.type === TaskType.MEETING);
@@ -523,6 +524,19 @@ const handleChooseNewMeeting = () => {
               console.log("✅ Item deleted successfully:", id);
           }
       }
+  };
+
+  const handleToggleArchiveMeeting = async (id: string, isArchived: boolean) => {
+    // Optimistic Update
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, archived: isArchived } : t));
+    
+    // Persist to Supabase
+    const { error } = await supabase.from('tasks').update({ archived: isArchived }).eq('id', id);
+    if (error) {
+        console.error("Error archiving meeting:", error);
+        // Rollback on error
+        setTasks(prev => prev.map(t => t.id === id ? { ...t, archived: !isArchived } : t));
+    }
   };
 
   const handleStatusChange = async (task: Task, newStatus: string) => {
@@ -1024,18 +1038,13 @@ const renderMeetings = () => (
             <div className="flex items-center gap-4">
                 <h3 className="text-lg font-bold text-gray-800">Próximas Reuniões</h3>
                 {/* Filtro de Participantes */}
-                <div className="flex items-center gap-2">
-                    <Users size={14} className="text-gray-400" />
-                    <select 
-                        value={filterResponsible} 
-                        onChange={e => setFilterResponsible(e.target.value)}
-                        className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                    >
-                        <option value="all">Todos os participantes</option>
-                        {users.map(u => (
-                            <option key={u.id} value={u.id}>{u.name}</option>
-                        ))}
-                    </select>
+                <div className="w-64">
+                    <MultiSelectResponsible
+                        users={users}
+                        selectedIds={filterResponsible}
+                        onChange={setFilterResponsible}
+                        placeholder="Todos os participantes"
+                    />
                 </div>
             </div>
             <button
@@ -1046,37 +1055,77 @@ const renderMeetings = () => (
             </button>
         </div>
         <div className="space-y-4">
-            {onlyMeetings.length > 0 ? onlyMeetings.map(meeting => (
-                <div key={meeting.id} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 group hover:shadow-md transition-shadow">
-                    <div className="flex items-start justify-between">
-                        <div className="flex items-center">
-                            <div className="w-12 h-12 rounded-lg bg-purple-100 text-purple-700 flex flex-col items-center justify-center mr-4 border border-purple-200">
-                                <span className="text-[10px] font-bold uppercase">{new Date(meeting.dueDate).toLocaleString('default', { month: 'short' }).replace('.', '')}</span>
-                                <span className="text-lg font-bold">{new Date(meeting.dueDate).getDate()}</span>
+            {onlyMeetings.length > 0 ? onlyMeetings.map(meeting => {
+                const meetingCompany = companies.find(c => c.id === meeting.companyId);
+                const assignedUser = users.find(u => meeting.assigned_to && meeting.assigned_to.includes(u.id));
+                
+                return (
+                    <div key={meeting.id} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 group hover:shadow-md transition-shadow">
+                        <div className="flex items-start justify-between">
+                            <div className="flex items-center flex-1">
+                                <div className="w-12 h-12 rounded-lg bg-purple-100 text-purple-700 flex flex-col items-center justify-center mr-4 border border-purple-200">
+                                    <span className="text-[10px] font-bold uppercase">{new Date(meeting.dueDate).toLocaleString('default', { month: 'short' }).replace('.', '')}</span>
+                                    <span className="text-lg font-bold">{new Date(meeting.dueDate).getDate()}</span>
+                                </div>
+                                <div className="flex-1">
+                                    <p className="font-bold text-gray-800">{meeting.title}</p>
+                                    <div className="flex items-center gap-3 mt-1">
+                                        {meetingCompany && (
+                                            <div className="flex items-center gap-1 text-xs text-gray-500">
+                                                <Building size={12} />
+                                                <span>{meetingCompany.name}</span>
+                                            </div>
+                                        )}
+                                        {assignedUser && (
+                                            <div className="flex items-center gap-1 text-xs text-gray-500">
+                                                <UserIcon size={12} />
+                                                <span>{assignedUser.name}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-2">
+                                        <p className="text-xs text-gray-400">
+                                            {meeting.startTime && meeting.endTime 
+                                                ? `${meeting.startTime} - ${meeting.endTime}`
+                                                : new Date(meeting.dueDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                            }
+                                        </p>
+                                        {meeting.archived && (
+                                            <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-medium">
+                                                <CheckCircle2 size={12} />
+                                                Realizada
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
-                            <div>
-                                <p className="font-bold text-gray-800">{meeting.title}</p>
-                                <p className="text-sm text-gray-500">{meeting.relatedTo}</p>
-                                <p className="text-xs text-gray-400 mt-1">{new Date(meeting.dueDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => handleToggleArchiveMeeting(meeting.id, !meeting.archived)}
+                                    className="p-2 text-gray-400 hover:text-green-500 transition-colors"
+                                    title={meeting.archived ? "Desarquivar" : "Marcar como realizada"}
+                                >
+                                    {meeting.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+                                </button>
+                                <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => { setEditingMeetingId(meeting.id); setCurrentMeeting(meeting); setIsMeetingModalOpen(true); }} className="p-2 text-gray-400 hover:text-blue-500"><Pencil size={16} /></button>
+                                    <button onClick={() => handleDelete(meeting.id)} className="p-2 text-gray-400 hover:text-red-500"><Trash2 size={16} /></button>
+                                </div>
                             </div>
                         </div>
-                        <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => { setEditingMeetingId(meeting.id); setCurrentMeeting(meeting); setIsMeetingModalOpen(true); }} className="p-2 text-gray-400 hover:text-blue-500"><Pencil size={16} /></button>
-                            <button onClick={() => handleDelete(meeting.id)} className="p-2 text-gray-400 hover:text-red-500"><Trash2 size={16} /></button>
-                        </div>
+                        {meeting.meetLink && (
+                            <div className="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+                                 <a href={meeting.meetLink} target="_blank" rel="noopener noreferrer" className="flex-1 text-center bg-green-500 text-white px-3 py-2 rounded-md text-xs font-bold hover:bg-green-600 transition-colors flex items-center justify-center">
+                                    <Video size={14} className="mr-1.5"/> Entrar na Reunião
+                                </a>
+                                <button onClick={() => handleCreateCalendarInvite(meeting)} className="flex-1 text-center bg-gray-100 text-gray-700 px-3 py-2 rounded-md text-xs font-bold hover:bg-gray-200 transition-colors flex items-center justify-center">
+                                    <CalendarCheck size={14} className="mr-1.5"/> Convidar via Google Agenda
+                                </button>
+                            </div>
+                        )}
                     </div>
-                    {meeting.meetLink && (
-                        <div className="mt-3 pt-3 border-t border-gray-100 flex gap-2">
-                             <a href={meeting.meetLink} target="_blank" rel="noopener noreferrer" className="flex-1 text-center bg-green-500 text-white px-3 py-2 rounded-md text-xs font-bold hover:bg-green-600 transition-colors flex items-center justify-center">
-                                <Video size={14} className="mr-1.5"/> Entrar na Reunião
-                            </a>
-                            <button onClick={() => handleCreateCalendarInvite(meeting)} className="flex-1 text-center bg-gray-100 text-gray-700 px-3 py-2 rounded-md text-xs font-bold hover:bg-gray-200 transition-colors flex items-center justify-center">
-                                <CalendarCheck size={14} className="mr-1.5"/> Convidar via Google Agenda
-                            </button>
-                        </div>
-                    )}
-                </div>
-            )) : <p className="text-center text-gray-400 py-16">Nenhuma reunião encontrada.</p>}
+                );
+            }) : <p className="text-center text-gray-400 py-16">Nenhuma reunião encontrada.</p>}
         </div>
     </div>
 );

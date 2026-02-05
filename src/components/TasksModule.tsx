@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Task, TaskType, Company, User } from '../types';
 import { Calendar as CalendarIcon, Clock, CheckCircle2, Circle, AlertCircle, Bot, Plus, User as UserIcon, Building, LayoutList, LayoutGrid, Pencil, Trash2, Filter, AlertTriangle } from 'lucide-react';
 import { prioritizeTasksAI } from '../services/geminiService';
+import { MultiSelectResponsible } from './MultiSelectResponsible';
 import { supabase } from '../lib/supabaseClient';
 
 interface TasksModuleProps {
@@ -20,6 +21,7 @@ export const TasksModule: React.FC<TasksModuleProps> = ({ tasks, setTasks, compa
   
   // Custom Filters
   const [priorityFilter, setPriorityFilter] = useState<string>('All');
+  const [responsibleFilter, setResponsibleFilter] = useState<string[]>([]);
   
 
   const [aiSuggestion, setAiSuggestion] = useState<string>('');
@@ -100,8 +102,8 @@ export const TasksModule: React.FC<TasksModuleProps> = ({ tasks, setTasks, compa
   // --- Filtering Logic ---
   const tasksMatchingGlobalFilters = tasks.filter(t => {
       const matchesPriority = priorityFilter === 'All' ? true : t.priority === priorityFilter;
-      // FIX: Removed filtering by assignee as it no longer exists on Task.
-      return matchesPriority;
+      const matchesResponsible = responsibleFilter.length === 0 || (t.assigned_to && responsibleFilter.some(id => t.assigned_to?.includes(id)));
+      return matchesPriority && matchesResponsible;
   });
 
   const listFilteredTasks = tasksMatchingGlobalFilters.filter(t => {
@@ -199,6 +201,16 @@ export const TasksModule: React.FC<TasksModuleProps> = ({ tasks, setTasks, compa
                   <h3 className={`font-bold text-gray-800 text-base mb-3 truncate pr-8 ${task.status === 'Done' ? 'line-through text-gray-500' : ''}`}>
                       {task.title}
                   </h3>
+
+                  {task.assigned_to && task.assigned_to.length > 0 && (() => {
+                      const assignedUser = users.find(u => task.assigned_to && task.assigned_to.includes(u.id));
+                      return assignedUser ? (
+                          <div className="flex items-center gap-1 mt-2 text-xs text-gray-500 mb-2">
+                              <UserIcon size={12} />
+                              <span>{assignedUser.name}</span>
+                          </div>
+                      ) : null;
+                  })()}
 
                   <div className="flex flex-wrap items-center justify-between gap-y-2">
                       <div className="flex items-center gap-4 text-sm text-gray-500">

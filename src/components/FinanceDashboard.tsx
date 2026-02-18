@@ -1656,8 +1656,7 @@ const newRecords: FinancialRecord[] = [];
                 // Ensure we have a valid date and it matches the period
                 if (!rDate) return false;
                 return rubricIds.includes(r.rubricId || '') && rDate.startsWith(key); 
-            }).reduce((acc, r) => acc + r.amount, 0); 
-            if (isExpense) vals[key] *= -1;
+            }).reduce((acc, r) => acc + r.amount, 0);
         }); 
         return vals; 
       };
@@ -1810,13 +1809,13 @@ const newRecords: FinancialRecord[] = [];
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {recordsToShow.map(r => {
-                            const realValue = r.amount; const isPositiveFlow = realValue >= 0; const isRefund = r.amount < 0; const isSelected = selectedRecordIds.has(r.id);
+                            const realValue = r.amount; const isPositiveFlow = realValue >= 0; const isSelected = selectedRecordIds.has(r.id);
                             return (
                             <tr key={r.id} className={`hover:bg-gray-50 group transition-colors ${isSelected ? 'bg-blue-50/50' : ''}`}>
                                 {isValidationMode && (<td className="p-4 text-center"><div onClick={() => handleSelectOne(r.id)} className="cursor-pointer text-gray-300 hover:text-mcsystem-500 transition-colors">{isSelected ? <CheckSquare size={18} className="text-mcsystem-500" /> : <Square size={18} />}</div></td>)}
                                 <td className="p-4 font-medium text-gray-800">{r.description}{r.companyId && (<div className="flex items-center mt-1 text-[10px] text-gray-500 font-normal"><Building size={10} className="mr-1" />{companies.find(c => c.id === r.companyId)?.name}</div>)}</td>
                                 <td className="p-4">{new Date(r.dueDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</td>
-                                <td className={`p-4 font-bold ${isPositiveFlow ? 'text-green-600' : 'text-red-500'}`}>{isPositiveFlow ? '+' : ''} R$ {(realValue || 0).toLocaleString('pt-BR')}{isRefund && <span className="block mt-1 text-[9px] uppercase border px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium w-fit">Estorno</span>}</td>
+                                <td className={`p-4 font-bold ${isPositiveFlow ? 'text-green-600' : 'text-red-500'}`}>{isPositiveFlow ? '+' : ''} R$ {(realValue || 0).toLocaleString('pt-BR')}</td>
                                 <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${r.type === TransactionType.INCOME ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{r.type}</span></td>
                                 <td className="p-4">{r.rubricId ? (<span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs border border-blue-100">{chartOfAccounts.find(c => c.id === r.rubricId)?.rubricName || r.category}</span>) : (r.revenueTypeId ? (<span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs border border-emerald-100">{revenueTypes.find(rt => rt.id === r.revenueTypeId)?.name || 'Receita'}</span>) : (<span className="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs border border-yellow-200 flex items-center w-fit"><AlertCircle size={10} className="mr-1"/> Definir Categoria</span>))}</td>
                                 <td className="p-4 text-center"><div className="flex justify-center space-x-2"><button onClick={(e) => handleEditTransaction(e, r)} className="flex items-center px-3 py-1 bg-mcsystem-500 text-white rounded text-xs hover:bg-mcsystem-600 transition-colors shadow-sm"><Pencil size={12} className="mr-1"/> {isValidationMode ? 'Validar' : 'Editar'}</button><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(e, r.id); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors relative z-10"><Trash2 size={16} className="pointer-events-none"/></button></div></td>
@@ -1903,7 +1902,7 @@ const newRecords: FinancialRecord[] = [];
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                           {filtered.map(r => {
-                              const realValue = r.amount; const isPositiveFlow = realValue >= 0; const isRefund = r.amount < 0; const isSelected = selectedRecordIds.has(r.id);
+                              const realValue = r.amount; const isPositiveFlow = realValue >= 0; const isSelected = selectedRecordIds.has(r.id);
                               return (
                               <tr key={r.id} className={`group transition-colors ${isSelected ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`}>
                                   <td className="p-4 text-center"><div onClick={() => handleSelectOne(r.id)} className="cursor-pointer text-gray-300 hover:text-mcsystem-500 transition-colors">{isSelected ? <CheckSquare size={18} className="text-mcsystem-500" /> : <Square size={18} />}</div></td>
@@ -1913,7 +1912,7 @@ const newRecords: FinancialRecord[] = [];
                                   <td className="p-4 text-xs text-gray-500">{banks.find(b => b.id === r.bankId)?.name || '-'}</td>
                                   <td className="p-4 font-medium text-gray-800">{r.description}{r.companyId && (<div className="flex items-center mt-1 text-[10px] text-gray-500 font-normal"><Building size={10} className="mr-1" />{companies.find(c => c.id === r.companyId)?.name}</div>)}</td>
                                   <td className="p-4"><div className="relative group/status inline-block"><select value={r.status} onChange={(e) => handleStatusChange(r.id, e.target.value as TransactionStatus)} className={`appearance-none pl-3 pr-8 py-1.5 rounded-full text-xs font-bold border-0 cursor-pointer outline-none focus:ring-2 focus:ring-offset-1 transition-all ${r.status === TransactionStatus.PAID ? 'bg-green-100 text-green-700 focus:ring-green-500' : r.status === TransactionStatus.OVERDUE ? 'bg-red-100 text-red-700 focus:ring-red-500' : 'bg-yellow-100 text-yellow-700 focus:ring-yellow-500'}`}><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.PAID}>Pago</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select><ChevronDown size={12} className={`absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${r.status === TransactionStatus.PAID ? 'text-green-700' : r.status === TransactionStatus.OVERDUE ? 'text-red-700' : 'text-yellow-700'}`} /></div></td>
-                                  <td className={`p-4 text-right font-bold ${isPositiveFlow ? 'text-green-600' : 'text-red-500'}`}>{isPositiveFlow ? '+' : ''} R$ {(realValue || 0).toLocaleString('pt-BR')}{isRefund && <span className="block mt-1 text-[9px] uppercase border px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium w-fit ml-auto">Estorno</span>}</td>
+                                  <td className={`p-4 text-right font-bold ${isPositiveFlow ? 'text-green-600' : 'text-red-500'}`}>{isPositiveFlow ? '+' : ''} R$ {(realValue || 0).toLocaleString('pt-BR')}</td>
                                   <td className="p-4 text-center"><div className="flex justify-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={(e) => handleEditTransaction(e, r)} className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded transition-colors"><Pencil size={16}/></button><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(e, r.id); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors relative z-10"><Trash2 size={16} className="pointer-events-none" /></button></div></td>
                               </tr>
                           )})}

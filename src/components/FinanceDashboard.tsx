@@ -750,7 +750,7 @@ const newRecords: FinancialRecord[] = [];
                     id: recordId,
                     tenant_id: currentUser.tenant_id,
                     description: cols[descIdx] || "Sem descrição",
-                    amount: Math.abs(amount),
+                    amount: amount,
                     type,
                     status: TransactionStatus.PENDING,
                     dueDate,
@@ -1810,7 +1810,7 @@ const newRecords: FinancialRecord[] = [];
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {recordsToShow.map(r => {
-                            const sign = r.type === TransactionType.EXPENSE ? -1 : 1; const realValue = r.amount * sign; const isPositiveFlow = realValue >= 0; const isRefund = r.amount < 0; const isSelected = selectedRecordIds.has(r.id);
+                            const realValue = r.amount; const isPositiveFlow = realValue >= 0; const isRefund = r.amount < 0; const isSelected = selectedRecordIds.has(r.id);
                             return (
                             <tr key={r.id} className={`hover:bg-gray-50 group transition-colors ${isSelected ? 'bg-blue-50/50' : ''}`}>
                                 {isValidationMode && (<td className="p-4 text-center"><div onClick={() => handleSelectOne(r.id)} className="cursor-pointer text-gray-300 hover:text-mcsystem-500 transition-colors">{isSelected ? <CheckSquare size={18} className="text-mcsystem-500" /> : <Square size={18} />}</div></td>)}
@@ -1903,7 +1903,7 @@ const newRecords: FinancialRecord[] = [];
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                           {filtered.map(r => {
-                              const sign = r.type === TransactionType.EXPENSE ? -1 : 1; const realValue = r.amount * sign; const isPositiveFlow = realValue >= 0; const isRefund = r.amount < 0; const isSelected = selectedRecordIds.has(r.id);
+                              const realValue = r.amount; const isPositiveFlow = realValue >= 0; const isRefund = r.amount < 0; const isSelected = selectedRecordIds.has(r.id);
                               return (
                               <tr key={r.id} className={`group transition-colors ${isSelected ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`}>
                                   <td className="p-4 text-center"><div onClick={() => handleSelectOne(r.id)} className="cursor-pointer text-gray-300 hover:text-mcsystem-500 transition-colors">{isSelected ? <CheckSquare size={18} className="text-mcsystem-500" /> : <Square size={18} />}</div></td>

@@ -1933,7 +1933,7 @@ const newRecords: FinancialRecord[] = [];
       const renderCellWithComparison = (curr: number | undefined, prev: number | undefined, isExpense: boolean) => {
           const safeCurr = curr ?? 0;
           const safePrev = prev ?? 0;
-          const valueClass = isExpense ? 'text-red-600' : 'text-gray-800'; 
+          const valueClass = safeCurr < 0 ? 'text-red-600' : (safeCurr > 0 ? 'text-green-600' : 'text-gray-800'); 
           const displayValue = safeCurr !== 0 ? safeCurr.toLocaleString('pt-BR', {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '-';
 
           if (!isCompareEnabled || safeCurr === 0) {

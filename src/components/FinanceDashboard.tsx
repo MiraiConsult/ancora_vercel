@@ -1327,7 +1327,10 @@ const newRecords: FinancialRecord[] = [];
 
     setInstallmentCount(1);
     setInstallmentsPreview([{ dueDate: record.dueDate, competenceDate: record.competenceDate || record.dueDate, amount: record.amount }]);
-    setIsRefund(record.amount < 0);
+    // Detectar se é estorno baseado no tipo + sinal
+    const isExpenseRecord = record.type === TransactionType.EXPENSE;
+    const isRefundRecord = isExpenseRecord ? (record.amount > 0) : (record.amount < 0);
+    setIsRefund(isRefundRecord);
     setIsModalOpen(true);
   };
   
@@ -1924,6 +1927,8 @@ const newRecords: FinancialRecord[] = [];
                       <tbody className="divide-y divide-gray-100">
                           {filtered.map(r => {
                               const realValue = r.amount; const isPositiveFlow = realValue >= 0; const isSelected = selectedRecordIds.has(r.id);
+                              const isExpenseType = r.type === TransactionType.EXPENSE;
+                              const isRefundBadge = isExpenseType ? (realValue > 0) : (realValue < 0);
                               return (
                               <tr key={r.id} className={`group transition-colors ${isSelected ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`}>
                                   <td className="p-4 text-center"><div onClick={() => handleSelectOne(r.id)} className="cursor-pointer text-gray-300 hover:text-mcsystem-500 transition-colors">{isSelected ? <CheckSquare size={18} className="text-mcsystem-500" /> : <Square size={18} />}</div></td>
@@ -1933,7 +1938,7 @@ const newRecords: FinancialRecord[] = [];
                                   <td className="p-4 text-xs text-gray-500">{banks.find(b => b.id === r.bankId)?.name || '-'}</td>
                                   <td className="p-4 font-medium text-gray-800">{r.description}{r.companyId && (<div className="flex items-center mt-1 text-[10px] text-gray-500 font-normal"><Building size={10} className="mr-1" />{companies.find(c => c.id === r.companyId)?.name}</div>)}</td>
                                   <td className="p-4"><div className="relative group/status inline-block"><select value={r.status} onChange={(e) => handleStatusChange(r.id, e.target.value as TransactionStatus)} className={`appearance-none pl-3 pr-8 py-1.5 rounded-full text-xs font-bold border-0 cursor-pointer outline-none focus:ring-2 focus:ring-offset-1 transition-all ${r.status === TransactionStatus.PAID ? 'bg-green-100 text-green-700 focus:ring-green-500' : r.status === TransactionStatus.OVERDUE ? 'bg-red-100 text-red-700 focus:ring-red-500' : 'bg-yellow-100 text-yellow-700 focus:ring-yellow-500'}`}><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.PAID}>Pago</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select><ChevronDown size={12} className={`absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${r.status === TransactionStatus.PAID ? 'text-green-700' : r.status === TransactionStatus.OVERDUE ? 'text-red-700' : 'text-yellow-700'}`} /></div></td>
-                                  <td className="p-4 text-right"><div className="flex items-center justify-end gap-2"><span className={`font-bold ${isPositiveFlow ? 'text-green-600' : 'text-red-500'}`}>{isPositiveFlow ? '+' : ''} R$ {Math.abs(realValue || 0).toLocaleString('pt-BR')}</span>{!isPositiveFlow && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded uppercase">Estorno</span>}</div></td>
+                                  <td className="p-4 text-right"><div className="flex items-center justify-end gap-2"><span className={`font-bold ${isPositiveFlow ? 'text-green-600' : 'text-red-500'}`}>{isPositiveFlow ? '+' : ''} R$ {Math.abs(realValue || 0).toLocaleString('pt-BR')}</span>{isRefundBadge && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded uppercase">Estorno</span>}</div></td>
                                   <td className="p-4 text-center"><div className="flex justify-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={(e) => handleEditTransaction(e, r)} className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded transition-colors"><Pencil size={16}/></button><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(e, r.id); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors relative z-10"><Trash2 size={16} className="pointer-events-none" /></button></div></td>
                               </tr>
                           )})}

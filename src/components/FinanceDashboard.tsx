@@ -1298,9 +1298,13 @@ const newRecords: FinancialRecord[] = [];
             const original = records.find(rec => rec.id === editingTransactionId);
             if (!original) return;
             const finalRecord: FinancialRecord = { ...original, ...transactionToSave };
+            console.log('[DEBUG] Salvando edição:', { original, transactionToSave, finalRecord });
             setRecords(prev => prev.map(rec => rec.id === editingTransactionId ? finalRecord : rec));
             if (!isMockUser) {
-                try { await supabase.from('financial_records').upsert(finalRecord); } 
+                try { 
+                    const result = await supabase.from('financial_records').upsert(finalRecord);
+                    console.log('[DEBUG] Resultado do upsert:', result);
+                } 
                 catch (error) { console.error("Error updating transaction:", error); alert(`Error updating transaction: ${JSON.stringify(error)}`); }
             }
         } else {

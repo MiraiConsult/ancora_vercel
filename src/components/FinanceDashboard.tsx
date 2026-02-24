@@ -1222,11 +1222,18 @@ const newRecords: FinancialRecord[] = [];
                 amount: parseFloat(((split.amount / installmentCount)).toFixed(2))
             })) : null;
 
+            const isExpenseInstallment = newRecord.type === TransactionType.EXPENSE;
+            let installmentAmount = Math.abs(inst.amount);
+            if (isExpenseInstallment) {
+                installmentAmount = isRefund ? installmentAmount : -installmentAmount;
+            } else {
+                installmentAmount = isRefund ? -installmentAmount : installmentAmount;
+            }
             return {
                 id: `f${Date.now()}-${i}`,
                 tenant_id: currentUser.tenant_id,
                 description: `${baseDescription} (${i + 1}/${installmentCount})`,
-                amount: isRefund ? -Math.abs(inst.amount) : Math.abs(inst.amount),
+                amount: installmentAmount,
                 type: newRecord.type as TransactionType,
                 status: finalStatus,
                 dueDate: inst.dueDate,
@@ -1263,10 +1270,17 @@ const newRecords: FinancialRecord[] = [];
         const finalStatus = newRecord.status || (finalDueDate < todayStr ? TransactionStatus.OVERDUE : TransactionStatus.PENDING);
         
         const finalAmount = installmentsPreview.length > 0 ? installmentsPreview[0].amount : Number(newRecord.amount);
+        const isExpense = newRecord.type === TransactionType.EXPENSE;
+        let calculatedAmount = Math.abs(finalAmount);
+        if (isExpense) {
+            calculatedAmount = isRefund ? calculatedAmount : -calculatedAmount;
+        } else {
+            calculatedAmount = isRefund ? -calculatedAmount : calculatedAmount;
+        }
         const transactionToSave: Partial<FinancialRecord> = {
             ...newRecord,
             description: baseDescription,
-            amount: isRefund ? -Math.abs(finalAmount) : Math.abs(finalAmount),
+            amount: calculatedAmount,
             dueDate: finalDueDate,
             competenceDate: installmentsPreview.length > 0 ? installmentsPreview[0].competenceDate : newRecord.competenceDate,
             category: displayCategory,

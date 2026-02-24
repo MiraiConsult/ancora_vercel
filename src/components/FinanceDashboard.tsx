@@ -1298,12 +1298,16 @@ const newRecords: FinancialRecord[] = [];
             const original = records.find(rec => rec.id === editingTransactionId);
             if (!original) return;
             const finalRecord: FinancialRecord = { ...original, ...transactionToSave };
-            console.log('[DEBUG] Salvando edição:', { original, transactionToSave, finalRecord });
+
             setRecords(prev => prev.map(rec => rec.id === editingTransactionId ? finalRecord : rec));
             if (!isMockUser) {
                 try { 
-                    const result = await supabase.from('financial_records').upsert(finalRecord);
-                    console.log('[DEBUG] Resultado do upsert:', result);
+                    const result = await supabase.from('financial_records').update(finalRecord).eq('id', editingTransactionId);
+
+                    if (result.error) {
+                        console.error("Error updating transaction:", result.error);
+                        alert(`Erro ao atualizar: ${result.error.message}`);
+                    }
                 } 
                 catch (error) { console.error("Error updating transaction:", error); alert(`Error updating transaction: ${JSON.stringify(error)}`); }
             }
@@ -2300,7 +2304,7 @@ const newRecords: FinancialRecord[] = [];
                             <div className="space-y-6">
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Descrição</label><input required type="text" placeholder="Ex: Venda de Consultoria" value={newRecord.description} onChange={e => setNewRecord({...newRecord, description: e.target.value})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-mcsystem-500 outline-none"/></div>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Valor (R$)</label><input required type="number" step="0.01" placeholder="0,00" value={Math.abs(newRecord.amount || 0)} onChange={e => { console.log('[DEBUG] Valor alterado:', e.target.value); setNewRecord({...newRecord, amount: Number(e.target.value)}); }} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/></div>
+                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Valor (R$)</label><input required type="number" step="0.01" placeholder="0,00" value={Math.abs(newRecord.amount || 0)} onChange={e => setNewRecord({...newRecord, amount: Number(e.target.value)})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/></div>
                                     <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Status</label><select value={newRecord.status} onChange={e => setNewRecord({...newRecord, status: e.target.value as any})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white"><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.PAID}>Pago</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select></div>
                                 </div>
                                 <div className="flex items-center p-3 bg-amber-50 rounded-lg border border-amber-200">
@@ -2316,8 +2320,8 @@ const newRecords: FinancialRecord[] = [];
                                     </label>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Vencimento</label><input required type="date" value={newRecord.dueDate} onChange={e => { console.log('[DEBUG] Vencimento alterado:', e.target.value); setNewRecord({...newRecord, dueDate: e.target.value}); }} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/></div>
-                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Competência</label><input type="month" value={newRecord.competenceDate ? newRecord.competenceDate.slice(0, 7) : ''} onChange={e => { console.log('[DEBUG] Competência alterada:', e.target.value); setNewRecord({...newRecord, competenceDate: e.target.value ? `${e.target.value}-01` : ''}); }} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/></div>
+                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Vencimento</label><input required type="date" value={newRecord.dueDate} onChange={e => setNewRecord({...newRecord, dueDate: e.target.value})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/></div>
+                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Competência</label><input type="month" value={newRecord.competenceDate ? newRecord.competenceDate.slice(0, 7) : ''} onChange={e => setNewRecord({...newRecord, competenceDate: e.target.value ? `${e.target.value}-01` : ''})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/></div>
                                 </div>
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Cliente / Fornecedor (Opcional)</label><div className="flex gap-2 items-center"><SearchableSelect options={companies.map(c => ({ value: c.id, label: c.name }))} value={newRecord.companyId} onChange={val => setNewRecord({...newRecord, companyId: val})} placeholder="Vincular a um cliente..." /><button type="button" onClick={() => setIsNewCompanyModalOpen(true)} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 border border-gray-200" title="Novo Cliente"><Plus size={16}/></button></div></div>
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Conta / Banco</label><div className="flex gap-2 items-center"><SearchableSelect options={banks.map(b => ({ value: b.id, label: b.name }))} value={newRecord.bankId} onChange={val => setNewRecord({...newRecord, bankId: val})} placeholder="Selecionar conta..." /><button type="button" onClick={() => setIsNewBankModalOpen(true)} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 border border-gray-200" title="Nova Conta"><Plus size={16}/></button></div></div>

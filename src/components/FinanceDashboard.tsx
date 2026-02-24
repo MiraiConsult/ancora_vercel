@@ -1225,8 +1225,10 @@ const newRecords: FinancialRecord[] = [];
             const isExpenseInstallment = newRecord.type === TransactionType.EXPENSE;
             let installmentAmount = Math.abs(inst.amount);
             if (isExpenseInstallment) {
+                // DESPESA: sem estorno = negativo, com estorno = positivo
                 installmentAmount = isRefund ? installmentAmount : -installmentAmount;
             } else {
+                // RECEITA: sem estorno = positivo, com estorno = negativo
                 installmentAmount = isRefund ? -installmentAmount : installmentAmount;
             }
             return {
@@ -1273,8 +1275,10 @@ const newRecords: FinancialRecord[] = [];
         const isExpense = newRecord.type === TransactionType.EXPENSE;
         let calculatedAmount = Math.abs(finalAmount);
         if (isExpense) {
+            // DESPESA: sem estorno = negativo, com estorno = positivo
             calculatedAmount = isRefund ? calculatedAmount : -calculatedAmount;
         } else {
+            // RECEITA: sem estorno = positivo, com estorno = negativo
             calculatedAmount = isRefund ? -calculatedAmount : calculatedAmount;
         }
         const transactionToSave: Partial<FinancialRecord> = {

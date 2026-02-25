@@ -1268,10 +1268,15 @@ const newRecords: FinancialRecord[] = [];
 
     } else {
         // --- CREATE/UPDATE SINGLE RECORD ---
-        const finalDueDate = installmentsPreview.length > 0 ? installmentsPreview[0].dueDate : (newRecord.dueDate || todayStr);
+        // Na edição, usar sempre newRecord (que reflete o formulário); installmentsPreview só para criação com parcelas
+        const finalDueDate = editingTransactionId
+            ? (newRecord.dueDate || todayStr)
+            : (installmentsPreview.length > 0 ? installmentsPreview[0].dueDate : (newRecord.dueDate || todayStr));
         const finalStatus = newRecord.status || (finalDueDate < todayStr ? TransactionStatus.OVERDUE : TransactionStatus.PENDING);
         
-        const finalAmount = installmentsPreview.length > 0 ? installmentsPreview[0].amount : Number(newRecord.amount);
+        const finalAmount = editingTransactionId
+            ? Number(newRecord.amount)
+            : (installmentsPreview.length > 0 ? installmentsPreview[0].amount : Number(newRecord.amount));
         const isExpense = newRecord.type === TransactionType.EXPENSE;
         let calculatedAmount = Math.abs(finalAmount);
         if (isExpense) {
@@ -1286,7 +1291,9 @@ const newRecords: FinancialRecord[] = [];
             description: baseDescription,
             amount: calculatedAmount,
             dueDate: finalDueDate,
-            competenceDate: installmentsPreview.length > 0 ? installmentsPreview[0].competenceDate : newRecord.competenceDate,
+            competenceDate: editingTransactionId
+                ? newRecord.competenceDate
+                : (installmentsPreview.length > 0 ? installmentsPreview[0].competenceDate : newRecord.competenceDate),
             category: displayCategory,
             status: finalStatus,
             paymentDate: finalStatus === TransactionStatus.PAID ? (newRecord.paymentDate || finalDueDate) : undefined,
@@ -1302,7 +1309,11 @@ const newRecords: FinancialRecord[] = [];
             setRecords(prev => prev.map(rec => rec.id === editingTransactionId ? finalRecord : rec));
             if (!isMockUser) {
                 try { 
-                    const result = await supabase.from('financial_records').update(finalRecord).eq('id', editingTransactionId);
+                    // Remover campos que nao devem ser enviados no UPDATE para evitar rejeicao do Supabase
+                    const { id: _id, tenant_id: _tid, created_at: _ca, ...updatePayload } = finalRecord as any;
+                    console.log('[DEBUG] Update payload:', JSON.stringify(updatePayload));
+                    console.log('[DEBUG] editingTransactionId:', editingTransactionId);
+                    const result = await supabase.from('financial_records').update(updatePayload).eq('id', editingTransactionId);
 
                     if (result.error) {
                         console.error("Error updating transaction:", result.error);

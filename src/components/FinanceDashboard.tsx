@@ -137,9 +137,22 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const importMenuRef = useRef<HTMLInputElement>(null);
 
-  // Dashboard Date Filters
+  // Dashboard Date Filters (legacy - kept for compatibility)
   const [dashboardFilterStartDate, setDashboardFilterStartDate] = useState<string>('');
   const [dashboardFilterEndDate, setDashboardFilterEndDate] = useState<string>('');
+
+  // Dashboard Period Selector (independent from DRE/Cashflow)
+  const [dashboardPrimaryPeriod, setDashboardPrimaryPeriod] = useState<PeriodConfig>({
+      year: currentYear,
+      months: [new Date().getMonth() + 1] // Default: current month
+  });
+  const [dashboardComparePeriod, setDashboardComparePeriod] = useState<PeriodConfig>({
+      year: currentYear - 1,
+      months: [new Date().getMonth() + 1]
+  });
+  const [isDashboardCompareEnabled, setIsDashboardCompareEnabled] = useState(false);
+  const [isDashboardPeriodMenuOpen, setIsDashboardPeriodMenuOpen] = useState(false);
+  const dashboardPeriodMenuRef = useRef<HTMLDivElement>(null);
 
   // Reconciliation Filters & Bulk Selection
   const [reconFilterType, setReconFilterType] = useState<TransactionType | 'ALL'>('ALL');
@@ -351,6 +364,9 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
       }
       if (periodMenuRef.current && !periodMenuRef.current.contains(event.target as Node)) {
         setIsPeriodMenuOpen(false);
+      }
+      if (dashboardPeriodMenuRef.current && !dashboardPeriodMenuRef.current.contains(event.target as Node)) {
+        setIsDashboardPeriodMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -1623,48 +1639,79 @@ const newRecords: FinancialRecord[] = [];
   
   // --- DASHBOARD CHARTS DATA ---
   const dashboardChartsData = useMemo(() => {
-      const monthMap = new Map<string, { month: string, income: number, expense: number, balance: number }>();
-      const categoryMap = new Map<string, number>();
-      let totalIncome = 0; let totalExpense = 0; let totalPendingIncome = 0; let totalPendingExpense = 0;
-      primaryPeriod.months.forEach(m => { const key = `${primaryPeriod.year}-${String(m).padStart(2, '0')}`; monthMap.set(key, { month: monthNames[m-1], income: 0, expense: 0, balance: 0 }); });
-      let accumulatedBalance = 0;
-      
-      // Aplicar filtros de data do dashboard
-      let filtered = validRecords.filter(r => { 
-          const d = r.dueDate; 
-          if (!d) return false; 
-          const [y, m] = d.split('-'); 
-          const year = parseInt(y); 
-          const month = parseInt(m); 
-          return year === primaryPeriod.year && primaryPeriod.months.includes(month); 
-      });
-      
-      // Filtrar por data de início e fim
-      if (dashboardFilterStartDate || dashboardFilterEndDate) {
-          filtered = filtered.filter(r => {
-              if (!r.dueDate) return false;
-              const recordDate = new Date(r.dueDate).getTime();
-              const startMatch = !dashboardFilterStartDate || recordDate >= new Date(dashboardFilterStartDate).getTime();
-              const endMatch = !dashboardFilterEndDate || recordDate <= new Date(dashboardFilterEndDate + 'T23:59:59').getTime();
-              return startMatch && endMatch;
+      // Helper: filter and aggregate records for a given period
+      const aggregatePeriod = (period: PeriodConfig) => {
+          const monthMap = new Map<string, { month: string, income: number, expense: number, balance: number }>();
+          const categoryMap = new Map<string, number>();
+          const revenueTypeMap = new Map<string, number>();
+          let totalIncome = 0; let totalExpense = 0; let totalPendingIncome = 0; let totalPendingExpense = 0;
+          period.months.forEach(m => { const key = `${period.year}-${String(m).padStart(2, '0')}`; monthMap.set(key, { month: monthNames[m-1], income: 0, expense: 0, balance: 0 }); });
+          let accumulatedBalance = 0;
+          const filtered = validRecords.filter(r => {
+              const d = r.dueDate;
+              if (!d) return false;
+              const [y, mo] = d.split('-');
+              return parseInt(y) === period.year && period.months.includes(parseInt(mo));
           });
-      }
-      filtered.forEach(r => {
-          const key = r.dueDate.slice(0, 7);
-          if (r.status === TransactionStatus.PAID) {
-              if (monthMap.has(key)) { const entry = monthMap.get(key)!; if (r.type === TransactionType.INCOME) entry.income += r.amount; else entry.expense += r.amount; entry.balance = entry.income - entry.expense; }
-              if (r.type === TransactionType.INCOME) totalIncome += r.amount; else totalExpense += r.amount;
-              if (r.type === TransactionType.EXPENSE) { const catName = r.category || 'Outros'; categoryMap.set(catName, (categoryMap.get(catName) || 0) + r.amount); }
-          }
-          if(r.status !== TransactionStatus.PAID) {
-              if (r.type === TransactionType.INCOME) totalPendingIncome += r.amount; else totalPendingExpense += r.amount;
-          }
-      });
-      const evolutionData = Array.from(monthMap.values()).map(d => { accumulatedBalance += d.balance; return { ...d, accBalance: accumulatedBalance }; });
-      const categoryData = Array.from(categoryMap.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 6);
-      const statusData = [ { name: 'Receitas', Pago: totalIncome, Pendente: totalPendingIncome }, { name: 'Despesas', Pago: totalExpense, Pendente: totalPendingExpense } ];
-      return { evolutionData, categoryData, statusData, totalIncome, totalExpense, balance: totalIncome - totalExpense, totalPendingIncome, totalPendingExpense };
-  }, [validRecords, primaryPeriod, dashboardFilterStartDate, dashboardFilterEndDate]);
+          filtered.forEach(r => {
+              const key = r.dueDate.slice(0, 7);
+              if (r.status === TransactionStatus.PAID) {
+                  if (monthMap.has(key)) { const entry = monthMap.get(key)!; if (r.type === TransactionType.INCOME) entry.income += r.amount; else entry.expense += Math.abs(r.amount); entry.balance = entry.income - entry.expense; }
+                  if (r.type === TransactionType.INCOME) {
+                      totalIncome += r.amount;
+                      // Revenue type breakdown
+                      if (r.split_revenue && r.split_revenue.length > 0) {
+                          r.split_revenue.forEach(split => {
+                              const rtName = revenueTypes.find(rt => rt.id === split.revenue_type_id)?.name || 'Outros';
+                              revenueTypeMap.set(rtName, (revenueTypeMap.get(rtName) || 0) + split.amount);
+                          });
+                      } else {
+                          const rtName = revenueTypes.find(rt => rt.id === r.revenueTypeId)?.name || 'Receita';
+                          revenueTypeMap.set(rtName, (revenueTypeMap.get(rtName) || 0) + r.amount);
+                      }
+                  } else {
+                      const catName = r.category || 'Outros';
+                      categoryMap.set(catName, (categoryMap.get(catName) || 0) + Math.abs(r.amount));
+                  }
+              }
+              if (r.status !== TransactionStatus.PAID) {
+                  if (r.type === TransactionType.INCOME) totalPendingIncome += r.amount; else totalPendingExpense += Math.abs(r.amount);
+              }
+          });
+          const evolutionData = Array.from(monthMap.values()).map(d => { accumulatedBalance += d.balance; return { ...d, accBalance: accumulatedBalance }; });
+          const categoryData = Array.from(categoryMap.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 6);
+          const revenueTypeData = Array.from(revenueTypeMap.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+          const statusData = [{ name: 'Receitas', Pago: totalIncome, Pendente: totalPendingIncome }, { name: 'Despesas', Pago: totalExpense, Pendente: totalPendingExpense }];
+          const margin = totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : 0;
+          return { evolutionData, categoryData, revenueTypeData, statusData, totalIncome, totalExpense, balance: totalIncome - totalExpense, totalPendingIncome, totalPendingExpense, margin };
+      };
+
+      const primary = aggregatePeriod(dashboardPrimaryPeriod);
+      const compare = isDashboardCompareEnabled ? aggregatePeriod(dashboardComparePeriod) : null;
+
+      // Build combined evolution data for comparison chart
+      const combinedEvolutionData = primary.evolutionData.map((d, i) => ({
+          ...d,
+          incomeCompare: compare?.evolutionData[i]?.income ?? null,
+          expenseCompare: compare?.evolutionData[i]?.expense ?? null,
+      }));
+
+      // Delta helpers
+      const delta = (curr: number, prev: number | null) => {
+          if (prev === null || prev === 0) return null;
+          return ((curr - prev) / Math.abs(prev)) * 100;
+      };
+
+      return {
+          ...primary,
+          evolutionData: combinedEvolutionData,
+          compare,
+          deltaIncome: delta(primary.totalIncome, compare?.totalIncome ?? null),
+          deltaExpense: delta(primary.totalExpense, compare?.totalExpense ?? null),
+          deltaBalance: delta(primary.balance, compare?.balance ?? null),
+          deltaMargin: compare ? (primary.margin - (compare?.margin ?? 0)) : null,
+      };
+  }, [validRecords, dashboardPrimaryPeriod, dashboardComparePeriod, isDashboardCompareEnabled, revenueTypes]);
 
   const buildHierarchy = (mode: 'DRE' | 'CASHFLOW') => {
       const primaryKeys = primaryPeriod.months.map(m => `${primaryPeriod.year}-${String(m).padStart(2, '0')}`);
@@ -2257,57 +2304,227 @@ const newRecords: FinancialRecord[] = [];
         
         {activeTab === 'DASHBOARD' && (
             <div className="space-y-6 animate-in fade-in">
-                {/* Filtros de Data */}
+                {/* Barra de Período do Dashboard */}
                 <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
-                    <div className="flex items-center gap-4 flex-wrap">
+                    <div className="flex flex-wrap items-center gap-3">
                         <div className="flex items-center gap-2">
-                            <Calendar size={16} className="text-gray-400" />
+                            <Calendar size={16} className="text-mcsystem-500" />
                             <span className="text-sm font-bold text-gray-700">Período:</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <label className="text-xs text-gray-500 font-medium">De:</label>
-                            <input
-                                type="date"
-                                value={dashboardFilterStartDate}
-                                onChange={(e) => setDashboardFilterStartDate(e.target.value)}
-                                className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-mcsystem-500 focus:border-mcsystem-500"
-                            />
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <label className="text-xs text-gray-500 font-medium">Até:</label>
-                            <input
-                                type="date"
-                                value={dashboardFilterEndDate}
-                                onChange={(e) => setDashboardFilterEndDate(e.target.value)}
-                                className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-mcsystem-500 focus:border-mcsystem-500"
-                            />
-                        </div>
-                        {(dashboardFilterStartDate || dashboardFilterEndDate) && (
-                            <button
-                                onClick={() => {
-                                    setDashboardFilterStartDate('');
-                                    setDashboardFilterEndDate('');
-                                }}
-                                className="text-xs text-gray-500 hover:text-red-500 font-medium flex items-center gap-1 transition-colors"
-                            >
-                                <X size={14} />
-                                Limpar Filtros
+                        {/* Seletor de Período Principal */}
+                        <div className="relative" ref={dashboardPeriodMenuRef}>
+                            <button onClick={() => setIsDashboardPeriodMenuOpen(!isDashboardPeriodMenuOpen)} className="px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg font-medium flex items-center shadow-sm hover:bg-gray-50 text-gray-700">
+                                <span>{dashboardPrimaryPeriod.months.length === 1 ? `${monthNames[dashboardPrimaryPeriod.months[0]-1]} ${dashboardPrimaryPeriod.year}` : dashboardPrimaryPeriod.months.length === 12 ? `Ano ${dashboardPrimaryPeriod.year}` : `${dashboardPrimaryPeriod.months.length} meses / ${dashboardPrimaryPeriod.year}`}</span>
+                                <ChevronDown size={14} className="ml-2 text-gray-400" />
                             </button>
+                            {isDashboardPeriodMenuOpen && (
+                                <div className="absolute top-full left-0 mt-2 w-[380px] bg-white border border-gray-200 rounded-lg shadow-xl z-30 p-4 animate-in fade-in zoom-in-95">
+                                    <div className="mb-4">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <label className="text-xs font-bold text-gray-500 uppercase">Período Principal</label>
+                                            <select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white" value={dashboardPrimaryPeriod.year} onChange={e => setDashboardPrimaryPeriod({...dashboardPrimaryPeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select>
+                                        </div>
+                                        <div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => { const mo = i+1; const has = dashboardPrimaryPeriod.months.includes(mo); setDashboardPrimaryPeriod(p => ({...p, months: has ? p.months.filter(x => x !== mo) : [...p.months, mo].sort((a,b)=>a-b)})); }} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${dashboardPrimaryPeriod.months.includes(i+1) ? 'bg-mcsystem-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{m}</button>))}</div>
+                                        <div className="flex justify-between text-xs text-mcsystem-600">
+                                            <button onClick={() => setDashboardPrimaryPeriod(p => ({...p, months: [1,2,3,4,5,6,7,8,9,10,11,12]}))} className="hover:underline">Selecionar Todos</button>
+                                            <button onClick={() => setDashboardPrimaryPeriod(p => ({...p, months: []}))} className="text-red-500 hover:underline">Limpar</button>
+                                        </div>
+                                    </div>
+                                    <div className="h-px bg-gray-200 my-3"></div>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <label className="flex items-center cursor-pointer">
+                                            <input type="checkbox" checked={isDashboardCompareEnabled} onChange={() => setIsDashboardCompareEnabled(!isDashboardCompareEnabled)} className="sr-only peer"/>
+                                            <div className="relative w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-mcsystem-500"></div>
+                                            <span className="ms-2 text-sm font-medium text-gray-700">Comparar com outro período</span>
+                                        </label>
+                                    </div>
+                                    {isDashboardCompareEnabled && (
+                                        <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 animate-in slide-in-from-top-2">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <label className="text-xs font-bold text-gray-500 uppercase">Período Comparativo</label>
+                                                <select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white" value={dashboardComparePeriod.year} onChange={e => setDashboardComparePeriod({...dashboardComparePeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select>
+                                            </div>
+                                            <div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => { const mo = i+1; const has = dashboardComparePeriod.months.includes(mo); setDashboardComparePeriod(p => ({...p, months: has ? p.months.filter(x => x !== mo) : [...p.months, mo].sort((a,b)=>a-b)})); }} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${dashboardComparePeriod.months.includes(i+1) ? 'bg-purple-500 text-white' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-100'}`}>{m}</button>))}</div>
+                                            <div className="flex justify-between text-xs">
+                                                <button onClick={() => setDashboardComparePeriod(p => ({...p, months: [...dashboardPrimaryPeriod.months]}))} className="text-purple-600 hover:underline flex items-center"><Copy size={10} className="mr-1"/> Copiar Principal</button>
+                                                <button onClick={() => setDashboardComparePeriod(p => ({...p, months: [1,2,3,4,5,6,7,8,9,10,11,12]}))} className="text-purple-600 hover:underline">Todos</button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        {isDashboardCompareEnabled && dashboardChartsData.compare && (
+                            <span className="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-2 py-1 rounded-full font-medium">
+                                vs {dashboardComparePeriod.months.length === 1 ? `${monthNames[dashboardComparePeriod.months[0]-1]} ${dashboardComparePeriod.year}` : `${dashboardComparePeriod.months.length} meses / ${dashboardComparePeriod.year}`}
+                            </span>
                         )}
                     </div>
                 </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100"><p className="text-gray-500 text-xs font-bold uppercase tracking-wide">Receitas (Mês)</p><h3 className="text-2xl font-bold mt-2 text-green-600">R$ {(dashboardChartsData.totalIncome || 0).toLocaleString('pt-BR')}</h3><p className="text-xs text-green-600 mt-1 flex items-center"><TrendingUp size={12} className="mr-1" /> Entrada Bruta</p></div>
-                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100"><p className="text-gray-500 text-xs font-bold uppercase tracking-wide">Despesas (Mês)</p><h3 className="text-2xl font-bold mt-2 text-red-500">R$ {(dashboardChartsData.totalExpense || 0).toLocaleString('pt-BR')}</h3><p className="text-xs text-red-500 mt-1 flex items-center"><TrendingDown size={12} className="mr-1" /> Saída Total</p></div>
-                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100"><p className="text-gray-500 text-xs font-bold uppercase tracking-wide">Resultado (Mês)</p><h3 className={`text-2xl font-bold mt-2 ${dashboardChartsData.balance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>R$ {(dashboardChartsData.balance || 0).toLocaleString('pt-BR')}</h3><p className="text-xs text-gray-400 mt-1 flex items-center"><Wallet size={12} className="mr-1" /> Saldo Operacional</p></div>
-                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 relative overflow-hidden"><div className="absolute right-0 top-0 p-4 opacity-5"><AlertCircle size={48} /></div><p className="text-gray-500 text-xs font-bold uppercase tracking-wide">Pendente (Mês)</p><div className="mt-2"><span className="block text-sm font-bold text-orange-500">R$ {(dashboardChartsData.totalPendingIncome || 0).toLocaleString('pt-BR')} <span className="text-[10px] font-normal text-gray-400">a receber</span></span><span className="block text-sm font-bold text-red-400">R$ {(dashboardChartsData.totalPendingExpense || 0).toLocaleString('pt-BR')} <span className="text-[10px] font-normal text-gray-400">a pagar</span></span></div></div>
+
+                {/* KPIs com Comparativo */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* Receitas */}
+                    <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-100">
+                        <p className="text-gray-500 text-xs font-bold uppercase tracking-wide">Receitas</p>
+                        <h3 className="text-2xl font-bold mt-2 text-green-600">R$ {(dashboardChartsData.totalIncome || 0).toLocaleString('pt-BR', {minimumFractionDigits:0})}</h3>
+                        {isDashboardCompareEnabled && dashboardChartsData.compare && (
+                            <div className="mt-2 flex items-center gap-2">
+                                <span className={`text-xs font-bold flex items-center px-1.5 py-0.5 rounded ${(dashboardChartsData.deltaIncome ?? 0) >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                                    {(dashboardChartsData.deltaIncome ?? 0) >= 0 ? <ArrowUpRight size={12} className="mr-0.5"/> : <ArrowDownRight size={12} className="mr-0.5"/>}
+                                    {dashboardChartsData.deltaIncome !== null ? `${Math.abs(dashboardChartsData.deltaIncome).toFixed(1)}%` : '-'}
+                                </span>
+                                <span className="text-[10px] text-gray-400">vs R$ {(dashboardChartsData.compare.totalIncome || 0).toLocaleString('pt-BR', {minimumFractionDigits:0})}</span>
+                            </div>
+                        )}
+                        {!isDashboardCompareEnabled && <p className="text-xs text-green-600 mt-1 flex items-center"><TrendingUp size={12} className="mr-1" /> Entrada Bruta</p>}
+                    </div>
+                    {/* Despesas */}
+                    <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-100">
+                        <p className="text-gray-500 text-xs font-bold uppercase tracking-wide">Despesas</p>
+                        <h3 className="text-2xl font-bold mt-2 text-red-500">R$ {(dashboardChartsData.totalExpense || 0).toLocaleString('pt-BR', {minimumFractionDigits:0})}</h3>
+                        {isDashboardCompareEnabled && dashboardChartsData.compare && (
+                            <div className="mt-2 flex items-center gap-2">
+                                <span className={`text-xs font-bold flex items-center px-1.5 py-0.5 rounded ${(dashboardChartsData.deltaExpense ?? 0) <= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                                    {(dashboardChartsData.deltaExpense ?? 0) >= 0 ? <ArrowUpRight size={12} className="mr-0.5"/> : <ArrowDownRight size={12} className="mr-0.5"/>}
+                                    {dashboardChartsData.deltaExpense !== null ? `${Math.abs(dashboardChartsData.deltaExpense).toFixed(1)}%` : '-'}
+                                </span>
+                                <span className="text-[10px] text-gray-400">vs R$ {(dashboardChartsData.compare.totalExpense || 0).toLocaleString('pt-BR', {minimumFractionDigits:0})}</span>
+                            </div>
+                        )}
+                        {!isDashboardCompareEnabled && <p className="text-xs text-red-500 mt-1 flex items-center"><TrendingDown size={12} className="mr-1" /> Saída Total</p>}
+                    </div>
+                    {/* Resultado */}
+                    <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-100">
+                        <p className="text-gray-500 text-xs font-bold uppercase tracking-wide">Resultado</p>
+                        <h3 className={`text-2xl font-bold mt-2 ${dashboardChartsData.balance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>R$ {(dashboardChartsData.balance || 0).toLocaleString('pt-BR', {minimumFractionDigits:0})}</h3>
+                        {isDashboardCompareEnabled && dashboardChartsData.compare && (
+                            <div className="mt-2 flex items-center gap-2">
+                                <span className={`text-xs font-bold flex items-center px-1.5 py-0.5 rounded ${(dashboardChartsData.deltaBalance ?? 0) >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                                    {(dashboardChartsData.deltaBalance ?? 0) >= 0 ? <ArrowUpRight size={12} className="mr-0.5"/> : <ArrowDownRight size={12} className="mr-0.5"/>}
+                                    {dashboardChartsData.deltaBalance !== null ? `${Math.abs(dashboardChartsData.deltaBalance).toFixed(1)}%` : '-'}
+                                </span>
+                                <span className="text-[10px] text-gray-400">vs R$ {(dashboardChartsData.compare.balance || 0).toLocaleString('pt-BR', {minimumFractionDigits:0})}</span>
+                            </div>
+                        )}
+                        {!isDashboardCompareEnabled && <p className="text-xs text-gray-400 mt-1 flex items-center"><Wallet size={12} className="mr-1" /> Saldo Operacional</p>}
+                    </div>
+                    {/* Margem */}
+                    <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-100">
+                        <p className="text-gray-500 text-xs font-bold uppercase tracking-wide">Margem Líquida</p>
+                        <h3 className={`text-2xl font-bold mt-2 ${(dashboardChartsData.margin || 0) >= 0 ? 'text-indigo-600' : 'text-red-600'}`}>{(dashboardChartsData.margin || 0).toFixed(1)}%</h3>
+                        {isDashboardCompareEnabled && dashboardChartsData.compare && (
+                            <div className="mt-2 flex items-center gap-2">
+                                <span className={`text-xs font-bold flex items-center px-1.5 py-0.5 rounded ${(dashboardChartsData.deltaMargin ?? 0) >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                                    {(dashboardChartsData.deltaMargin ?? 0) >= 0 ? <ArrowUpRight size={12} className="mr-0.5"/> : <ArrowDownRight size={12} className="mr-0.5"/>}
+                                    {dashboardChartsData.deltaMargin !== null ? `${Math.abs(dashboardChartsData.deltaMargin).toFixed(1)} p.p.` : '-'}
+                                </span>
+                                <span className="text-[10px] text-gray-400">vs {(dashboardChartsData.compare.margin || 0).toFixed(1)}%</span>
+                            </div>
+                        )}
+                        {!isDashboardCompareEnabled && <p className="text-xs text-indigo-500 mt-1 flex items-center"><TrendingUp size={12} className="mr-1" /> Resultado / Receita</p>}
+                    </div>
                 </div>
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100"><h3 className="font-bold text-gray-800 mb-6 flex items-center"><BarChart3 size={20} className="mr-2 text-mcsystem-500" /> Evolução do Fluxo de Caixa</h3><div className="h-80 w-full"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={dashboardChartsData.evolutionData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="month" axisLine={false} tickLine={false} /><YAxis yAxisId="left" orientation="left" stroke="#8884d8" /><YAxis yAxisId="right" orientation="right" stroke="#82ca9d" /><Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} /><Legend /><Bar yAxisId="left" dataKey="income" name="Receitas" fill="#10b981" barSize={20} radius={[4, 4, 0, 0]} /><Bar yAxisId="left" dataKey="expense" name="Despesas" fill="#ef4444" barSize={20} radius={[4, 4, 0, 0]} /><Line yAxisId="right" type="monotone" dataKey="accBalance" name="Saldo Acumulado" stroke="#3b82f6" strokeWidth={3} dot={{r: 4}} /></ComposedChart></ResponsiveContainer></div></div>
+
+                {/* Gráfico de Evolução com Comparativo */}
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                    <h3 className="font-bold text-gray-800 mb-6 flex items-center"><BarChart3 size={20} className="mr-2 text-mcsystem-500" /> Evolução do Fluxo de Caixa {isDashboardCompareEnabled && <span className="ml-2 text-xs font-normal text-gray-400">(barras sólidas = período atual, barras listradas = comparativo)</span>}</h3>
+                    <div className="h-80 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={dashboardChartsData.evolutionData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <XAxis dataKey="month" axisLine={false} tickLine={false} />
+                                <YAxis yAxisId="left" orientation="left" />
+                                <YAxis yAxisId="right" orientation="right" />
+                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
+                                <Legend />
+                                <Bar yAxisId="left" dataKey="income" name="Receitas" fill="#10b981" barSize={isDashboardCompareEnabled ? 12 : 20} radius={[4,4,0,0]} />
+                                {isDashboardCompareEnabled && <Bar yAxisId="left" dataKey="incomeCompare" name="Receitas (comp.)" fill="#10b981" fillOpacity={0.35} barSize={12} radius={[4,4,0,0]} />}
+                                <Bar yAxisId="left" dataKey="expense" name="Despesas" fill="#ef4444" barSize={isDashboardCompareEnabled ? 12 : 20} radius={[4,4,0,0]} />
+                                {isDashboardCompareEnabled && <Bar yAxisId="left" dataKey="expenseCompare" name="Despesas (comp.)" fill="#ef4444" fillOpacity={0.35} barSize={12} radius={[4,4,0,0]} />}
+                                <Line yAxisId="right" type="monotone" dataKey="accBalance" name="Saldo Acumulado" stroke="#3b82f6" strokeWidth={3} dot={{r: 4}} />
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* Gráficos Secundários */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100"><h3 className="font-bold text-gray-800 mb-4">Despesas por Categoria</h3><div className="h-64"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={dashboardChartsData.categoryData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">{dashboardChartsData.categoryData.map((entry, index) => (<Cell key={`cell-${index}`} fill={['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'][index % 6]} />))}</Pie><Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} /><Legend /></PieChart></ResponsiveContainer></div></div>
-                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100"><h3 className="font-bold text-gray-800 mb-4">Realizado vs Pendente</h3><div className="h-64"><ResponsiveContainer width="100%" height="100%"><BarChart data={dashboardChartsData.statusData} layout="vertical"><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" /><YAxis dataKey="name" type="category" width={80} /><Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} /><Legend /><Bar dataKey="Pago" stackId="a" fill="#10b981" radius={[0, 4, 4, 0]} barSize={30} /><Bar dataKey="Pendente" stackId="a" fill="#f59e0b" radius={[0, 4, 4, 0]} barSize={30} /></BarChart></ResponsiveContainer></div></div>
+                    {/* Receita por Tipo */}
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                        <h3 className="font-bold text-gray-800 mb-4 flex items-center"><PieIcon size={16} className="mr-2 text-mcsystem-500" /> Receita por Tipo</h3>
+                        <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie data={dashboardChartsData.revenueTypeData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
+                                        {dashboardChartsData.revenueTypeData.map((entry, index) => (<Cell key={`cell-rt-${index}`} fill={['#10b981','#3b82f6','#8b5cf6','#f59e0b','#06b6d4','#ec4899'][index % 6]} />))}
+                                    </Pie>
+                                    <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
+                                    <Legend />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                    {/* Despesas por Categoria */}
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                        <h3 className="font-bold text-gray-800 mb-4 flex items-center"><PieIcon size={16} className="mr-2 text-red-400" /> Despesas por Categoria</h3>
+                        <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie data={dashboardChartsData.categoryData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
+                                        {dashboardChartsData.categoryData.map((entry, index) => (<Cell key={`cell-cat-${index}`} fill={['#ef4444','#f97316','#eab308','#84cc16','#06b6d4','#8b5cf6'][index % 6]} />))}
+                                    </Pie>
+                                    <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
+                                    <Legend />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
                 </div>
+
+                {/* Comparativo Receita vs Despesa por Período (quando comparativo ativo) */}
+                {isDashboardCompareEnabled && dashboardChartsData.compare && (
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                        <h3 className="font-bold text-gray-800 mb-4 flex items-center"><BarChart3 size={16} className="mr-2 text-purple-500" /> Comparativo de Período</h3>
+                        <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={[
+                                    { name: 'Receitas', atual: dashboardChartsData.totalIncome, comparativo: dashboardChartsData.compare.totalIncome },
+                                    { name: 'Despesas', atual: dashboardChartsData.totalExpense, comparativo: dashboardChartsData.compare.totalExpense },
+                                    { name: 'Resultado', atual: dashboardChartsData.balance, comparativo: dashboardChartsData.compare.balance },
+                                ]} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                                    <YAxis />
+                                    <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
+                                    <Legend />
+                                    <Bar dataKey="atual" name={`${dashboardPrimaryPeriod.year}`} fill="#3b82f6" radius={[4,4,0,0]} barSize={40} />
+                                    <Bar dataKey="comparativo" name={`${dashboardComparePeriod.year} (comp.)`} fill="#8b5cf6" fillOpacity={0.7} radius={[4,4,0,0]} barSize={40} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                )}
+
+                {/* Realizado vs Pendente */}
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                    <h3 className="font-bold text-gray-800 mb-4">Realizado vs Pendente</h3>
+                    <div className="h-48">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={dashboardChartsData.statusData} layout="vertical">
+                                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                                <XAxis type="number" />
+                                <YAxis dataKey="name" type="category" width={80} />
+                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
+                                <Legend />
+                                <Bar dataKey="Pago" stackId="a" fill="#10b981" radius={[0,4,4,0]} barSize={30} />
+                                <Bar dataKey="Pendente" stackId="a" fill="#f59e0b" radius={[0,4,4,0]} barSize={30} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* Análise IA */}
                 <div className="bg-gradient-to-br from-mcsystem-900 to-blue-900 text-white p-6 rounded-lg shadow-lg relative overflow-hidden"><div className="absolute right-0 top-0 p-4 opacity-20"><Bot size={48} /></div><p className="text-blue-200 text-xs font-bold uppercase tracking-wide mb-2 flex items-center"><Bot size={14} className="mr-1" /> Análise IA</p><div className="h-20 overflow-y-auto text-sm text-blue-50 leading-relaxed scrollbar-hide">{loadingInsight ? (<span className="flex items-center"><span className="animate-spin mr-2">⏳</span> Analisando dados...</span>) : insight ? insight : (<button onClick={handleGenerateInsight} className="underline hover:text-white transition-colors text-left">Clique para gerar uma análise financeira inteligente baseada nos seus dados recentes.</button>)}</div></div>
             </div>
         )}

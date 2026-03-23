@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { FinancialRecord, TransactionType, TransactionStatus, ChartOfAccount, RevenueType, Bank, Company, User, FinancialRecordSplit } from '../types';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, AreaChart, Area, Line, PieChart, Pie, ComposedChart, LineChart } from 'recharts';
-import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as PieIcon, DollarSign, Plus, X, Save, List, Hash, Tag, Search, Pencil, Trash2, Landmark, Tags, Grid3X3, CalendarRange, FileCheck, Filter, Upload, Download, ChevronDown, TrendingUp, Wallet, ArrowRightLeft, LayoutDashboard, ChevronRight, Eye, EyeOff, Calendar, ArrowUpRight, ArrowDownRight, Minus, Settings2, Check, Copy, RefreshCw, BarChart3, TrendingDown, Sparkles, CreditCard, Clock, CalendarClock, Lock, CheckSquare, Square, CheckCircle2, Calculator, Split, Building, Edit3, Table, BookTemplate, BookOpen, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, AreaChart, Area, Line, PieChart, Pie, ComposedChart, LineChart, ReferenceLine } from 'recharts';
+import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as PieIcon, DollarSign, Plus, X, Save, List, Hash, Tag, Search, Pencil, Trash2, Landmark, Tags, Grid3X3, CalendarRange, FileCheck, Filter, Upload, Download, ChevronDown, TrendingUp, Wallet, ArrowRightLeft, LayoutDashboard, ChevronRight, Eye, EyeOff, Calendar, ArrowUpRight, ArrowDownRight, Minus, Settings2, Check, Copy, RefreshCw, BarChart3, TrendingDown, Sparkles, CreditCard, Clock, CalendarClock, Lock, CheckSquare, Square, CheckCircle2, Calculator, Split, Building, Edit3, Table, BookTemplate, BookOpen, ArrowUp, ArrowDown, ArrowUpDown, Users } from 'lucide-react';
 import { generateFinancialInsight } from '../services/geminiService';
 import { supabase } from '../lib/supabaseClient';
 import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
@@ -1702,6 +1702,107 @@ const newRecords: FinancialRecord[] = [];
           return ((curr - prev) / Math.abs(prev)) * 100;
       };
 
+      // ── NOVOS DATASETS ──────────────────────────────────────────────────────
+
+      // 1. Receita por Tipo — Barras Mensais (todos os meses do período principal)
+      const revenueTypeMonthlyMap = new Map<string, Map<string, number>>(); // month -> rtName -> value
+      const primaryKeys = dashboardPrimaryPeriod.months.map(m => `${dashboardPrimaryPeriod.year}-${String(m).padStart(2,'0')}`);
+      primaryKeys.forEach(k => revenueTypeMonthlyMap.set(k, new Map()));
+      validRecords.filter(r => {
+          if (!r.dueDate || r.type !== TransactionType.INCOME || r.status !== TransactionStatus.PAID) return false;
+          return primaryKeys.includes(r.dueDate.slice(0,7));
+      }).forEach(r => {
+          const key = r.dueDate.slice(0,7);
+          const monthMap2 = revenueTypeMonthlyMap.get(key)!;
+          if (r.split_revenue && r.split_revenue.length > 0) {
+              r.split_revenue.forEach(split => {
+                  const rtName = revenueTypes.find(rt => rt.id === split.revenue_type_id)?.name || 'Outros';
+                  monthMap2.set(rtName, (monthMap2.get(rtName) || 0) + split.amount);
+              });
+          } else {
+              const rtName = revenueTypes.find(rt => rt.id === r.revenueTypeId)?.name || 'Receita';
+              monthMap2.set(rtName, (monthMap2.get(rtName) || 0) + r.amount);
+          }
+      });
+      const allRevenueTypeNames = Array.from(new Set(Array.from(revenueTypeMonthlyMap.values()).flatMap(m => Array.from(m.keys()))));
+      const revenueTypeMonthlyData = primaryKeys.map(k => {
+          const entry: Record<string, any> = { month: monthNames[parseInt(k.split('-')[1])-1] };
+          allRevenueTypeNames.forEach(name => { entry[name] = revenueTypeMonthlyMap.get(k)?.get(name) || 0; });
+          return entry;
+      });
+
+      // 2. Inadimplência / Atraso por mês
+      const overdueMap = new Map<string, { month: string, pago: number, atrasado: number, pendente: number }>();
+      primaryKeys.forEach(k => overdueMap.set(k, { month: monthNames[parseInt(k.split('-')[1])-1], pago: 0, atrasado: 0, pendente: 0 }));
+      validRecords.filter(r => r.type === TransactionType.INCOME && primaryKeys.includes(r.dueDate?.slice(0,7) || '')).forEach(r => {
+          const key = r.dueDate.slice(0,7);
+          const entry = overdueMap.get(key);
+          if (!entry) return;
+          if (r.status === TransactionStatus.PAID) entry.pago += r.amount;
+          else if (r.status === TransactionStatus.OVERDUE) entry.atrasado += r.amount;
+          else entry.pendente += r.amount;
+      });
+      const overdueData = Array.from(overdueMap.values());
+
+      // 3. Top 7 Clientes por Receita
+      const clientIncomeMap = new Map<string, number>();
+      validRecords.filter(r => r.type === TransactionType.INCOME && r.status === TransactionStatus.PAID && r.companyId && primaryKeys.includes(r.dueDate?.slice(0,7) || '')).forEach(r => {
+          clientIncomeMap.set(r.companyId!, (clientIncomeMap.get(r.companyId!) || 0) + r.amount);
+      });
+      const topClientsData = Array.from(clientIncomeMap.entries())
+          .map(([id, value]) => ({ name: companies.find(c => c.id === id)?.name || id, value }))
+          .sort((a, b) => b.value - a.value).slice(0, 7);
+
+      // 4. Top 7 Fornecedores por Despesa
+      const supplierExpenseMap = new Map<string, number>();
+      validRecords.filter(r => r.type === TransactionType.EXPENSE && r.status === TransactionStatus.PAID && r.companyId && primaryKeys.includes(r.dueDate?.slice(0,7) || '')).forEach(r => {
+          supplierExpenseMap.set(r.companyId!, (supplierExpenseMap.get(r.companyId!) || 0) + Math.abs(r.amount));
+      });
+      const topSuppliersData = Array.from(supplierExpenseMap.entries())
+          .map(([id, value]) => ({ name: companies.find(c => c.id === id)?.name || id, value }))
+          .sort((a, b) => b.value - a.value).slice(0, 7);
+
+      // 5. Distribuição de Vencimentos Futuros (próximos 60 dias, por semana)
+      const today = new Date();
+      const in60Days = new Date(today); in60Days.setDate(today.getDate() + 60);
+      const weeklyDueMap = new Map<string, { week: string, receita: number, despesa: number }>();
+      for (let i = 0; i < 9; i++) {
+          const weekStart = new Date(today); weekStart.setDate(today.getDate() + i * 7);
+          const label = `${weekStart.toLocaleDateString('pt-BR', {day:'2-digit',month:'2-digit'})}`;
+          weeklyDueMap.set(String(i), { week: label, receita: 0, despesa: 0 });
+      }
+      validRecords.filter(r => r.status === TransactionStatus.PENDING && r.dueDate).forEach(r => {
+          const due = new Date(r.dueDate + 'T12:00:00');
+          if (due < today || due > in60Days) return;
+          const diffDays = Math.floor((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          const weekIdx = String(Math.floor(diffDays / 7));
+          const entry = weeklyDueMap.get(weekIdx);
+          if (!entry) return;
+          if (r.type === TransactionType.INCOME) entry.receita += r.amount;
+          else entry.despesa += Math.abs(r.amount);
+      });
+      const futureDueData = Array.from(weeklyDueMap.values()).filter(d => d.receita > 0 || d.despesa > 0);
+
+      // 6. Margem Líquida por Mês
+      const marginMonthlyData = primary.evolutionData.map(d => ({
+          month: d.month,
+          margem: d.income > 0 ? parseFloat(((d.income - d.expense) / d.income * 100).toFixed(1)) : 0,
+          margemCompare: null as number | null,
+      })).map((d, i) => ({
+          ...d,
+          margemCompare: compare ? (compare.evolutionData[i]?.income > 0 ? parseFloat(((compare.evolutionData[i].income - compare.evolutionData[i].expense) / compare.evolutionData[i].income * 100).toFixed(1)) : 0) : null,
+      }));
+
+      // 7. Receita Acumulada no Ano (todos os meses do ano do período principal)
+      const yearMonths = [1,2,3,4,5,6,7,8,9,10,11,12];
+      let accIncome = 0;
+      const accumulatedIncomeData = yearMonths.map(m => {
+          const key = `${dashboardPrimaryPeriod.year}-${String(m).padStart(2,'0')}`;
+          const monthIncome = validRecords.filter(r => r.type === TransactionType.INCOME && r.status === TransactionStatus.PAID && r.dueDate?.startsWith(key)).reduce((s, r) => s + r.amount, 0);
+          accIncome += monthIncome;
+          return { month: monthNames[m-1], acumulado: accIncome, mensal: monthIncome };
+      });
+
       return {
           ...primary,
           evolutionData: combinedEvolutionData,
@@ -1710,8 +1811,17 @@ const newRecords: FinancialRecord[] = [];
           deltaExpense: delta(primary.totalExpense, compare?.totalExpense ?? null),
           deltaBalance: delta(primary.balance, compare?.balance ?? null),
           deltaMargin: compare ? (primary.margin - (compare?.margin ?? 0)) : null,
+          // novos
+          revenueTypeMonthlyData,
+          allRevenueTypeNames,
+          overdueData,
+          topClientsData,
+          topSuppliersData,
+          futureDueData,
+          marginMonthlyData,
+          accumulatedIncomeData,
       };
-  }, [validRecords, dashboardPrimaryPeriod, dashboardComparePeriod, isDashboardCompareEnabled, revenueTypes]);
+  }, [validRecords, dashboardPrimaryPeriod, dashboardComparePeriod, isDashboardCompareEnabled, revenueTypes, companies]);
 
   const buildHierarchy = (mode: 'DRE' | 'CASHFLOW') => {
       const primaryKeys = primaryPeriod.months.map(m => `${primaryPeriod.year}-${String(m).padStart(2, '0')}`);
@@ -2523,6 +2633,163 @@ const newRecords: FinancialRecord[] = [];
                         </ResponsiveContainer>
                     </div>
                 </div>
+
+                {/* ──── SEÇÃO: ANÁLISE DE RECEITA ──── */}
+                <div className="border-t border-gray-100 pt-2">
+                    <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center"><TrendingUp size={14} className="mr-2 text-green-500" /> Análise de Receita</h2>
+                </div>
+
+                {/* Receita por Tipo — Barras Mensais */}
+                {dashboardChartsData.revenueTypeMonthlyData.length > 0 && dashboardChartsData.allRevenueTypeNames.length > 0 && (
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                        <h3 className="font-bold text-gray-800 mb-4 flex items-center"><BarChart3 size={16} className="mr-2 text-green-500" /> Receita por Tipo de Receita (Mensal)</h3>
+                        <div className="h-72">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={dashboardChartsData.revenueTypeMonthlyData} margin={{top:5,right:10,left:0,bottom:5}}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                    <XAxis dataKey="month" axisLine={false} tickLine={false} />
+                                    <YAxis />
+                                    <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
+                                    <Legend />
+                                    {dashboardChartsData.allRevenueTypeNames.map((name, i) => (
+                                        <Bar key={name} dataKey={name} stackId="rt" fill={['#10b981','#3b82f6','#8b5cf6','#f59e0b','#06b6d4','#ec4899'][i % 6]} radius={i === dashboardChartsData.allRevenueTypeNames.length - 1 ? [4,4,0,0] : [0,0,0,0]} />
+                                    ))}
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                )}
+
+                {/* Receita Acumulada no Ano */}
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                    <h3 className="font-bold text-gray-800 mb-4 flex items-center"><TrendingUp size={16} className="mr-2 text-blue-500" /> Receita Acumulada no Ano ({dashboardPrimaryPeriod.year})</h3>
+                    <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={dashboardChartsData.accumulatedIncomeData} margin={{top:5,right:10,left:0,bottom:5}}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <XAxis dataKey="month" axisLine={false} tickLine={false} />
+                                <YAxis yAxisId="left" />
+                                <YAxis yAxisId="right" orientation="right" />
+                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
+                                <Legend />
+                                <Bar yAxisId="left" dataKey="mensal" name="Receita Mensal" fill="#10b981" fillOpacity={0.5} barSize={20} radius={[4,4,0,0]} />
+                                <Line yAxisId="right" type="monotone" dataKey="acumulado" name="Acumulado no Ano" stroke="#3b82f6" strokeWidth={3} dot={{r:4}} />
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* Inadimplência / Atraso */}
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                    <h3 className="font-bold text-gray-800 mb-4 flex items-center"><AlertCircle size={16} className="mr-2 text-orange-500" /> Inadimplência — Receitas por Status</h3>
+                    <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={dashboardChartsData.overdueData} margin={{top:5,right:10,left:0,bottom:5}}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <XAxis dataKey="month" axisLine={false} tickLine={false} />
+                                <YAxis />
+                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
+                                <Legend />
+                                <Bar dataKey="pago" name="Pago" stackId="s" fill="#10b981" radius={[0,0,0,0]} />
+                                <Bar dataKey="pendente" name="Pendente" stackId="s" fill="#f59e0b" radius={[0,0,0,0]} />
+                                <Bar dataKey="atrasado" name="Atrasado" stackId="s" fill="#ef4444" radius={[4,4,0,0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* Margem Líquida por Mês */}
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                    <h3 className="font-bold text-gray-800 mb-4 flex items-center"><TrendingUp size={16} className="mr-2 text-indigo-500" /> Margem Líquida por Mês (%)</h3>
+                    <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={dashboardChartsData.marginMonthlyData} margin={{top:5,right:10,left:0,bottom:5}}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <XAxis dataKey="month" axisLine={false} tickLine={false} />
+                                <YAxis tickFormatter={(v) => `${v}%`} />
+                                <Tooltip formatter={(value: any) => `${(value || 0).toFixed(1)}%`} />
+                                <Legend />
+                                <ReferenceLine y={0} stroke="#e5e7eb" strokeDasharray="4 4" />
+                                <Area type="monotone" dataKey="margem" name="Margem (%)" stroke="#6366f1" fill="#6366f1" fillOpacity={0.1} strokeWidth={2} dot={{r:4}} />
+                                {isDashboardCompareEnabled && <Line type="monotone" dataKey="margemCompare" name="Margem Comp. (%)" stroke="#8b5cf6" strokeDasharray="5 5" strokeWidth={2} dot={{r:3}} />}
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* ──── SEÇÃO: CLIENTES E FORNECEDORES ──── */}
+                {(dashboardChartsData.topClientsData.length > 0 || dashboardChartsData.topSuppliersData.length > 0) && (
+                    <>
+                        <div className="border-t border-gray-100 pt-2">
+                            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center"><Building size={14} className="mr-2 text-blue-500" /> Clientes e Fornecedores</h2>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* Top Clientes */}
+                            {dashboardChartsData.topClientsData.length > 0 && (
+                                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                                    <h3 className="font-bold text-gray-800 mb-4 flex items-center"><Users size={16} className="mr-2 text-green-500" /> Top Clientes por Receita</h3>
+                                    <div className="h-64">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={dashboardChartsData.topClientsData} layout="vertical" margin={{top:0,right:20,left:0,bottom:0}}>
+                                                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                                                <XAxis type="number" tickFormatter={(v) => `R$${(v/1000).toFixed(0)}k`} />
+                                                <YAxis dataKey="name" type="category" width={110} tick={{fontSize:11}} />
+                                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
+                                                <Bar dataKey="value" name="Receita" fill="#10b981" radius={[0,4,4,0]} barSize={20}>
+                                                    {dashboardChartsData.topClientsData.map((_, index) => <Cell key={`c-${index}`} fill={`hsl(${160 - index * 12}, 70%, ${45 + index * 3}%)`} />)}
+                                                </Bar>
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                </div>
+                            )}
+                            {/* Top Fornecedores */}
+                            {dashboardChartsData.topSuppliersData.length > 0 && (
+                                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                                    <h3 className="font-bold text-gray-800 mb-4 flex items-center"><Building size={16} className="mr-2 text-red-400" /> Top Fornecedores por Despesa</h3>
+                                    <div className="h-64">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={dashboardChartsData.topSuppliersData} layout="vertical" margin={{top:0,right:20,left:0,bottom:0}}>
+                                                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                                                <XAxis type="number" tickFormatter={(v) => `R$${(v/1000).toFixed(0)}k`} />
+                                                <YAxis dataKey="name" type="category" width={110} tick={{fontSize:11}} />
+                                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
+                                                <Bar dataKey="value" name="Despesa" fill="#ef4444" radius={[0,4,4,0]} barSize={20}>
+                                                    {dashboardChartsData.topSuppliersData.map((_, index) => <Cell key={`s-${index}`} fill={`hsl(${0 + index * 8}, 70%, ${50 + index * 2}%)`} />)}
+                                                </Bar>
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </>
+                )}
+
+                {/* ──── SEÇÃO: PROJEÇÃO FUTURA ──── */}
+                {dashboardChartsData.futureDueData.length > 0 && (
+                    <>
+                        <div className="border-t border-gray-100 pt-2">
+                            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center"><Calendar size={14} className="mr-2 text-orange-500" /> Projeção Futura</h2>
+                        </div>
+                        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center"><Calendar size={16} className="mr-2 text-orange-500" /> Vencimentos Pendentes — Próximos 60 Dias (por semana)</h3>
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={dashboardChartsData.futureDueData} margin={{top:5,right:10,left:0,bottom:5}}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                        <XAxis dataKey="week" axisLine={false} tickLine={false} tick={{fontSize:11}} />
+                                        <YAxis />
+                                        <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
+                                        <Legend />
+                                        <Bar dataKey="receita" name="A Receber" fill="#10b981" radius={[4,4,0,0]} barSize={24} />
+                                        <Bar dataKey="despesa" name="A Pagar" fill="#f97316" radius={[4,4,0,0]} barSize={24} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    </>
+                )}
 
                 {/* Análise IA */}
                 <div className="bg-gradient-to-br from-mcsystem-900 to-blue-900 text-white p-6 rounded-lg shadow-lg relative overflow-hidden"><div className="absolute right-0 top-0 p-4 opacity-20"><Bot size={48} /></div><p className="text-blue-200 text-xs font-bold uppercase tracking-wide mb-2 flex items-center"><Bot size={14} className="mr-1" /> Análise IA</p><div className="h-20 overflow-y-auto text-sm text-blue-50 leading-relaxed scrollbar-hide">{loadingInsight ? (<span className="flex items-center"><span className="animate-spin mr-2">⏳</span> Analisando dados...</span>) : insight ? insight : (<button onClick={handleGenerateInsight} className="underline hover:text-white transition-colors text-left">Clique para gerar uma análise financeira inteligente baseada nos seus dados recentes.</button>)}</div></div>

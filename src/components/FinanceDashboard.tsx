@@ -151,6 +151,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
       months: [new Date().getMonth() + 1]
   });
   const [isDashboardCompareEnabled, setIsDashboardCompareEnabled] = useState(false);
+  const [dashboardSubTab, setDashboardSubTab] = useState<'OVERVIEW' | 'REVENUE' | 'CLIENTS' | 'PROJECTION'>('OVERVIEW');
   const [isDashboardPeriodMenuOpen, setIsDashboardPeriodMenuOpen] = useState(false);
   const dashboardPeriodMenuRef = useRef<HTMLDivElement>(null);
 
@@ -2413,14 +2414,471 @@ const newRecords: FinancialRecord[] = [];
         </div>
         
         {activeTab === 'DASHBOARD' && (
-            <div className="space-y-6 animate-in fade-in">
-                {/* Barra de Período do Dashboard */}
-                <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
-                    <div className="flex flex-wrap items-center gap-3">
-                        <div className="flex items-center gap-2">
-                            <Calendar size={16} className="text-mcsystem-500" />
-                            <span className="text-sm font-bold text-gray-700">Período:</span>
+            <div className="space-y-0 animate-in fade-in">
+
+                {/* ── HEADER EXECUTIVE COMMAND CENTER ── */}
+                <div className="bg-gradient-to-r from-[#0a1628] to-[#0d2244] rounded-xl p-6 mb-6 relative overflow-hidden shadow-xl">
+                    <div className="absolute inset-0 opacity-10" style={{backgroundImage: 'radial-gradient(circle at 80% 50%, #1e90ff 0%, transparent 60%)'}}></div>
+                    <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div>
+                            <div className="flex items-center gap-3 mb-1">
+                                <div className="w-8 h-8 rounded-full border-2 border-cyan-400 flex items-center justify-center">
+                                    <div className="w-3 h-3 rounded-full bg-cyan-400 animate-pulse"></div>
+                                </div>
+                                <h1 className="text-xl font-bold text-white tracking-tight">Painel Financeiro</h1>
+                            </div>
+                            <p className="text-blue-300 text-sm ml-11">Análise de performance financeira em tempo real &bull; {dashboardPrimaryPeriod.months.length === 1 ? `${monthNames[dashboardPrimaryPeriod.months[0]-1]} de ${dashboardPrimaryPeriod.year}` : dashboardPrimaryPeriod.months.length === 12 ? `Ano ${dashboardPrimaryPeriod.year}` : `${dashboardPrimaryPeriod.months.length} meses de ${dashboardPrimaryPeriod.year}`}</p>
                         </div>
+                        <div className="flex items-center gap-3 ml-11 md:ml-0">
+                            {/* Seletor de Período no Header */}
+                            <div className="relative" ref={dashboardPeriodMenuRef}>
+                                <button onClick={() => setIsDashboardPeriodMenuOpen(!isDashboardPeriodMenuOpen)} className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2 rounded-lg text-sm font-medium transition-all backdrop-blur-sm">
+                                    <Calendar size={14} className="text-cyan-400" />
+                                    <span>{dashboardPrimaryPeriod.months.length === 1 ? `${monthNames[dashboardPrimaryPeriod.months[0]-1]} ${dashboardPrimaryPeriod.year}` : dashboardPrimaryPeriod.months.length === 12 ? `Ano ${dashboardPrimaryPeriod.year}` : `${dashboardPrimaryPeriod.months.length} meses / ${dashboardPrimaryPeriod.year}`}</span>
+                                    <ChevronDown size={12} className="text-blue-300" />
+                                </button>
+                                {isDashboardPeriodMenuOpen && (
+                                    <div className="absolute top-full right-0 mt-2 w-[380px] bg-white border border-gray-200 rounded-lg shadow-xl z-30 p-4 animate-in fade-in zoom-in-95">
+                                        <div className="mb-4">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <label className="text-xs font-bold text-gray-500 uppercase">Período Principal</label>
+                                                <select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white" value={dashboardPrimaryPeriod.year} onChange={e => setDashboardPrimaryPeriod({...dashboardPrimaryPeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select>
+                                            </div>
+                                            <div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => { const mo = i+1; const has = dashboardPrimaryPeriod.months.includes(mo); setDashboardPrimaryPeriod(p => ({...p, months: has ? p.months.filter(x => x !== mo) : [...p.months, mo].sort((a,b)=>a-b)})); }} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${dashboardPrimaryPeriod.months.includes(i+1) ? 'bg-mcsystem-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{m}</button>))}</div>
+                                            <div className="flex justify-between text-xs text-mcsystem-600">
+                                                <button onClick={() => setDashboardPrimaryPeriod(p => ({...p, months: [1,2,3,4,5,6,7,8,9,10,11,12]}))} className="hover:underline">Selecionar Todos</button>
+                                                <button onClick={() => setDashboardPrimaryPeriod(p => ({...p, months: []}))} className="text-red-500 hover:underline">Limpar</button>
+                                            </div>
+                                        </div>
+                                        <div className="h-px bg-gray-200 my-3"></div>
+                                        <div className="flex items-center justify-between mb-3">
+                                            <label className="flex items-center cursor-pointer">
+                                                <input type="checkbox" checked={isDashboardCompareEnabled} onChange={() => setIsDashboardCompareEnabled(!isDashboardCompareEnabled)} className="sr-only peer"/>
+                                                <div className="relative w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-mcsystem-500"></div>
+                                                <span className="ms-2 text-sm font-medium text-gray-700">Comparar com outro período</span>
+                                            </label>
+                                        </div>
+                                        {isDashboardCompareEnabled && (
+                                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 animate-in slide-in-from-top-2">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <label className="text-xs font-bold text-gray-500 uppercase">Período Comparativo</label>
+                                                    <select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white" value={dashboardComparePeriod.year} onChange={e => setDashboardComparePeriod({...dashboardComparePeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select>
+                                                </div>
+                                                <div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => { const mo = i+1; const has = dashboardComparePeriod.months.includes(mo); setDashboardComparePeriod(p => ({...p, months: has ? p.months.filter(x => x !== mo) : [...p.months, mo].sort((a,b)=>a-b)})); }} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${dashboardComparePeriod.months.includes(i+1) ? 'bg-purple-500 text-white' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-100'}`}>{m}</button>))}</div>
+                                                <div className="flex justify-between text-xs">
+                                                    <button onClick={() => setDashboardComparePeriod(p => ({...p, months: [...dashboardPrimaryPeriod.months]}))} className="text-purple-600 hover:underline flex items-center"><Copy size={10} className="mr-1"/> Copiar Principal</button>
+                                                    <button onClick={() => setDashboardComparePeriod(p => ({...p, months: [1,2,3,4,5,6,7,8,9,10,11,12]}))} className="text-purple-600 hover:underline">Todos</button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                            {isDashboardCompareEnabled && dashboardChartsData.compare && (
+                                <span className="text-xs bg-purple-500/20 text-purple-200 border border-purple-400/30 px-2 py-1 rounded-full font-medium">
+                                    vs {dashboardComparePeriod.months.length === 1 ? `${monthNames[dashboardComparePeriod.months[0]-1]} ${dashboardComparePeriod.year}` : `${dashboardComparePeriod.months.length} meses / ${dashboardComparePeriod.year}`}
+                                </span>
+                            )}
+                            <button onClick={handleGenerateInsight} className="flex items-center gap-2 bg-cyan-500 hover:bg-cyan-400 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all shadow-lg shadow-cyan-500/30">
+                                <Bot size={14} /> Análise IA
+                            </button>
+                        </div>
+                    </div>
+                    {/* Insight IA inline */}
+                    {(loadingInsight || insight) && (
+                        <div className="relative mt-4 bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-blue-100 leading-relaxed">
+                            {loadingInsight ? <span className="flex items-center gap-2"><span className="animate-spin">⏳</span> Analisando dados...</span> : insight}
+                        </div>
+                    )}
+                </div>
+
+                {/* ── KPIs PREMIUM ── */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    {/* Receitas */}
+                    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <p className="text-[11px] font-bold text-green-600 uppercase tracking-widest">Receita Realizada</p>
+                                {isDashboardCompareEnabled && dashboardChartsData.compare && dashboardChartsData.deltaIncome !== null && (
+                                    <span className={`text-[10px] font-bold flex items-center mt-0.5 ${(dashboardChartsData.deltaIncome ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                        {(dashboardChartsData.deltaIncome ?? 0) >= 0 ? '↑' : '↓'} {Math.abs(dashboardChartsData.deltaIncome).toFixed(1)}%
+                                    </span>
+                                )}
+                            </div>
+                            <div className="w-9 h-9 rounded-lg bg-green-50 flex items-center justify-center"><DollarSign size={18} className="text-green-500" /></div>
+                        </div>
+                        <p className="text-2xl font-bold text-gray-900 mt-3">R$ {(dashboardChartsData.totalIncome || 0).toLocaleString('pt-BR', {minimumFractionDigits:0})}</p>
+                        <p className="text-xs text-gray-400 mt-1">Despesas: <span className="text-red-500 font-medium">R$ {(dashboardChartsData.totalExpense || 0).toLocaleString('pt-BR', {minimumFractionDigits:0})}</span></p>
+                    </div>
+                    {/* Resultado */}
+                    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <p className={`text-[11px] font-bold uppercase tracking-widest ${dashboardChartsData.balance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>Resultado</p>
+                                {isDashboardCompareEnabled && dashboardChartsData.compare && dashboardChartsData.deltaBalance !== null && (
+                                    <span className={`text-[10px] font-bold flex items-center mt-0.5 ${(dashboardChartsData.deltaBalance ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                        {(dashboardChartsData.deltaBalance ?? 0) >= 0 ? '↑' : '↓'} {Math.abs(dashboardChartsData.deltaBalance).toFixed(1)}%
+                                    </span>
+                                )}
+                            </div>
+                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${dashboardChartsData.balance >= 0 ? 'bg-blue-50' : 'bg-red-50'}`}><Wallet size={18} className={dashboardChartsData.balance >= 0 ? 'text-blue-500' : 'text-red-500'} /></div>
+                        </div>
+                        <p className={`text-2xl font-bold mt-3 ${dashboardChartsData.balance >= 0 ? 'text-gray-900' : 'text-red-600'}`}>R$ {(dashboardChartsData.balance || 0).toLocaleString('pt-BR', {minimumFractionDigits:0})}</p>
+                        <p className="text-xs text-gray-400 mt-1">Saldo Operacional</p>
+                    </div>
+                    {/* Margem */}
+                    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <p className="text-[11px] font-bold text-indigo-600 uppercase tracking-widest">Margem Líquida</p>
+                                {isDashboardCompareEnabled && dashboardChartsData.compare && dashboardChartsData.deltaMargin !== null && (
+                                    <span className={`text-[10px] font-bold flex items-center mt-0.5 ${(dashboardChartsData.deltaMargin ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                        {(dashboardChartsData.deltaMargin ?? 0) >= 0 ? '↑' : '↓'} {Math.abs(dashboardChartsData.deltaMargin).toFixed(1)} p.p.
+                                    </span>
+                                )}
+                            </div>
+                            <div className="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center"><TrendingUp size={18} className="text-indigo-500" /></div>
+                        </div>
+                        <p className={`text-2xl font-bold mt-3 ${(dashboardChartsData.margin || 0) >= 0 ? 'text-gray-900' : 'text-red-600'}`}>{(dashboardChartsData.margin || 0).toFixed(1)}%</p>
+                        <p className="text-xs text-gray-400 mt-1">Resultado / Receita</p>
+                    </div>
+                    {/* Pendentes */}
+                    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                        <div className="flex items-start justify-between">
+                            <div><p className="text-[11px] font-bold text-orange-500 uppercase tracking-widest">A Receber</p></div>
+                            <div className="w-9 h-9 rounded-lg bg-orange-50 flex items-center justify-center"><AlertCircle size={18} className="text-orange-500" /></div>
+                        </div>
+                        <p className="text-2xl font-bold text-gray-900 mt-3">R$ {(dashboardChartsData.totalPendingIncome || 0).toLocaleString('pt-BR', {minimumFractionDigits:0})}</p>
+                        <p className="text-xs text-gray-400 mt-1">A Pagar: <span className="text-red-400 font-medium">R$ {(dashboardChartsData.totalPendingExpense || 0).toLocaleString('pt-BR', {minimumFractionDigits:0})}</span></p>
+                    </div>
+                </div>
+
+                {/* ── SUB-ABAS INTERNAS ── */}
+                <div className="flex gap-1 bg-gray-100 p-1 rounded-xl mb-6 w-fit">
+                    {([{id:'OVERVIEW',label:'Visão Geral',icon:LayoutDashboard},{id:'REVENUE',label:'Receita',icon:TrendingUp},{id:'CLIENTS',label:'Clientes',icon:Users},{id:'PROJECTION',label:'Projeção',icon:Calendar}] as const).map(sub => (
+                        <button key={sub.id} onClick={() => setDashboardSubTab(sub.id)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${ dashboardSubTab === sub.id ? 'bg-white text-mcsystem-700 shadow-sm font-bold' : 'text-gray-500 hover:text-gray-700'}`}>
+                            <sub.icon size={14} />{sub.label}
+                        </button>
+                    ))}
+                </div>
+
+                {/* ── CONTEÚDO DAS SUB-ABAS ── */}
+                <div className="space-y-6">
+
+                {/* VISÃO GERAL */}
+                {dashboardSubTab === 'OVERVIEW' && (<>
+
+                {/* Evolução do Fluxo de Caixa */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <div className="flex items-start justify-between mb-6">
+                        <div>
+                            <h3 className="font-bold text-gray-900 text-base">Evolução do Fluxo de Caixa</h3>
+                            <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Performance Mensal</p>
+                        </div>
+                        {isDashboardCompareEnabled && <span className="text-[10px] text-gray-400 bg-gray-50 px-2 py-1 rounded">barras sólidas = atual · barras claras = comparativo</span>}
+                    </div>
+                    <div className="h-80 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={dashboardChartsData.evolutionData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize:12,fill:'#9ca3af'}} />
+                                <YAxis yAxisId="left" orientation="left" tick={{fontSize:11,fill:'#9ca3af'}} axisLine={false} tickLine={false} />
+                                <YAxis yAxisId="right" orientation="right" tick={{fontSize:11,fill:'#9ca3af'}} axisLine={false} tickLine={false} />
+                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb',boxShadow:'0 4px 6px -1px rgba(0,0,0,0.1)'}} />
+                                <Legend wrapperStyle={{fontSize:'12px'}} />
+                                <Bar yAxisId="left" dataKey="income" name="Receitas" fill="#10b981" barSize={isDashboardCompareEnabled ? 12 : 20} radius={[4,4,0,0]} />
+                                {isDashboardCompareEnabled && <Bar yAxisId="left" dataKey="incomeCompare" name="Receitas (comp.)" fill="#10b981" fillOpacity={0.3} barSize={12} radius={[4,4,0,0]} />}
+                                <Bar yAxisId="left" dataKey="expense" name="Despesas" fill="#ef4444" barSize={isDashboardCompareEnabled ? 12 : 20} radius={[4,4,0,0]} />
+                                {isDashboardCompareEnabled && <Bar yAxisId="left" dataKey="expenseCompare" name="Despesas (comp.)" fill="#ef4444" fillOpacity={0.3} barSize={12} radius={[4,4,0,0]} />}
+                                <Line yAxisId="right" type="monotone" dataKey="accBalance" name="Saldo Acumulado" stroke="#3b82f6" strokeWidth={2.5} dot={{r:3,fill:'#3b82f6'}} />
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* Grid: Receita por Tipo + Despesas por Categoria */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <div className="mb-4">
+                            <h3 className="font-bold text-gray-900 text-base">Composição da Receita</h3>
+                            <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Por Tipo de Receita</p>
+                        </div>
+                        <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie data={dashboardChartsData.revenueTypeData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
+                                        {dashboardChartsData.revenueTypeData.map((entry, index) => (<Cell key={`cell-rt-${index}`} fill={['#10b981','#3b82f6','#8b5cf6','#f59e0b','#06b6d4','#ec4899'][index % 6]} />))}
+                                    </Pie>
+                                    <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb'}} />
+                                    <Legend wrapperStyle={{fontSize:'12px'}} />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <div className="mb-4">
+                            <h3 className="font-bold text-gray-900 text-base">Composição das Despesas</h3>
+                            <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Por Categoria</p>
+                        </div>
+                        <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie data={dashboardChartsData.categoryData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
+                                        {dashboardChartsData.categoryData.map((entry, index) => (<Cell key={`cell-cat-${index}`} fill={['#ef4444','#f97316','#eab308','#84cc16','#06b6d4','#8b5cf6'][index % 6]} />))}
+                                    </Pie>
+                                    <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb'}} />
+                                    <Legend wrapperStyle={{fontSize:'12px'}} />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Realizado vs Pendente */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <div className="mb-4">
+                        <h3 className="font-bold text-gray-900 text-base">Realizado vs Pendente</h3>
+                        <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Status dos Lançamentos</p>
+                    </div>
+                    <div className="h-48">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={dashboardChartsData.statusData} layout="vertical">
+                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+                                <XAxis type="number" tick={{fontSize:11,fill:'#9ca3af'}} axisLine={false} tickLine={false} />
+                                <YAxis dataKey="name" type="category" width={80} tick={{fontSize:12,fill:'#6b7280'}} axisLine={false} tickLine={false} />
+                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb'}} />
+                                <Legend wrapperStyle={{fontSize:'12px'}} />
+                                <Bar dataKey="Pago" stackId="a" fill="#10b981" radius={[0,4,4,0]} barSize={30} />
+                                <Bar dataKey="Pendente" stackId="a" fill="#f59e0b" radius={[0,4,4,0]} barSize={30} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* Comparativo de Período */}
+                {isDashboardCompareEnabled && dashboardChartsData.compare && (
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <div className="mb-4">
+                            <h3 className="font-bold text-gray-900 text-base">Comparativo de Período</h3>
+                            <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">{dashboardPrimaryPeriod.year} vs {dashboardComparePeriod.year}</p>
+                        </div>
+                        <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={[
+                                    { name: 'Receitas', atual: dashboardChartsData.totalIncome, comparativo: dashboardChartsData.compare.totalIncome },
+                                    { name: 'Despesas', atual: dashboardChartsData.totalExpense, comparativo: dashboardChartsData.compare.totalExpense },
+                                    { name: 'Resultado', atual: dashboardChartsData.balance, comparativo: dashboardChartsData.compare.balance },
+                                ]} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize:12,fill:'#6b7280'}} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#9ca3af'}} />
+                                    <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb'}} />
+                                    <Legend wrapperStyle={{fontSize:'12px'}} />
+                                    <Bar dataKey="atual" name={`${dashboardPrimaryPeriod.year}`} fill="#3b82f6" radius={[4,4,0,0]} barSize={40} />
+                                    <Bar dataKey="comparativo" name={`${dashboardComparePeriod.year} (comp.)`} fill="#8b5cf6" fillOpacity={0.7} radius={[4,4,0,0]} barSize={40} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                )}
+
+                </>)}
+
+                {/* ABA RECEITA */}
+                {dashboardSubTab === 'REVENUE' && (<>
+
+                {dashboardChartsData.revenueTypeMonthlyData.length > 0 && dashboardChartsData.allRevenueTypeNames.length > 0 && (
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <div className="mb-4">
+                            <h3 className="font-bold text-gray-900 text-base">Receita por Tipo de Receita</h3>
+                            <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Evolução Mensal por Categoria</p>
+                        </div>
+                        <div className="h-72">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={dashboardChartsData.revenueTypeMonthlyData} margin={{top:5,right:10,left:0,bottom:5}}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                                    <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize:12,fill:'#9ca3af'}} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#9ca3af'}} />
+                                    <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb'}} />
+                                    <Legend wrapperStyle={{fontSize:'12px'}} />
+                                    {dashboardChartsData.allRevenueTypeNames.map((name, i) => (
+                                        <Bar key={name} dataKey={name} stackId="rt" fill={['#10b981','#3b82f6','#8b5cf6','#f59e0b','#06b6d4','#ec4899'][i % 6]} radius={i === dashboardChartsData.allRevenueTypeNames.length - 1 ? [4,4,0,0] : [0,0,0,0]} />
+                                    ))}
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                )}
+
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <div className="mb-4">
+                        <h3 className="font-bold text-gray-900 text-base">Receita Acumulada no Ano</h3>
+                        <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">{dashboardPrimaryPeriod.year} — Mensal e Acumulado</p>
+                    </div>
+                    <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={dashboardChartsData.accumulatedIncomeData} margin={{top:5,right:10,left:0,bottom:5}}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize:12,fill:'#9ca3af'}} />
+                                <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#9ca3af'}} />
+                                <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#9ca3af'}} />
+                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb'}} />
+                                <Legend wrapperStyle={{fontSize:'12px'}} />
+                                <Bar yAxisId="left" dataKey="mensal" name="Receita Mensal" fill="#10b981" fillOpacity={0.5} barSize={20} radius={[4,4,0,0]} />
+                                <Line yAxisId="right" type="monotone" dataKey="acumulado" name="Acumulado no Ano" stroke="#3b82f6" strokeWidth={2.5} dot={{r:4,fill:'#3b82f6'}} />
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <div className="mb-4">
+                        <h3 className="font-bold text-gray-900 text-base">Inadimplência — Receitas por Status</h3>
+                        <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Pago · Pendente · Atrasado</p>
+                    </div>
+                    <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={dashboardChartsData.overdueData} margin={{top:5,right:10,left:0,bottom:5}}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize:12,fill:'#9ca3af'}} />
+                                <YAxis axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#9ca3af'}} />
+                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb'}} />
+                                <Legend wrapperStyle={{fontSize:'12px'}} />
+                                <Bar dataKey="pago" name="Pago" stackId="s" fill="#10b981" />
+                                <Bar dataKey="pendente" name="Pendente" stackId="s" fill="#f59e0b" />
+                                <Bar dataKey="atrasado" name="Atrasado" stackId="s" fill="#ef4444" radius={[4,4,0,0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <div className="mb-4">
+                        <h3 className="font-bold text-gray-900 text-base">Margem Líquida por Mês</h3>
+                        <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Resultado / Receita (%)</p>
+                    </div>
+                    <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={dashboardChartsData.marginMonthlyData} margin={{top:5,right:10,left:0,bottom:5}}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize:12,fill:'#9ca3af'}} />
+                                <YAxis tickFormatter={(v) => `${v}%`} axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#9ca3af'}} />
+                                <Tooltip formatter={(value: any) => `${(value || 0).toFixed(1)}%`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb'}} />
+                                <Legend wrapperStyle={{fontSize:'12px'}} />
+                                <ReferenceLine y={0} stroke="#e5e7eb" strokeDasharray="4 4" />
+                                <Area type="monotone" dataKey="margem" name="Margem (%)" stroke="#6366f1" fill="#6366f1" fillOpacity={0.1} strokeWidth={2} dot={{r:4}} />
+                                {isDashboardCompareEnabled && <Line type="monotone" dataKey="margemCompare" name="Margem Comp. (%)" stroke="#8b5cf6" strokeDasharray="5 5" strokeWidth={2} dot={{r:3}} />}
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                </>)}
+
+                {/* ABA CLIENTES */}
+                {dashboardSubTab === 'CLIENTS' && (<>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {dashboardChartsData.topClientsData.length > 0 ? (
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <div className="mb-4">
+                                <h3 className="font-bold text-gray-900 text-base">Top Clientes por Receita</h3>
+                                <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Maiores Pagadores do Período</p>
+                            </div>
+                            <div className="h-72">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={dashboardChartsData.topClientsData} layout="vertical" margin={{top:0,right:20,left:0,bottom:0}}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+                                        <XAxis type="number" tickFormatter={(v) => `R$${(v/1000).toFixed(0)}k`} axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#9ca3af'}} />
+                                        <YAxis dataKey="name" type="category" width={120} tick={{fontSize:11,fill:'#374151'}} axisLine={false} tickLine={false} />
+                                        <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb'}} />
+                                        <Bar dataKey="value" name="Receita" radius={[0,4,4,0]} barSize={22}>
+                                            {dashboardChartsData.topClientsData.map((_, index) => <Cell key={`c-${index}`} fill={`hsl(${160 - index * 12}, 70%, ${45 + index * 3}%)`} />)}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center justify-center h-48">
+                            <p className="text-gray-400 text-sm">Nenhum cliente vinculado aos lançamentos do período</p>
+                        </div>
+                    )}
+                    {dashboardChartsData.topSuppliersData.length > 0 ? (
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <div className="mb-4">
+                                <h3 className="font-bold text-gray-900 text-base">Top Fornecedores por Despesa</h3>
+                                <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Maiores Gastos do Período</p>
+                            </div>
+                            <div className="h-72">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={dashboardChartsData.topSuppliersData} layout="vertical" margin={{top:0,right:20,left:0,bottom:0}}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+                                        <XAxis type="number" tickFormatter={(v) => `R$${(v/1000).toFixed(0)}k`} axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#9ca3af'}} />
+                                        <YAxis dataKey="name" type="category" width={120} tick={{fontSize:11,fill:'#374151'}} axisLine={false} tickLine={false} />
+                                        <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb'}} />
+                                        <Bar dataKey="value" name="Despesa" radius={[0,4,4,0]} barSize={22}>
+                                            {dashboardChartsData.topSuppliersData.map((_, index) => <Cell key={`s-${index}`} fill={`hsl(${0 + index * 8}, 70%, ${50 + index * 2}%)`} />)}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center justify-center h-48">
+                            <p className="text-gray-400 text-sm">Nenhum fornecedor vinculado aos lançamentos do período</p>
+                        </div>
+                    )}
+                </div>
+
+                </>)}
+
+                {/* ABA PROJEÇÃO */}
+                {dashboardSubTab === 'PROJECTION' && (<>
+
+                {dashboardChartsData.futureDueData.length > 0 ? (
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <div className="mb-4">
+                            <h3 className="font-bold text-gray-900 text-base">Vencimentos Pendentes — Próximos 60 Dias</h3>
+                            <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">A Receber e A Pagar por Semana</p>
+                        </div>
+                        <div className="h-72">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={dashboardChartsData.futureDueData} margin={{top:5,right:10,left:0,bottom:5}}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                                    <XAxis dataKey="week" axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#9ca3af'}} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#9ca3af'}} />
+                                    <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} contentStyle={{borderRadius:'8px',border:'1px solid #e5e7eb'}} />
+                                    <Legend wrapperStyle={{fontSize:'12px'}} />
+                                    <Bar dataKey="receita" name="A Receber" fill="#10b981" radius={[4,4,0,0]} barSize={28} />
+                                    <Bar dataKey="despesa" name="A Pagar" fill="#f97316" radius={[4,4,0,0]} barSize={28} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="bg-white p-12 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center">
+                        <Calendar size={40} className="text-gray-200 mb-3" />
+                        <p className="text-gray-500 font-medium">Nenhum vencimento pendente nos próximos 60 dias</p>
+                        <p className="text-gray-400 text-sm mt-1">Todos os lançamentos estão pagos ou não há lançamentos futuros cadastrados</p>
+                    </div>
+                )}
+
+                </>)}
+
+                </div>{/* fim space-y-6 sub-abas */}
+            </div>
+        )}
+
+        {activeTab === 'RECONCILIATION' && renderUnifiedTransactions()}
+        {activeTab === 'DRE' && renderHierarchicalReport('DRE')}
+        {activeTab === 'CASHFLOW' && renderHierarchicalReport('CASHFLOW')}
+        {activeTab === 'COA' && renderCOA()}
+        {activeTab === 'VALIDATION' && renderTransactionTable(undefined, true)}
+        {activeTab === 'CASH_EVOLUTION' && <CashEvolutionByBank records={records} banks={banks} />}
+
+        {isDrillDownOpen && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[80] p-4 backdrop-blur-sm"><div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col animate-in zoom-in-95 duration-200"><div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center rounded-t-xl"><h3 className="font-bold text-gray-800 flex items-center"><List size={18} className="mr-2 text-mcsystem-500" /> Detalhes: {drillDownTitle}</h3><button onClick={() => setIsDrillDownOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button></div><div className="flex-1 overflow-y-auto p-4 bg-gray-50/50">{renderTransactionTable(drillDownRecords)}</div></div></div>)}
+        
                         {/* Seletor de Período Principal */}
                         <div className="relative" ref={dashboardPeriodMenuRef}>
                             <button onClick={() => setIsDashboardPeriodMenuOpen(!isDashboardPeriodMenuOpen)} className="px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg font-medium flex items-center shadow-sm hover:bg-gray-50 text-gray-700">
@@ -2616,183 +3074,9 @@ const newRecords: FinancialRecord[] = [];
                     </div>
                 )}
 
-                {/* Realizado vs Pendente */}
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                    <h3 className="font-bold text-gray-800 mb-4">Realizado vs Pendente</h3>
-                    <div className="h-48">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={dashboardChartsData.statusData} layout="vertical">
-                                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                                <XAxis type="number" />
-                                <YAxis dataKey="name" type="category" width={80} />
-                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
-                                <Legend />
-                                <Bar dataKey="Pago" stackId="a" fill="#10b981" radius={[0,4,4,0]} barSize={30} />
-                                <Bar dataKey="Pendente" stackId="a" fill="#f59e0b" radius={[0,4,4,0]} barSize={30} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
 
-                {/* ──── SEÇÃO: ANÁLISE DE RECEITA ──── */}
-                <div className="border-t border-gray-100 pt-2">
-                    <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center"><TrendingUp size={14} className="mr-2 text-green-500" /> Análise de Receita</h2>
-                </div>
 
-                {/* Receita por Tipo — Barras Mensais */}
-                {dashboardChartsData.revenueTypeMonthlyData.length > 0 && dashboardChartsData.allRevenueTypeNames.length > 0 && (
-                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                        <h3 className="font-bold text-gray-800 mb-4 flex items-center"><BarChart3 size={16} className="mr-2 text-green-500" /> Receita por Tipo de Receita (Mensal)</h3>
-                        <div className="h-72">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={dashboardChartsData.revenueTypeMonthlyData} margin={{top:5,right:10,left:0,bottom:5}}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                    <XAxis dataKey="month" axisLine={false} tickLine={false} />
-                                    <YAxis />
-                                    <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
-                                    <Legend />
-                                    {dashboardChartsData.allRevenueTypeNames.map((name, i) => (
-                                        <Bar key={name} dataKey={name} stackId="rt" fill={['#10b981','#3b82f6','#8b5cf6','#f59e0b','#06b6d4','#ec4899'][i % 6]} radius={i === dashboardChartsData.allRevenueTypeNames.length - 1 ? [4,4,0,0] : [0,0,0,0]} />
-                                    ))}
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                )}
 
-                {/* Receita Acumulada no Ano */}
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                    <h3 className="font-bold text-gray-800 mb-4 flex items-center"><TrendingUp size={16} className="mr-2 text-blue-500" /> Receita Acumulada no Ano ({dashboardPrimaryPeriod.year})</h3>
-                    <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <ComposedChart data={dashboardChartsData.accumulatedIncomeData} margin={{top:5,right:10,left:0,bottom:5}}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                <XAxis dataKey="month" axisLine={false} tickLine={false} />
-                                <YAxis yAxisId="left" />
-                                <YAxis yAxisId="right" orientation="right" />
-                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
-                                <Legend />
-                                <Bar yAxisId="left" dataKey="mensal" name="Receita Mensal" fill="#10b981" fillOpacity={0.5} barSize={20} radius={[4,4,0,0]} />
-                                <Line yAxisId="right" type="monotone" dataKey="acumulado" name="Acumulado no Ano" stroke="#3b82f6" strokeWidth={3} dot={{r:4}} />
-                            </ComposedChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-
-                {/* Inadimplência / Atraso */}
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                    <h3 className="font-bold text-gray-800 mb-4 flex items-center"><AlertCircle size={16} className="mr-2 text-orange-500" /> Inadimplência — Receitas por Status</h3>
-                    <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={dashboardChartsData.overdueData} margin={{top:5,right:10,left:0,bottom:5}}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                <XAxis dataKey="month" axisLine={false} tickLine={false} />
-                                <YAxis />
-                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
-                                <Legend />
-                                <Bar dataKey="pago" name="Pago" stackId="s" fill="#10b981" radius={[0,0,0,0]} />
-                                <Bar dataKey="pendente" name="Pendente" stackId="s" fill="#f59e0b" radius={[0,0,0,0]} />
-                                <Bar dataKey="atrasado" name="Atrasado" stackId="s" fill="#ef4444" radius={[4,4,0,0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-
-                {/* Margem Líquida por Mês */}
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                    <h3 className="font-bold text-gray-800 mb-4 flex items-center"><TrendingUp size={16} className="mr-2 text-indigo-500" /> Margem Líquida por Mês (%)</h3>
-                    <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <ComposedChart data={dashboardChartsData.marginMonthlyData} margin={{top:5,right:10,left:0,bottom:5}}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                <XAxis dataKey="month" axisLine={false} tickLine={false} />
-                                <YAxis tickFormatter={(v) => `${v}%`} />
-                                <Tooltip formatter={(value: any) => `${(value || 0).toFixed(1)}%`} />
-                                <Legend />
-                                <ReferenceLine y={0} stroke="#e5e7eb" strokeDasharray="4 4" />
-                                <Area type="monotone" dataKey="margem" name="Margem (%)" stroke="#6366f1" fill="#6366f1" fillOpacity={0.1} strokeWidth={2} dot={{r:4}} />
-                                {isDashboardCompareEnabled && <Line type="monotone" dataKey="margemCompare" name="Margem Comp. (%)" stroke="#8b5cf6" strokeDasharray="5 5" strokeWidth={2} dot={{r:3}} />}
-                            </ComposedChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-
-                {/* ──── SEÇÃO: CLIENTES E FORNECEDORES ──── */}
-                {(dashboardChartsData.topClientsData.length > 0 || dashboardChartsData.topSuppliersData.length > 0) && (
-                    <>
-                        <div className="border-t border-gray-100 pt-2">
-                            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center"><Building size={14} className="mr-2 text-blue-500" /> Clientes e Fornecedores</h2>
-                        </div>
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            {/* Top Clientes */}
-                            {dashboardChartsData.topClientsData.length > 0 && (
-                                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                                    <h3 className="font-bold text-gray-800 mb-4 flex items-center"><Users size={16} className="mr-2 text-green-500" /> Top Clientes por Receita</h3>
-                                    <div className="h-64">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart data={dashboardChartsData.topClientsData} layout="vertical" margin={{top:0,right:20,left:0,bottom:0}}>
-                                                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                                                <XAxis type="number" tickFormatter={(v) => `R$${(v/1000).toFixed(0)}k`} />
-                                                <YAxis dataKey="name" type="category" width={110} tick={{fontSize:11}} />
-                                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
-                                                <Bar dataKey="value" name="Receita" fill="#10b981" radius={[0,4,4,0]} barSize={20}>
-                                                    {dashboardChartsData.topClientsData.map((_, index) => <Cell key={`c-${index}`} fill={`hsl(${160 - index * 12}, 70%, ${45 + index * 3}%)`} />)}
-                                                </Bar>
-                                            </BarChart>
-                                        </ResponsiveContainer>
-                                    </div>
-                                </div>
-                            )}
-                            {/* Top Fornecedores */}
-                            {dashboardChartsData.topSuppliersData.length > 0 && (
-                                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                                    <h3 className="font-bold text-gray-800 mb-4 flex items-center"><Building size={16} className="mr-2 text-red-400" /> Top Fornecedores por Despesa</h3>
-                                    <div className="h-64">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart data={dashboardChartsData.topSuppliersData} layout="vertical" margin={{top:0,right:20,left:0,bottom:0}}>
-                                                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                                                <XAxis type="number" tickFormatter={(v) => `R$${(v/1000).toFixed(0)}k`} />
-                                                <YAxis dataKey="name" type="category" width={110} tick={{fontSize:11}} />
-                                                <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
-                                                <Bar dataKey="value" name="Despesa" fill="#ef4444" radius={[0,4,4,0]} barSize={20}>
-                                                    {dashboardChartsData.topSuppliersData.map((_, index) => <Cell key={`s-${index}`} fill={`hsl(${0 + index * 8}, 70%, ${50 + index * 2}%)`} />)}
-                                                </Bar>
-                                            </BarChart>
-                                        </ResponsiveContainer>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </>
-                )}
-
-                {/* ──── SEÇÃO: PROJEÇÃO FUTURA ──── */}
-                {dashboardChartsData.futureDueData.length > 0 && (
-                    <>
-                        <div className="border-t border-gray-100 pt-2">
-                            <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center"><Calendar size={14} className="mr-2 text-orange-500" /> Projeção Futura</h2>
-                        </div>
-                        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                            <h3 className="font-bold text-gray-800 mb-4 flex items-center"><Calendar size={16} className="mr-2 text-orange-500" /> Vencimentos Pendentes — Próximos 60 Dias (por semana)</h3>
-                            <div className="h-64">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={dashboardChartsData.futureDueData} margin={{top:5,right:10,left:0,bottom:5}}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                        <XAxis dataKey="week" axisLine={false} tickLine={false} tick={{fontSize:11}} />
-                                        <YAxis />
-                                        <Tooltip formatter={(value: any) => `R$ ${(value || 0).toLocaleString('pt-BR')}`} />
-                                        <Legend />
-                                        <Bar dataKey="receita" name="A Receber" fill="#10b981" radius={[4,4,0,0]} barSize={24} />
-                                        <Bar dataKey="despesa" name="A Pagar" fill="#f97316" radius={[4,4,0,0]} barSize={24} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </div>
-                        </div>
-                    </>
-                )}
-
-                {/* Análise IA */}
-                <div className="bg-gradient-to-br from-mcsystem-900 to-blue-900 text-white p-6 rounded-lg shadow-lg relative overflow-hidden"><div className="absolute right-0 top-0 p-4 opacity-20"><Bot size={48} /></div><p className="text-blue-200 text-xs font-bold uppercase tracking-wide mb-2 flex items-center"><Bot size={14} className="mr-1" /> Análise IA</p><div className="h-20 overflow-y-auto text-sm text-blue-50 leading-relaxed scrollbar-hide">{loadingInsight ? (<span className="flex items-center"><span className="animate-spin mr-2">⏳</span> Analisando dados...</span>) : insight ? insight : (<button onClick={handleGenerateInsight} className="underline hover:text-white transition-colors text-left">Clique para gerar uma análise financeira inteligente baseada nos seus dados recentes.</button>)}</div></div>
             </div>
         )}
 

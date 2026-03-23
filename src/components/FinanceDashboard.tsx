@@ -106,6 +106,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<MainTab>('RECONCILIATION');
   const [reportViewMode, setReportViewMode] = useState<ReportViewMode>('SUMMARY');
+  const [cashflowViewMode, setCashflowViewMode] = useState<'COA' | 'REVENUE_TYPE'>('COA');
   
   // --- View Options & Advanced Filtering ---
   const [hideEmptyRows, setHideEmptyRows] = useState(true);
@@ -1736,6 +1737,39 @@ const newRecords: FinancialRecord[] = [];
           return vals;
       };
 
+      // Helper: calculate cashflow value for a revenue type (uses payment/due date, not competence)
+      const calculateValueForRevenueTypeCashflow = (revenueTypeId: string, keys: string[]) => {
+          const vals: Record<string, number> = {};
+          keys.forEach(key => {
+              let totalForMonth = 0;
+              const monthRecords = validRecords.filter(r => {
+                  if (r.type !== TransactionType.INCOME) return false;
+                  if (!includeProjections && r.status !== TransactionStatus.PAID) return false;
+                  let rDate = '';
+                  if (includeProjections) {
+                      rDate = r.dueDate || r.competenceDate || '';
+                  } else if (r.status === TransactionStatus.PAID) {
+                      rDate = r.paymentDate || r.dueDate || r.competenceDate || '';
+                  } else { return false; }
+                  return rDate.startsWith(key);
+              });
+              monthRecords.forEach(record => {
+                  if (record.split_revenue && record.split_revenue.length > 0) {
+                      const relevantSplitAmount = record.split_revenue
+                          .filter(split => split.revenue_type_id === revenueTypeId)
+                          .reduce((sum, split) => sum + split.amount, 0);
+                      totalForMonth += relevantSplitAmount;
+                  } else {
+                      if (record.revenueTypeId === revenueTypeId) {
+                          totalForMonth += record.amount;
+                      }
+                  }
+              });
+              vals[key] = totalForMonth;
+          });
+          return vals;
+      };
+
       if (mode === 'CASHFLOW') {
         const inflowNode = { code: 'INFLOW', name: 'TOTAL ENTRADAS', type: 'ROOT', values: {}, prevValues: {}, children: [] as any[] };
         const outflowNode = { code: 'OUTFLOW', name: 'TOTAL SAÍDAS', type: 'ROOT', values: {}, prevValues: {}, children: [] as any[] };
@@ -1743,6 +1777,19 @@ const newRecords: FinancialRecord[] = [];
         const inflowCenters = uniqueCenters.filter(c => c.classificationCode === '1').sort((a,b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
         const outflowCenters = uniqueCenters.filter(c => c.classificationCode !== '1').sort((a,b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
         
+        if (cashflowViewMode === 'REVENUE_TYPE') {
+            // REVENUE_TYPE mode: group inflows by revenue type (cash-based dates)
+            revenueTypes.forEach(rt => {
+                const rtNode = {
+                    code: rt.id,
+                    name: rt.name,
+                    type: 'RUBRIC',
+                    values: calculateValueForRevenueTypeCashflow(rt.id, primaryKeys),
+                    prevValues: calculateValueForRevenueTypeCashflow(rt.id, compareKeys)
+                };
+                inflowNode.children.push(rtNode);
+            });
+        } else {
         inflowCenters.forEach(center => {
             const centerNode: any = { code: center.code, name: center.name, type: 'CENTER', values: {}, prevValues: {}, children: [] };
             
@@ -1762,6 +1809,7 @@ const newRecords: FinancialRecord[] = [];
             compareKeys.forEach(k => { centerNode.prevValues[k] = centerNode.children.reduce((acc, child) => acc + (child.prevValues[k] || 0), 0); });
             inflowNode.children.push(centerNode);
         });
+        } // end COA mode for inflow
 
         outflowCenters.forEach(center => {
             const centerNode: any = { code: center.code, name: center.name, type: 'CENTER', values: {}, prevValues: {}, children: [] };
@@ -2029,7 +2077,7 @@ const newRecords: FinancialRecord[] = [];
 
       return (
           <div className="space-y-4 animate-in fade-in">
-              <div className="flex flex-col md:flex-row justify-between items-center gap-4"><h3 className="font-bold text-gray-800 text-lg">{mode === 'DRE' ? `DRE Matriz` : `Fluxo de Caixa`}</h3><div className="flex flex-wrap gap-2 items-center"><div className="relative" ref={periodMenuRef}><button onClick={() => setIsPeriodMenuOpen(!isPeriodMenuOpen)} className="px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg font-medium flex items-center shadow-sm hover:bg-gray-50 text-gray-700"><Calendar size={16} className="mr-2 text-mcsystem-500" /> Configurar Período <ChevronDown size={14} className="ml-2 text-gray-400" /></button>{isPeriodMenuOpen && (<div className="absolute top-full right-0 mt-2 w-[400px] bg-white border border-gray-200 rounded-lg shadow-xl z-30 p-4 animate-in fade-in zoom-in-95"><div className="mb-4"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Principal</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={primaryPeriod.year} onChange={e => setPrimaryPeriod({...primaryPeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, false)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${primaryPeriod.months.includes(i + 1) ? 'bg-mcsystem-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{m}</button>))}</div><div className="flex justify-between text-xs text-mcsystem-600"><button onClick={() => selectAllMonths(false)} className="hover:underline">Selecionar Todos</button><button onClick={() => clearMonths(false)} className="text-red-500 hover:underline">Limpar</button></div></div><div className="h-px bg-gray-200 my-4"></div><div className="flex items-center justify-between mb-3"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={isCompareEnabled} onChange={() => setIsCompareEnabled(!isCompareEnabled)} className="sr-only peer"/><div className="relative w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-mcsystem-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-mcsystem-500"></div><span className="ms-2 text-sm font-medium text-gray-700">Comparar com outro período</span></label></div>{isCompareEnabled && (<div className="bg-gray-50 p-3 rounded-lg border border-gray-100 animate-in slide-in-from-top-2"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Comparativo</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none" value={comparePeriod.year} onChange={e => setComparePeriod({...comparePeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, true)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${comparePeriod.months.includes(i + 1) ? 'bg-purple-500 text-white' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-100'}`}>{m}</button>))}</div><div className="flex justify-between text-xs"><button onClick={copyPrimaryToCompare} className="text-purple-600 hover:underline flex items-center"><Copy size={10} className="mr-1"/> Copiar Principal</button><div className="space-x-2"><button onClick={() => selectAllMonths(true)} className="text-purple-600 hover:underline">Todos</button><button onClick={() => clearMonths(true)} className="text-red-500 hover:underline">Limpar</button></div></div></div>)}</div>)}</div><div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><button onClick={() => setIncludeProjections(!includeProjections)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${includeProjections ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{includeProjections ? <CheckSquare size={16} className="mr-2"/> : <Square size={16} className="mr-2"/>}{'Incluir Pendentes'}</button><button onClick={() => setHideEmptyRows(!hideEmptyRows)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${!hideEmptyRows ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{hideEmptyRows ? <Eye size={16} className="mr-2"/> : <EyeOff size={16} className="mr-2"/>}{hideEmptyRows ? 'Mostrar Vazios' : 'Ocultar Vazios'}</button><button onClick={() => setReportViewMode('SUMMARY')} className="px-4 py-2 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 font-medium">Voltar</button><button className="px-4 py-2 text-sm bg-mcsystem-500 text-white rounded-lg flex items-center font-medium shadow-sm hover:bg-mcsystem-400"><Download size={14} className="mr-2"/> Excel</button></div></div>
+              <div className="flex flex-col md:flex-row justify-between items-center gap-4"><h3 className="font-bold text-gray-800 text-lg">{mode === 'DRE' ? `DRE Matriz` : `Fluxo de Caixa`}</h3><div className="flex flex-wrap gap-2 items-center"><div className="relative" ref={periodMenuRef}><button onClick={() => setIsPeriodMenuOpen(!isPeriodMenuOpen)} className="px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg font-medium flex items-center shadow-sm hover:bg-gray-50 text-gray-700"><Calendar size={16} className="mr-2 text-mcsystem-500" /> Configurar Período <ChevronDown size={14} className="ml-2 text-gray-400" /></button>{isPeriodMenuOpen && (<div className="absolute top-full right-0 mt-2 w-[400px] bg-white border border-gray-200 rounded-lg shadow-xl z-30 p-4 animate-in fade-in zoom-in-95"><div className="mb-4"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Principal</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={primaryPeriod.year} onChange={e => setPrimaryPeriod({...primaryPeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, false)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${primaryPeriod.months.includes(i + 1) ? 'bg-mcsystem-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{m}</button>))}</div><div className="flex justify-between text-xs text-mcsystem-600"><button onClick={() => selectAllMonths(false)} className="hover:underline">Selecionar Todos</button><button onClick={() => clearMonths(false)} className="text-red-500 hover:underline">Limpar</button></div></div><div className="h-px bg-gray-200 my-4"></div><div className="flex items-center justify-between mb-3"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={isCompareEnabled} onChange={() => setIsCompareEnabled(!isCompareEnabled)} className="sr-only peer"/><div className="relative w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-mcsystem-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-mcsystem-500"></div><span className="ms-2 text-sm font-medium text-gray-700">Comparar com outro período</span></label></div>{isCompareEnabled && (<div className="bg-gray-50 p-3 rounded-lg border border-gray-100 animate-in slide-in-from-top-2"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Comparativo</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none" value={comparePeriod.year} onChange={e => setComparePeriod({...comparePeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, true)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${comparePeriod.months.includes(i + 1) ? 'bg-purple-500 text-white' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-100'}`}>{m}</button>))}</div><div className="flex justify-between text-xs"><button onClick={copyPrimaryToCompare} className="text-purple-600 hover:underline flex items-center"><Copy size={10} className="mr-1"/> Copiar Principal</button><div className="space-x-2"><button onClick={() => selectAllMonths(true)} className="text-purple-600 hover:underline">Todos</button><button onClick={() => clearMonths(true)} className="text-red-500 hover:underline">Limpar</button></div></div></div>)}</div>)}</div>{mode === 'CASHFLOW' && (<><div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><div className="flex items-center bg-gray-100 rounded-lg p-1 gap-1"><button onClick={() => setCashflowViewMode('COA')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${cashflowViewMode === 'COA' ? 'bg-white text-mcsystem-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Plano de Contas</button><button onClick={() => setCashflowViewMode('REVENUE_TYPE')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${cashflowViewMode === 'REVENUE_TYPE' ? 'bg-white text-mcsystem-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Tipo de Receita</button></div></>)}<div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><button onClick={() => setIncludeProjections(!includeProjections)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${includeProjections ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{includeProjections ? <CheckSquare size={16} className="mr-2"/> : <Square size={16} className="mr-2"/>}{'Incluir Pendentes'}</button><button onClick={() => setHideEmptyRows(!hideEmptyRows)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${!hideEmptyRows ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{hideEmptyRows ? <Eye size={16} className="mr-2"/> : <EyeOff size={16} className="mr-2"/>}{hideEmptyRows ? 'Mostrar Vazios' : 'Ocultar Vazios'}</button><button onClick={() => setReportViewMode('SUMMARY')} className="px-4 py-2 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 font-medium">Voltar</button><button className="px-4 py-2 text-sm bg-mcsystem-500 text-white rounded-lg flex items-center font-medium shadow-sm hover:bg-mcsystem-400"><Download size={14} className="mr-2"/> Excel</button></div></div>
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
                   <table className="w-full text-xs text-gray-600 whitespace-nowrap table-fixed min-w-[1400px]">
                       <thead className="bg-gray-100 text-gray-600 font-bold uppercase tracking-wider text-[10px]">

@@ -1592,11 +1592,11 @@ const newRecords: FinancialRecord[] = [];
           if (!rDate || !rDate.startsWith(dateKey)) return false;
 
           if (node.type === 'ROOT') {
-              if (node.code === 'INFLOW') return r.type === TransactionType.INCOME;
-              if (node.code === 'OUTFLOW') return r.type === TransactionType.EXPENSE;
+              if (node.code === 'INFLOW') return r.amount >= 0;
+              if (node.code === 'OUTFLOW') return r.amount < 0;
           } else if (node.type === 'CLASSIFICATION') {
               if (mode === 'DRE' && node.code === '1') {
-                  return r.type === TransactionType.INCOME;
+                  return r.amount >= 0;
               }
               const rubric = chartOfAccounts.find(c => c.id === r.rubricId);
               return rubric && rubric.classificationCode === node.code;
@@ -1604,7 +1604,7 @@ const newRecords: FinancialRecord[] = [];
               const rubric = chartOfAccounts.find(c => c.id === r.rubricId);
               return rubric && rubric.centerCode === node.code;
           } else if (node.type === 'RUBRIC') {
-              if (mode === 'DRE' && r.type === TransactionType.INCOME) {
+              if (mode === 'DRE' && r.amount >= 0) {
                   return r.revenueTypeId === node.code;
               }
               const rubric = chartOfAccounts.find(c => c.id === r.rubricId);
@@ -1639,27 +1639,29 @@ const newRecords: FinancialRecord[] = [];
           });
           filtered.forEach(r => {
               const key = r.dueDate.slice(0, 7);
+              const amt = r.amount; // Valor direto do lançamento, respeitando o sinal
+              const isPositive = amt >= 0;
               if (r.status === TransactionStatus.PAID) {
-                  if (monthMap.has(key)) { const entry = monthMap.get(key)!; if (r.type === TransactionType.INCOME) entry.income += r.amount; else entry.expense += Math.abs(r.amount); entry.balance = entry.income - entry.expense; }
-                  if (r.type === TransactionType.INCOME) {
-                      totalIncome += r.amount;
+                  if (monthMap.has(key)) { const entry = monthMap.get(key)!; if (isPositive) entry.income += amt; else entry.expense += Math.abs(amt); entry.balance = entry.income - entry.expense; }
+                  if (isPositive) {
+                      totalIncome += amt;
                       // Revenue type breakdown
                       if (r.split_revenue && r.split_revenue.length > 0) {
                           r.split_revenue.forEach(split => {
                               const rtName = revenueTypes.find(rt => rt.id === split.revenue_type_id)?.name || 'Outros';
-                              revenueTypeMap.set(rtName, (revenueTypeMap.get(rtName) || 0) + split.amount);
+                              revenueTypeMap.set(rtName, (revenueTypeMap.get(rtName) || 0) + Math.abs(split.amount));
                           });
                       } else {
                           const rtName = revenueTypes.find(rt => rt.id === r.revenueTypeId)?.name || 'Receita';
-                          revenueTypeMap.set(rtName, (revenueTypeMap.get(rtName) || 0) + r.amount);
+                          revenueTypeMap.set(rtName, (revenueTypeMap.get(rtName) || 0) + amt);
                       }
                   } else {
                       const catName = r.category || 'Outros';
-                      categoryMap.set(catName, (categoryMap.get(catName) || 0) + Math.abs(r.amount));
+                      categoryMap.set(catName, (categoryMap.get(catName) || 0) + Math.abs(amt));
                   }
               }
               if (r.status !== TransactionStatus.PAID) {
-                  if (r.type === TransactionType.INCOME) totalPendingIncome += r.amount; else totalPendingExpense += Math.abs(r.amount);
+                  if (isPositive) totalPendingIncome += amt; else totalPendingExpense += Math.abs(amt);
               }
           });
           const evolutionData = Array.from(monthMap.values()).map(d => { accumulatedBalance += d.balance; return { ...d, accBalance: accumulatedBalance }; });
@@ -1693,7 +1695,7 @@ const newRecords: FinancialRecord[] = [];
       const primaryKeys = dashboardPrimaryPeriod.months.map(m => `${dashboardPrimaryPeriod.year}-${String(m).padStart(2,'0')}`);
       primaryKeys.forEach(k => revenueTypeMonthlyMap.set(k, new Map()));
       validRecords.filter(r => {
-          if (!r.dueDate || r.type !== TransactionType.INCOME || r.status !== TransactionStatus.PAID) return false;
+          if (!r.dueDate || r.amount <= 0 || r.status !== TransactionStatus.PAID) return false;
           return primaryKeys.includes(r.dueDate.slice(0,7));
       }).forEach(r => {
           const key = r.dueDate.slice(0,7);
@@ -1718,7 +1720,7 @@ const newRecords: FinancialRecord[] = [];
       // 2. Inadimplência / Atraso por mês
       const overdueMap = new Map<string, { month: string, pago: number, atrasado: number, pendente: number }>();
       primaryKeys.forEach(k => overdueMap.set(k, { month: monthNames[parseInt(k.split('-')[1])-1], pago: 0, atrasado: 0, pendente: 0 }));
-      validRecords.filter(r => r.type === TransactionType.INCOME && primaryKeys.includes(r.dueDate?.slice(0,7) || '')).forEach(r => {
+      validRecords.filter(r => r.amount > 0 && primaryKeys.includes(r.dueDate?.slice(0,7) || '')).forEach(r => {
           const key = r.dueDate.slice(0,7);
           const entry = overdueMap.get(key);
           if (!entry) return;
@@ -1730,7 +1732,7 @@ const newRecords: FinancialRecord[] = [];
 
       // 3. Top 7 Clientes por Receita
       const clientIncomeMap = new Map<string, number>();
-      validRecords.filter(r => r.type === TransactionType.INCOME && r.status === TransactionStatus.PAID && r.companyId && primaryKeys.includes(r.dueDate?.slice(0,7) || '')).forEach(r => {
+      validRecords.filter(r => r.amount > 0 && r.status === TransactionStatus.PAID && r.companyId && primaryKeys.includes(r.dueDate?.slice(0,7) || '')).forEach(r => {
           clientIncomeMap.set(r.companyId!, (clientIncomeMap.get(r.companyId!) || 0) + r.amount);
       });
       const topClientsData = Array.from(clientIncomeMap.entries())
@@ -1739,7 +1741,7 @@ const newRecords: FinancialRecord[] = [];
 
       // 4. Top 7 Fornecedores por Despesa
       const supplierExpenseMap = new Map<string, number>();
-      validRecords.filter(r => r.type === TransactionType.EXPENSE && r.status === TransactionStatus.PAID && r.companyId && primaryKeys.includes(r.dueDate?.slice(0,7) || '')).forEach(r => {
+      validRecords.filter(r => r.amount < 0 && r.status === TransactionStatus.PAID && r.companyId && primaryKeys.includes(r.dueDate?.slice(0,7) || '')).forEach(r => {
           supplierExpenseMap.set(r.companyId!, (supplierExpenseMap.get(r.companyId!) || 0) + Math.abs(r.amount));
       });
       const topSuppliersData = Array.from(supplierExpenseMap.entries())
@@ -1762,7 +1764,7 @@ const newRecords: FinancialRecord[] = [];
           const weekIdx = String(Math.floor(diffDays / 7));
           const entry = weeklyDueMap.get(weekIdx);
           if (!entry) return;
-          if (r.type === TransactionType.INCOME) entry.receita += r.amount;
+          if (r.amount >= 0) entry.receita += r.amount;
           else entry.despesa += Math.abs(r.amount);
       });
       const futureDueData = Array.from(weeklyDueMap.values()).filter(d => d.receita > 0 || d.despesa > 0);
@@ -1782,7 +1784,7 @@ const newRecords: FinancialRecord[] = [];
       let accIncome = 0;
       const accumulatedIncomeData = yearMonths.map(m => {
           const key = `${dashboardPrimaryPeriod.year}-${String(m).padStart(2,'0')}`;
-          const monthIncome = validRecords.filter(r => r.type === TransactionType.INCOME && r.status === TransactionStatus.PAID && r.dueDate?.startsWith(key)).reduce((s, r) => s + r.amount, 0);
+          const monthIncome = validRecords.filter(r => r.amount > 0 && r.status === TransactionStatus.PAID && r.dueDate?.startsWith(key)).reduce((s, r) => s + r.amount, 0);
           accIncome += monthIncome;
           return { month: monthNames[m-1], acumulado: accIncome, mensal: monthIncome };
       });
@@ -1852,7 +1854,7 @@ const newRecords: FinancialRecord[] = [];
               let totalForMonth = 0;
 
               const monthRecords = validRecords.filter(r => {
-                  if (r.type !== TransactionType.INCOME) return false;
+                  if (r.amount <= 0) return false; // Somente lançamentos positivos (entradas)
                   // DRE is competence based
                   const rDate = r.competenceDate || '';
                   return rDate.startsWith(key);
@@ -1884,7 +1886,7 @@ const newRecords: FinancialRecord[] = [];
           keys.forEach(key => {
               let totalForMonth = 0;
               const monthRecords = validRecords.filter(r => {
-                  if (r.type !== TransactionType.INCOME) return false;
+                  if (r.amount <= 0) return false; // Somente lançamentos positivos (entradas)
                   if (!includeProjections && r.status !== TransactionStatus.PAID) return false;
                   let rDate = '';
                   if (includeProjections) {
@@ -2082,8 +2084,8 @@ const newRecords: FinancialRecord[] = [];
                 aValue = banks.find(bank => bank.id === a.bankId)?.name || '';
                 bValue = banks.find(bank => bank.id === b.bankId)?.name || '';
             } else if (sortConfig.key === 'amount') {
-                aValue = a.amount * (a.type === TransactionType.INCOME ? 1 : -1);
-                bValue = b.amount * (b.type === TransactionType.INCOME ? 1 : -1);
+                aValue = a.amount;
+                bValue = b.amount;
             } else {
                 aValue = a[sortConfig.key as keyof FinancialRecord];
                 bValue = b[sortConfig.key as keyof FinancialRecord];

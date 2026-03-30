@@ -1310,12 +1310,18 @@ const newRecords: FinancialRecord[] = [];
             if (!original) return;
             const finalRecord: FinancialRecord = { ...original, ...transactionToSave };
 
+            console.log('[DEBUG EDIT] newRecord.amount:', newRecord.amount, 'type:', typeof newRecord.amount);
+            console.log('[DEBUG EDIT] finalAmount:', finalAmount, 'calculatedAmount:', calculatedAmount);
+            console.log('[DEBUG EDIT] transactionToSave.amount:', transactionToSave.amount);
+            console.log('[DEBUG EDIT] finalRecord.amount:', finalRecord.amount);
+            console.log('[DEBUG EDIT] original.amount:', original.amount);
+
             setRecords(prev => prev.map(rec => rec.id === editingTransactionId ? finalRecord : rec));
             if (!isMockUser) {
                 try { 
                     // Remover campos que nao devem ser enviados no UPDATE para evitar rejeicao do Supabase
                     const { id: _id, tenant_id: _tid, created_at: _ca, ...updatePayload } = finalRecord as any;
-                    console.log('[DEBUG] Update payload:', JSON.stringify(updatePayload));
+                    console.log('[DEBUG] Update payload amount:', updatePayload.amount);
                     console.log('[DEBUG] editingTransactionId:', editingTransactionId);
                     const result = await supabase.from('financial_records').update(updatePayload).eq('id', editingTransactionId);
 

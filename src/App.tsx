@@ -20,7 +20,6 @@ import { AuthCallback } from './components/AuthCallback';
 import { User, ListItem, RevenueType, Bank, Deal, Company, Contact, Task, FinancialRecord, Tenant, SystemNotification, DealStage, TransactionType, TransactionStatus, ChartOfAccount, GeneralNote, DealStageConfig, TaskStageConfig, FinancialRecordSplit, Tag } from './types';
 import { ShieldAlert, Bell, Wifi, WifiOff, AlertTriangle, HelpCircle, X, Database, Building2 } from 'lucide-react';
 import { supabase, supabaseUrl, supabaseKey } from './lib/supabaseClient'; // Import credentials
-import { createClient } from '@supabase/supabase-js'; // Import createClient factory
 // FIX: Removed MOCK_SECTORS as it is not exported from constants and the 'sectors' feature is being phased out.
 import { 
   MOCK_USERS, 
@@ -436,14 +435,12 @@ const App: React.FC = () => {
   };
 
 const handleAddUser = async (newUser: User) => {
-  // Validação de sessão de admin
   if (!user || user.role !== 'admin') {
     alert("Sessão de administrador inválida. Por favor, faça o login novamente.");
     return;
   }
 
   try {
-    // Gerar senha temporária
     const generatePassword = () => {
       const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
       let pwd = '';
@@ -454,89 +451,32 @@ const handleAddUser = async (newUser: User) => {
     };
 
     const tempPassword = newUser.password || generatePassword();
+    const permissions = newUser.role === 'collaborator' ? (newUser.permissions || {}) : {};
 
-    // Criar cliente admin com Service Role Key
-    const supabaseAdmin = createClient(
-      supabaseUrl,
-      import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false
-        }
-      }
-    );
-
-    // Verificar se email já existe
-    const { data: existingUser } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('email', newUser.email)
-      .single();
-
-    if (existingUser) {
-      alert('Este email já está cadastrado no sistema.');
-      return;
-    }
-
-    // Criar usuário com API Admin
-    const { data: createdUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
-      email: newUser.email,
-      password: tempPassword,
-      email_confirm: true, // Email já confirmado
-      user_metadata: {
-        name: newUser.name
-      },
-      app_metadata: {
-        tenant_id: user.tenant_id,
-        provider: 'email',
-        providers: ['email']
-      }
+    const { data, error } = await supabase.rpc('invite_user', {
+      user_email: newUser.email,
+      user_name: newUser.name,
+      user_password: tempPassword,
+      user_permissions: permissions,
+      user_role: newUser.role || 'collaborator'
     });
 
-    if (createError) {
-      console.error('Erro ao criar usuário:', createError);
-      throw new Error(`Erro ao criar usuário: ${createError.message}`);
+    if (error) {
+      throw new Error(error.message);
     }
 
-    if (!createdUser?.user) {
-      throw new Error('Erro ao criar usuário: resposta inválida do servidor');
-    }
-
-    // Criar perfil na tabela profiles
-    const { error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .insert({
-        id: createdUser.user.id,
-        tenant_id: user.tenant_id,
-        name: newUser.name,
-        email: newUser.email,
-        role: newUser.role,
-        permissions: newUser.role === 'collaborator' ? (newUser.permissions || {}) : {},
-        avatar: newUser.name.substring(0, 2).toUpperCase()
-      });
-
-    if (profileError) {
-      console.error('Erro ao criar perfil:', profileError);
-      // Deletar usuário se perfil falhar
-      await supabaseAdmin.auth.admin.deleteUser(createdUser.user.id);
-      throw new Error(`Erro ao criar perfil: ${profileError.message}`);
-    }
-
-    // Adicionar usuário à lista local
     const newUserProfile: User = {
-      id: createdUser.user.id,
+      id: data.user_id,
       tenant_id: user.tenant_id,
       name: newUser.name,
       email: newUser.email,
       role: newUser.role,
-      permissions: newUser.role === 'collaborator' ? (newUser.permissions || {}) : {},
+      permissions,
       avatar: newUser.name.substring(0, 2).toUpperCase()
     };
 
     setAllUsers(prev => [...prev, newUserProfile]);
-    
-    // Mostrar senha temporária ao admin
+
     alert(`Colaborador cadastrado com sucesso!\n\nEmail: ${newUser.email}\nSenha temporária: ${tempPassword}\n\nAnote essa senha e envie ao usuário.`);
 
   } catch (error: any) {

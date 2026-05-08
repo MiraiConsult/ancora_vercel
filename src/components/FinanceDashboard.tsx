@@ -2451,7 +2451,7 @@ const newRecords: FinancialRecord[] = [];
             <div className="space-y-0 animate-in fade-in">
 
                 {/* ── HEADER EXECUTIVE COMMAND CENTER ── */}
-                <div className="bg-gradient-to-r from-[#0a1628] to-[#0d2244] rounded-xl p-6 mb-6 relative overflow-hidden shadow-xl">
+                <div className="bg-gradient-to-r from-[#0a1628] to-[#0d2244] rounded-xl p-6 mb-6 relative shadow-xl">
                     <div className="absolute inset-0 opacity-10" style={{backgroundImage: 'radial-gradient(circle at 80% 50%, #1e90ff 0%, transparent 60%)'}}></div>
                     <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div>
@@ -2472,7 +2472,9 @@ const newRecords: FinancialRecord[] = [];
                                     <ChevronDown size={12} className="text-blue-300" />
                                 </button>
                                 {isDashboardPeriodMenuOpen && (
-                                    <div className="absolute top-full right-0 mt-2 w-[380px] bg-white border border-gray-200 rounded-lg shadow-xl z-30 p-4 animate-in fade-in zoom-in-95">
+                                    <div className="fixed inset-0 z-30 md:absolute md:inset-auto md:top-full md:right-0 md:mt-2 flex items-end md:items-start justify-center md:justify-end">
+                                        <div className="absolute inset-0 bg-black/30 md:hidden" onClick={() => setIsDashboardPeriodMenuOpen(false)}></div>
+                                        <div className="relative w-full max-w-md md:w-[380px] bg-white border border-gray-200 rounded-t-xl md:rounded-lg shadow-xl z-31 p-4 animate-in fade-in slide-in-from-bottom md:zoom-in-95">
                                         <div className="mb-4">
                                             <div className="flex justify-between items-center mb-2">
                                                 <label className="text-xs font-bold text-gray-500 uppercase">Período Principal</label>
@@ -2505,6 +2507,7 @@ const newRecords: FinancialRecord[] = [];
                                                 </div>
                                             </div>
                                         )}
+                                    </div>
                                     </div>
                                 )}
                             </div>

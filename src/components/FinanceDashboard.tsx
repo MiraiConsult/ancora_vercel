@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { FinancialRecord, TransactionType, TransactionStatus, ChartOfAccount, RevenueType, Bank, Company, User, FinancialRecordSplit } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, AreaChart, Area, Line, PieChart, Pie, ComposedChart, LineChart, ReferenceLine } from 'recharts';
 import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as PieIcon, DollarSign, Plus, X, Save, List, Hash, Tag, Search, Pencil, Trash2, Landmark, Tags, Grid3X3, CalendarRange, FileCheck, Filter, Upload, Download, ChevronDown, TrendingUp, Wallet, ArrowRightLeft, LayoutDashboard, ChevronRight, Eye, EyeOff, Calendar, ArrowUpRight, ArrowDownRight, Minus, Settings2, Check, Copy, RefreshCw, BarChart3, TrendingDown, Sparkles, CreditCard, Clock, CalendarClock, Lock, CheckSquare, Square, CheckCircle2, Calculator, Split, Building, Edit3, Table, BookTemplate, BookOpen, ArrowUp, ArrowDown, ArrowUpDown, Users } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { generateFinancialInsight } from '../services/geminiService';
 import { supabase } from '../lib/supabaseClient';
 import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
@@ -370,9 +371,9 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
         setIsDashboardPeriodMenuOpen(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("click", handleClickOutside);
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("click", handleClickOutside);
     };
   }, [importMenuRef, periodMenuRef]);
 
@@ -848,48 +849,72 @@ const newRecords: FinancialRecord[] = [];
         };
     } else { // rubric
         if (!coaFormData.centerCode || !coaFormData.rubricName) { alert("Selecione o grupo e informe o nome da rubrica."); return; }
-        
+
         const center = uniqueCenters.find(c => c.code === coaFormData.centerCode);
         if (!center) return;
         const classification = uniqueClassifications.find(c => c.code === center.classificationCode);
         if (!classification) return;
 
-        const existingInCenter = chartOfAccounts.filter(c => c.centerCode === coaFormData.centerCode);
-        let maxSuffix = 0;
-        existingInCenter.forEach(c => {
-            const parts = c.rubricCode.split('.');
-            if (parts.length === 3) {
-                const suffix = parseInt(parts[2]); 
-                if (!isNaN(suffix) && suffix > maxSuffix) maxSuffix = suffix;
-            }
-        });
-        const newRubricCode = `${coaFormData.centerCode}.${maxSuffix + 1}`;
+        if (editingRubricId) {
+            const existing = chartOfAccounts.find(c => c.id === editingRubricId);
+            entryToSave = {
+                id: editingRubricId, tenant_id: currentUser.tenant_id,
+                classificationCode: classification.code,
+                classificationName: classification.name,
+                centerCode: center.code,
+                centerName: center.name,
+                rubricCode: existing?.rubricCode || center.code + '.1',
+                rubricName: coaFormData.rubricName.toUpperCase()
+            };
+        } else {
+            const existingInCenter = chartOfAccounts.filter(c => c.centerCode === coaFormData.centerCode);
+            let maxSuffix = 0;
+            existingInCenter.forEach(c => {
+                const parts = c.rubricCode.split('.');
+                if (parts.length === 3) {
+                    const suffix = parseInt(parts[2]);
+                    if (!isNaN(suffix) && suffix > maxSuffix) maxSuffix = suffix;
+                }
+            });
+            const newRubricCode = `${coaFormData.centerCode}.${maxSuffix + 1}`;
 
-        entryToSave = {
-            id: `coa_${Date.now()}`, tenant_id: currentUser.tenant_id,
-            classificationCode: classification.code,
-            classificationName: classification.name,
-            centerCode: center.code,
-            centerName: center.name,
-            rubricCode: newRubricCode,
-            rubricName: coaFormData.rubricName.toUpperCase()
-        };
+            entryToSave = {
+                id: `coa_${Date.now()}`, tenant_id: currentUser.tenant_id,
+                classificationCode: classification.code,
+                classificationName: classification.name,
+                centerCode: center.code,
+                centerName: center.name,
+                rubricCode: newRubricCode,
+                rubricName: coaFormData.rubricName.toUpperCase()
+            };
+        }
     }
-    
+
     if (entryToSave) {
         if (!isMockUser) {
             const { error } = await supabase.from('chart_of_accounts').upsert(entryToSave);
             if (error) { console.error("Error saving COA:", error); alert(`Erro ao salvar: ${error.message}`); return; }
         }
-        setChartOfAccounts(prev => [...prev, entryToSave!].sort((a,b) => a.rubricCode.localeCompare(b.rubricCode, 'en', { numeric: true })));
+        if (editingRubricId) {
+            setChartOfAccounts(prev => prev.map(c => c.id === editingRubricId ? entryToSave! : c));
+        } else {
+            setChartOfAccounts(prev => [...prev, entryToSave!].sort((a,b) => a.rubricCode.localeCompare(b.rubricCode, 'en', { numeric: true })));
+        }
     }
-    
+
     setIsCOAModalOpen(false);
+    setEditingRubricId(null);
     setCoaFormData({ classificationName: '', classificationCode: '', groupName: '', centerCode: '', rubricName: '' });
     setSelectedClassificationForCascading('');
   };
 
-  const handleEditRubric = (e: React.MouseEvent, rubric: ChartOfAccount) => { e.preventDefault(); e.stopPropagation(); /* Logic to edit is now part of bulk edit or deletion. */ };
+  const handleEditRubric = (e: React.MouseEvent, rubric: ChartOfAccount) => {
+    e.preventDefault(); e.stopPropagation();
+    setEditingRubricId(rubric.id);
+    setCoaFormData({ classificationName: rubric.classificationName, classificationCode: rubric.classificationCode, centerCode: rubric.centerCode, rubricName: rubric.rubricName });
+    setIsCOAModalOpen(true);
+    setCoaFormType('rubric');
+  };
   const handleDeleteRubric = async (e: React.MouseEvent, id: string) => { e.preventDefault(); e.stopPropagation(); if (window.confirm('Tem certeza que deseja excluir esta rubrica?')) { setChartOfAccounts(prev => prev.filter(c => c.id !== id)); if (editingRubricId === id) { setEditingRubricId(null); } if (!isMockUser) { const { error } = await supabase.from('chart_of_accounts').delete().eq('id', id); if (error) console.error("Error deleting rubric:", error); } } };
 
   // --- COA Bulk & Import Handlers ---
@@ -2223,9 +2248,28 @@ const newRecords: FinancialRecord[] = [];
       const filterNodes = (nodes: any[]): any[] => { if (!hideEmptyRows) return nodes; return nodes.map(node => { if (node.children && node.children.length > 0) { const filteredChildren = filterNodes(node.children); const totalVal = primaryKeys.reduce((acc, m) => acc + Math.abs(node.values[m] || 0), 0); if (filteredChildren.length > 0 || totalVal > 0.01) { return { ...node, children: filteredChildren }; } return null; } else { const totalVal = primaryKeys.reduce((acc, m) => acc + Math.abs(node.values[m] || 0), 0); return totalVal > 0.01 ? node : null; } }).filter(Boolean); };
       const displayedHierarchy = filterNodes(hierarchy); const bottomLineLabel = mode === 'DRE' ? 'RESULTADO LÍQUIDO' : 'SALDO OPERACIONAL';
 
+      const handleExportExcel = () => {
+        const rows: any[][] = [];
+        const header = ['Item', ...primaryKeys.map(k => `${monthNames[parseInt(k.split('-')[1]) - 1]} ${k.split('-')[0]}`), 'TOTAL'];
+        rows.push(header);
+        const addNode = (node: any, indent: number) => {
+          const total = primaryKeys.reduce((acc, k) => acc + (node.values[k] || 0), 0);
+          const row = [' '.repeat(indent * 2) + node.name, ...primaryKeys.map(k => node.values[k] || 0), total];
+          rows.push(row);
+          if (node.children) node.children.forEach((c: any) => addNode(c, indent + 1));
+        };
+        displayedHierarchy.forEach((cls: any) => addNode(cls, 0));
+        const netRow = [bottomLineLabel, ...primaryKeys.map(k => netResult[k] || 0), primaryKeys.reduce((acc, k) => acc + (netResult[k] || 0), 0)];
+        rows.push(netRow);
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, mode === 'DRE' ? 'DRE' : 'Fluxo de Caixa');
+        XLSX.writeFile(wb, `${mode === 'DRE' ? 'DRE' : 'FluxoCaixa'}_${primaryPeriod.year}.xlsx`);
+      };
+
       return (
           <div className="space-y-4 animate-in fade-in">
-              <div className="flex flex-col md:flex-row justify-between items-center gap-4"><h3 className="font-bold text-gray-800 text-lg">{mode === 'DRE' ? `DRE Matriz` : `Fluxo de Caixa`}</h3><div className="flex flex-wrap gap-2 items-center"><div className="relative" ref={periodMenuRef}><button onClick={() => setIsPeriodMenuOpen(!isPeriodMenuOpen)} className="px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg font-medium flex items-center shadow-sm hover:bg-gray-50 text-gray-700"><Calendar size={16} className="mr-2 text-mcsystem-500" /> Configurar Período <ChevronDown size={14} className="ml-2 text-gray-400" /></button>{isPeriodMenuOpen && (<div className="absolute top-full right-0 mt-2 w-[400px] bg-white border border-gray-200 rounded-lg shadow-xl z-30 p-4 animate-in fade-in zoom-in-95"><div className="mb-4"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Principal</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={primaryPeriod.year} onChange={e => setPrimaryPeriod({...primaryPeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, false)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${primaryPeriod.months.includes(i + 1) ? 'bg-mcsystem-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{m}</button>))}</div><div className="flex justify-between text-xs text-mcsystem-600"><button onClick={() => selectAllMonths(false)} className="hover:underline">Selecionar Todos</button><button onClick={() => clearMonths(false)} className="text-red-500 hover:underline">Limpar</button></div></div><div className="h-px bg-gray-200 my-4"></div><div className="flex items-center justify-between mb-3"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={isCompareEnabled} onChange={() => setIsCompareEnabled(!isCompareEnabled)} className="sr-only peer"/><div className="relative w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-mcsystem-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-mcsystem-500"></div><span className="ms-2 text-sm font-medium text-gray-700">Comparar com outro período</span></label></div>{isCompareEnabled && (<div className="bg-gray-50 p-3 rounded-lg border border-gray-100 animate-in slide-in-from-top-2"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Comparativo</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none" value={comparePeriod.year} onChange={e => setComparePeriod({...comparePeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, true)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${comparePeriod.months.includes(i + 1) ? 'bg-purple-500 text-white' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-100'}`}>{m}</button>))}</div><div className="flex justify-between text-xs"><button onClick={copyPrimaryToCompare} className="text-purple-600 hover:underline flex items-center"><Copy size={10} className="mr-1"/> Copiar Principal</button><div className="space-x-2"><button onClick={() => selectAllMonths(true)} className="text-purple-600 hover:underline">Todos</button><button onClick={() => clearMonths(true)} className="text-red-500 hover:underline">Limpar</button></div></div></div>)}</div>)}</div>{mode === 'CASHFLOW' && (<><div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><div className="flex items-center bg-gray-100 rounded-lg p-1 gap-1"><button onClick={() => setCashflowViewMode('COA')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${cashflowViewMode === 'COA' ? 'bg-white text-mcsystem-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Plano de Contas</button><button onClick={() => setCashflowViewMode('REVENUE_TYPE')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${cashflowViewMode === 'REVENUE_TYPE' ? 'bg-white text-mcsystem-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Tipo de Receita</button></div></>)}<div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><button onClick={() => setIncludeProjections(!includeProjections)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${includeProjections ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{includeProjections ? <CheckSquare size={16} className="mr-2"/> : <Square size={16} className="mr-2"/>}{'Incluir Pendentes'}</button><button onClick={() => setHideEmptyRows(!hideEmptyRows)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${!hideEmptyRows ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{hideEmptyRows ? <Eye size={16} className="mr-2"/> : <EyeOff size={16} className="mr-2"/>}{hideEmptyRows ? 'Mostrar Vazios' : 'Ocultar Vazios'}</button><button onClick={() => setReportViewMode('SUMMARY')} className="px-4 py-2 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 font-medium">Voltar</button><button className="px-4 py-2 text-sm bg-mcsystem-500 text-white rounded-lg flex items-center font-medium shadow-sm hover:bg-mcsystem-400"><Download size={14} className="mr-2"/> Excel</button></div></div>
+              <div className="flex flex-col md:flex-row justify-between items-center gap-4"><h3 className="font-bold text-gray-800 text-lg">{mode === 'DRE' ? `DRE Matriz` : `Fluxo de Caixa`}</h3><div className="flex flex-wrap gap-2 items-center"><div className="relative" ref={periodMenuRef}><button onClick={() => setIsPeriodMenuOpen(!isPeriodMenuOpen)} className="px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg font-medium flex items-center shadow-sm hover:bg-gray-50 text-gray-700"><Calendar size={16} className="mr-2 text-mcsystem-500" /> Configurar Período <ChevronDown size={14} className="ml-2 text-gray-400" /></button>{isPeriodMenuOpen && (<div className="absolute top-full right-0 mt-2 w-[400px] bg-white border border-gray-200 rounded-lg shadow-xl z-30 p-4 animate-in fade-in zoom-in-95"><div className="mb-4"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Principal</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={primaryPeriod.year} onChange={e => setPrimaryPeriod({...primaryPeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, false)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${primaryPeriod.months.includes(i + 1) ? 'bg-mcsystem-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{m}</button>))}</div><div className="flex justify-between text-xs text-mcsystem-600"><button onClick={() => selectAllMonths(false)} className="hover:underline">Selecionar Todos</button><button onClick={() => clearMonths(false)} className="text-red-500 hover:underline">Limpar</button></div></div><div className="h-px bg-gray-200 my-4"></div><div className="flex items-center justify-between mb-3"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={isCompareEnabled} onChange={() => setIsCompareEnabled(!isCompareEnabled)} className="sr-only peer"/><div className="relative w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-mcsystem-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-mcsystem-500"></div><span className="ms-2 text-sm font-medium text-gray-700">Comparar com outro período</span></label></div>{isCompareEnabled && (<div className="bg-gray-50 p-3 rounded-lg border border-gray-100 animate-in slide-in-from-top-2"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Comparativo</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none" value={comparePeriod.year} onChange={e => setComparePeriod({...comparePeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, true)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${comparePeriod.months.includes(i + 1) ? 'bg-purple-500 text-white' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-100'}`}>{m}</button>))}</div><div className="flex justify-between text-xs"><button onClick={copyPrimaryToCompare} className="text-purple-600 hover:underline flex items-center"><Copy size={10} className="mr-1"/> Copiar Principal</button><div className="space-x-2"><button onClick={() => selectAllMonths(true)} className="text-purple-600 hover:underline">Todos</button><button onClick={() => clearMonths(true)} className="text-red-500 hover:underline">Limpar</button></div></div></div>)}</div>)}</div>{mode === 'CASHFLOW' && (<><div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><div className="flex items-center bg-gray-100 rounded-lg p-1 gap-1"><button onClick={() => setCashflowViewMode('COA')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${cashflowViewMode === 'COA' ? 'bg-white text-mcsystem-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Plano de Contas</button><button onClick={() => setCashflowViewMode('REVENUE_TYPE')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${cashflowViewMode === 'REVENUE_TYPE' ? 'bg-white text-mcsystem-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Tipo de Receita</button></div></>)}<div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><button onClick={() => setIncludeProjections(!includeProjections)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${includeProjections ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{includeProjections ? <CheckSquare size={16} className="mr-2"/> : <Square size={16} className="mr-2"/>}{'Incluir Pendentes'}</button><button onClick={() => setHideEmptyRows(!hideEmptyRows)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${!hideEmptyRows ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{hideEmptyRows ? <Eye size={16} className="mr-2"/> : <EyeOff size={16} className="mr-2"/>}{hideEmptyRows ? 'Mostrar Vazios' : 'Ocultar Vazios'}</button><button onClick={() => setReportViewMode('SUMMARY')} className="px-4 py-2 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 font-medium">Voltar</button><button onClick={handleExportExcel} className="px-4 py-2 text-sm bg-mcsystem-500 text-white rounded-lg flex items-center font-medium shadow-sm hover:bg-mcsystem-400"><Download size={14} className="mr-2"/> Excel</button></div></div>
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
                   <table className="w-full text-xs text-gray-600 whitespace-nowrap table-fixed min-w-[1400px]">
                       <thead className="bg-gray-100 text-gray-600 font-bold uppercase tracking-wider text-[10px]">

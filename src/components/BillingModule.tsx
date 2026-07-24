@@ -67,6 +67,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
 
   const activeProducts = useMemo(() => products.filter(p => p.active), [products]);
   const clientName = (id?: string) => companies.find(c => c.id === id)?.name || '—';
+  const productName = (id?: string) => products.find(p => p.id === id)?.name || null;
 
   const charges = useMemo(
     () => financeRecords
@@ -74,6 +75,21 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
       .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '')),
     [financeRecords],
   );
+
+  // Faturamento por produto (a partir das cobranças Asaas)
+  const revenueByProduct = useMemo(() => {
+    const map = new Map<string, { name: string; count: number; total: number; recebido: number }>();
+    for (const r of charges) {
+      const key = r.product_id || '__none__';
+      const name = productName(r.product_id) || 'Sem produto';
+      const cur = map.get(key) || { name, count: 0, total: 0, recebido: 0 };
+      cur.count++;
+      cur.total += r.amount || 0;
+      if ((r.status as string) === 'Pago') cur.recebido += r.amount || 0;
+      map.set(key, cur);
+    }
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [charges, products]);
 
   const filteredCharges = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -166,9 +182,12 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
 
       {/* Content */}
       {tab === 'CHARGES' ? (
-        <ChargeList charges={filteredCharges} clientName={clientName} statusBadge={statusBadge} />
+        <>
+          {revenueByProduct.length > 0 && <RevenueByProduct rows={revenueByProduct} />}
+          <ChargeList charges={filteredCharges} clientName={clientName} productName={productName} statusBadge={statusBadge} />
+        </>
       ) : (
-        <SubscriptionList subs={filteredSubs} clientName={clientName} />
+        <SubscriptionList subs={filteredSubs} clientName={clientName} productName={productName} />
       )}
 
       {modal === 'charge' && (
@@ -229,7 +248,45 @@ const EmptyState: React.FC<{ icon: React.ReactNode; text: string }> = ({ icon, t
   </div>
 );
 
-const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: string) => string; statusBadge: (s?: string) => React.ReactNode }> = ({ charges, clientName, statusBadge }) => {
+const RevenueByProduct: React.FC<{ rows: { name: string; count: number; total: number; recebido: number }[] }> = ({ rows }) => {
+  const totalGeral = rows.reduce((s, r) => s + r.total, 0);
+  const recebidoGeral = rows.reduce((s, r) => s + r.recebido, 0);
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
+        <h3 className="font-bold text-gray-800">Faturamento por produto</h3>
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-gray-500">Total: <b className="text-gray-800">{formatBRL(totalGeral)}</b></span>
+          <span className="text-gray-500">Recebido: <b className="text-green-600">{formatBRL(recebidoGeral)}</b></span>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 text-gray-500 text-left uppercase text-xs tracking-wider">
+              <th className="px-6 py-3 font-semibold">Produto</th>
+              <th className="px-6 py-3 font-semibold text-center">Cobranças</th>
+              <th className="px-6 py-3 font-semibold text-right">Total cobrado</th>
+              <th className="px-6 py-3 font-semibold text-right">Recebido</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {rows.map((r, i) => (
+              <tr key={i} className="hover:bg-gray-50 transition-colors">
+                <td className="px-6 py-3 font-medium text-gray-800">{r.name}</td>
+                <td className="px-6 py-3 text-center text-gray-600">{r.count}</td>
+                <td className="px-6 py-3 text-right font-medium text-gray-700">{formatBRL(r.total)}</td>
+                <td className="px-6 py-3 text-right font-medium text-green-600">{formatBRL(r.recebido)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: string) => string; productName: (id?: string) => string | null; statusBadge: (s?: string) => React.ReactNode }> = ({ charges, clientName, productName, statusBadge }) => {
   if (charges.length === 0) return <EmptyState icon={<FileText size={48} />} text="Nenhuma cobrança Asaas ainda." />;
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -238,6 +295,7 @@ const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: strin
           <thead>
             <tr className="bg-gray-50 text-gray-500 text-left uppercase text-xs tracking-wider">
               <th className="px-6 py-4 font-semibold">Cliente / Descrição</th>
+              <th className="px-6 py-4 font-semibold">Produto</th>
               <th className="px-6 py-4 font-semibold">Valor</th>
               <th className="px-6 py-4 font-semibold">Vencimento</th>
               <th className="px-6 py-4 font-semibold text-center">Status</th>
@@ -250,6 +308,11 @@ const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: strin
                 <td className="px-6 py-4">
                   <div className="font-semibold text-gray-800">{clientName(r.companyId)}</div>
                   <div className="text-gray-400 text-xs mt-0.5 max-w-md truncate">{r.description}</div>
+                </td>
+                <td className="px-6 py-4">
+                  {productName(r.product_id)
+                    ? <span className="inline-block text-xs bg-mcsystem-50 text-mcsystem-700 px-2 py-1 rounded-md">{productName(r.product_id)}</span>
+                    : <span className="text-gray-300 text-xs">—</span>}
                 </td>
                 <td className="px-6 py-4 font-medium text-gray-700">{formatBRL(r.amount)}</td>
                 <td className="px-6 py-4 text-gray-600">{r.dueDate}</td>
@@ -271,7 +334,7 @@ const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: strin
   );
 };
 
-const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: string) => string }> = ({ subs, clientName }) => {
+const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: string) => string; productName: (id?: string) => string | null }> = ({ subs, clientName, productName }) => {
   if (subs.length === 0) return <EmptyState icon={<Repeat size={48} />} text="Nenhuma assinatura ainda." />;
   const cycleLabel = (c?: string) => CYCLES.find(x => x.value === c)?.label || c || '—';
   return (
@@ -281,6 +344,7 @@ const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: strin
           <thead>
             <tr className="bg-gray-50 text-gray-500 text-left uppercase text-xs tracking-wider">
               <th className="px-6 py-4 font-semibold">Cliente / Descrição</th>
+              <th className="px-6 py-4 font-semibold">Produto</th>
               <th className="px-6 py-4 font-semibold">Valor</th>
               <th className="px-6 py-4 font-semibold">Ciclo</th>
               <th className="px-6 py-4 font-semibold">Próx. vencimento</th>
@@ -293,6 +357,11 @@ const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: strin
                 <td className="px-6 py-4">
                   <div className="font-semibold text-gray-800">{clientName(s.client_id)}</div>
                   <div className="text-gray-400 text-xs mt-0.5 max-w-md truncate">{s.description}</div>
+                </td>
+                <td className="px-6 py-4">
+                  {productName(s.product_id)
+                    ? <span className="inline-block text-xs bg-mcsystem-50 text-mcsystem-700 px-2 py-1 rounded-md">{productName(s.product_id)}</span>
+                    : <span className="text-gray-300 text-xs">—</span>}
                 </td>
                 <td className="px-6 py-4 font-medium text-gray-700">{formatBRL(s.value)}</td>
                 <td className="px-6 py-4 text-gray-600">{cycleLabel(s.cycle)}</td>

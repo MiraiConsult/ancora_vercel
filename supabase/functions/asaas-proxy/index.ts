@@ -107,6 +107,7 @@ Deno.serve(async (req: Request) => {
           category: 'Cobrança Asaas',
           companyId: params.clientId,
           revenueTypeId: params.revenueTypeId || null,
+          product_id: params.productId || null,
           asaas_payment_id: payment.id,
           asaas_invoice_url: payment.invoiceUrl,
         };

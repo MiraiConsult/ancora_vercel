@@ -102,6 +102,20 @@ Deno.serve(async (req: Request) => {
       if (c.cnpj) byCnpj.set(digits(c.cnpj), c);
     }
 
+    // Produtos para casar com a descrição das cobranças (o nome do produto costuma
+    // aparecer na descrição). Casa pelo nome mais longo primeiro (mais específico).
+    const { data: products } = await admin.from('products').select('id, name').eq('tenant_id', tenantId);
+    const productList = (products || [])
+      .filter((p: any) => p.name && p.name.trim().length >= 3)
+      .map((p: any) => ({ id: p.id, name: p.name.toLowerCase() }))
+      .sort((a: any, b: any) => b.name.length - a.name.length);
+    const matchProduct = (desc?: string): string | null => {
+      if (!desc) return null;
+      const d = desc.toLowerCase();
+      for (const p of productList) { if (d.includes(p.name)) return p.id; }
+      return null;
+    };
+
     const custToClient = new Map<string, string>();
     const newClients: any[] = [];
     const linkUpdates: { id: string; asaas_customer_id: string }[] = [];
@@ -159,6 +173,7 @@ Deno.serve(async (req: Request) => {
       paymentDate: p.paymentDate || null,
       category: 'Cobrança Asaas',
       companyId: custToClient.get(p.customer) || byAsaas.get(p.customer)?.id || null,
+      product_id: matchProduct(p.description),
       asaas_payment_id: p.id,
       asaas_invoice_url: p.invoiceUrl || null,
       asaas_subscription_id: p.subscription || null,
@@ -175,6 +190,7 @@ Deno.serve(async (req: Request) => {
       id: `sa${s.id}`,
       tenant_id: tenantId,
       client_id: custToClient.get(s.customer) || byAsaas.get(s.customer)?.id || null,
+      product_id: matchProduct(s.description),
       asaas_id: s.id,
       description: s.description || '',
       value: Number(s.value) || 0,

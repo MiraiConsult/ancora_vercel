@@ -63,6 +63,7 @@ export interface FinancialRecord {
   paymentDate?: string; // Data da Baixa
   category: string;
   companyId?: string;
+  product_id?: string;
   rubricId?: string;
   revenueTypeId?: string;
   bankId?: string;

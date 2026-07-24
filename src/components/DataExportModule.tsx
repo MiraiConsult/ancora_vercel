@@ -2,14 +2,11 @@
 
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Company, Contact, Deal, Task, FinancialRecord, ChartOfAccount, User } from '../types';
-import { Database, Download, Users, BarChart3, Contact as ContactIcon, Calendar, DollarSign, Tags, UserCog, AlertTriangle, Loader2 } from 'lucide-react';
+import { Company, FinancialRecord, ChartOfAccount, User } from '../types';
+import { Database, Download, Users, DollarSign, Tags, UserCog, AlertTriangle, Loader2 } from 'lucide-react';
 
 interface DataExportModuleProps {
   companies: Company[];
-  contacts: Contact[];
-  deals: Deal[];
-  tasks: Task[];
   financeRecords: FinancialRecord[];
   chartOfAccounts: ChartOfAccount[];
   users: User[];
@@ -17,9 +14,6 @@ interface DataExportModuleProps {
 
 export const DataExportModule: React.FC<DataExportModuleProps> = ({
   companies,
-  contacts,
-  deals,
-  tasks,
   financeRecords,
   chartOfAccounts,
   users,
@@ -29,14 +23,6 @@ export const DataExportModule: React.FC<DataExportModuleProps> = ({
 
     const entitiesToExport = [
         {
-            group: 'Dados de CRM',
-            items: [
-                { id: 'companies', label: 'Clientes', icon: Users, data: companies, count: companies.length },
-                { id: 'contacts', label: 'Contatos', icon: ContactIcon, data: contacts, count: contacts.length },
-                { id: 'deals', label: 'Negócios (Pipeline)', icon: BarChart3, data: deals, count: deals.length },
-            ]
-        },
-        {
             group: 'Dados Financeiros',
             items: [
                 { id: 'financeRecords', label: 'Lançamentos Financeiros', icon: DollarSign, data: financeRecords, count: financeRecords.length },
@@ -44,10 +30,10 @@ export const DataExportModule: React.FC<DataExportModuleProps> = ({
             ]
         },
         {
-            group: 'Dados Operacionais',
+            group: 'Cadastros',
             items: [
-                { id: 'tasks', label: 'Compromissos e Tarefas', icon: Calendar, data: tasks, count: tasks.length },
-                { id: 'users', label: 'Usuários e Colaboradores', icon: UserCog, data: users, count: users.length },
+                { id: 'companies', label: 'Clientes', icon: Users, data: companies, count: companies.length },
+                { id: 'users', label: 'Usuários', icon: UserCog, data: users, count: users.length },
             ]
         }
     ];

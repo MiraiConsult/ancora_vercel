@@ -1,39 +1,3 @@
-
-
-
-
-
-
-export interface DealStageConfig {
-  id: string;
-  tenant_id: string;
-  name: string;
-  order: number;  // Mapeado de order_position do banco
-  order_position?: number;  // Campo real do banco
-  is_fixed: boolean;
-  is_visible: boolean;
-  color?: string;  // Cor da etapa no Kanban
-}
-
-export interface TaskStageConfig {
-  id: string;
-  tenant_id: string;
-  name: string;
-  order: number;  // Mapeado de order_position do banco
-  order_position?: number;  // Campo real do banco
-  is_fixed: boolean;
-  color?: string;  // Cor da etapa no Kanban
-}
-
-export enum DealStage {
-  PROSPECTING = 'Prospecção',
-  QUALIFICATION = 'Qualificação',
-  PROPOSAL = 'Proposta',
-  NEGOTIATION = 'Negociação',
-  CLOSED_WON = 'Fechado (Ganho)',
-  CLOSED_LOST = 'Perdido'
-}
-
 export interface Tenant {
   id: string;
   name: string;
@@ -76,72 +40,6 @@ export interface Company {
   responsible_users?: string[];  // IDs dos usuários responsáveis
 }
 
-export interface Contact {
-  id: string;
-  tenant_id: string;
-  name: string;
-  role: string;
-  email: string;
-  phone: string;
-  companyId: string;
-}
-
-export interface Interaction {
-  id: string;
-  type: 'Call' | 'Meeting' | 'Email' | 'Note' | 'System';
-  description: string;
-  date: string;
-  author: string;
-}
-
-export interface Deal {
-  id: string;
-  tenant_id: string;
-  title: string;
-  value: number;
-  stage: string;
-  companyId: string;
-  probability: number;
-  lastActivity: string;
-  temperature?: 'Hot' | 'Warm' | 'Cold'; 
-  description?: string;
-  products?: string[];
-  contactId?: string;
-  history?: Interaction[];
-  revenueTypeId?: string;
-  // FIX: Add optional createdAt property to Deal interface.
-  createdAt?: string;
-  responsible_users?: string[];  // IDs dos usuários responsáveis
-}
-
-export enum TaskType {
-  CALL = 'Ligação',
-  MEETING = 'Reunião',
-  EMAIL = 'E-mail',
-  FOLLOW_UP = 'Follow-up'
-}
-
-export interface Task {
-  id: string;
-  tenant_id: string;
-  title: string;
-  description?: string;
-  type: string;
-  dueDate: string;
-  startTime?: string;  // Horário de início (para reuniões)
-  endTime?: string;    // Horário de fim (para reuniões)
-  createdAt?: string;
-  completedAt?: string | null;
-  priority: 'High' | 'Medium' | 'Low';
-  status: string;  // Nome da etapa customizável (ex: 'Pendente', 'Em Progresso', 'Concluído')
-  archived?: boolean;
-  companyId?: string;
-  relatedTo?: string;
-  meetLink?: string;
-  assigned_to?: string[];  // IDs dos usuários atribuídos/participantes
-  tag_id?: string;  // ID da tag associada
-}
-
 export enum TransactionType {
   INCOME = 'Receita',
   EXPENSE = 'Despesa'
@@ -163,15 +61,34 @@ export interface FinancialRecord {
   dueDate: string;     // Data de Vencimento (Caixa)
   competenceDate?: string; // Data de Competência (Venda/Fato Gerador)
   paymentDate?: string; // Data da Baixa
-  category: string; 
+  category: string;
   companyId?: string;
-  rubricId?: string; 
-  revenueTypeId?: string; 
-  bankId?: string; 
-  needsValidation?: boolean; 
-  dealId?: string; 
+  rubricId?: string;
+  revenueTypeId?: string;
+  bankId?: string;
+  needsValidation?: boolean;
+  dealId?: string; // Legado — mantido para compatibilidade com registros existentes
   seriesId?: string;
   split_revenue?: { revenue_type_id: string; amount: number; }[];
+  // Integração Asaas
+  asaas_payment_id?: string;
+  asaas_invoice_url?: string;
+  asaas_subscription_id?: string;
+}
+
+export interface Subscription {
+  id: string;
+  tenant_id: string;
+  client_id?: string;
+  product_id?: string;
+  asaas_id?: string;
+  description?: string;
+  value: number;
+  cycle?: string;          // MONTHLY, WEEKLY, YEARLY... (Asaas)
+  billing_type?: string;   // UNDEFINED, BOLETO, PIX, CREDIT_CARD
+  next_due_date?: string;
+  status?: string;         // ACTIVE, INACTIVE, EXPIRED
+  created_at?: string;
 }
 
 export interface FinancialRecordSplit {
@@ -184,12 +101,12 @@ export interface FinancialRecordSplit {
 export interface ChartOfAccount {
   id: string;
   tenant_id: string;
-  classificationCode: string; 
-  classificationName: string; 
-  centerCode: string;         
-  centerName: string;         
-  rubricCode: string;         
-  rubricName: string;         
+  classificationCode: string;
+  classificationName: string;
+  centerCode: string;
+  centerName: string;
+  rubricCode: string;
+  rubricName: string;
 }
 
 export interface RevenueType {
@@ -207,10 +124,15 @@ export interface Bank {
   initialBalance: number;
 }
 
-export interface ListItem {
+export interface Product {
   id: string;
   tenant_id: string;
   name: string;
+  description?: string;
+  price: number;
+  active: boolean;
+  asaas_id?: string; // ID do produto/serviço no Asaas (integração futura)
+  created_at?: string;
 }
 
 export interface AIInsight {
@@ -225,7 +147,8 @@ export interface SystemNotification {
   title: string;
   message: string;
   type: 'Info' | 'Success' | 'Warning' | 'Error';
-  entityType: 'Deal' | 'Task' | 'Finance' | 'Company' | 'System';
+  // 'Deal' | 'Task' mantidos apenas para compatibilidade com registros legados
+  entityType?: 'Finance' | 'Company' | 'System' | 'Deal' | 'Task';
   entityId?: string;
   createdAt: string;
   read: boolean;
@@ -236,17 +159,10 @@ export interface User {
   tenant_id: string;
   name: string;
   role: string; // Fonte da verdade para permissão: 'admin' ou 'collaborator'
-  email: string; 
+  email: string;
   password?: string;
   avatar?: string;
   error?: string;
   permissions?: Record<string, boolean>;
   is_super_admin?: boolean;
-}
-
-export interface Tag {
-  id: string;
-  tenant_id: string;
-  name: string;
-  color: string;
 }

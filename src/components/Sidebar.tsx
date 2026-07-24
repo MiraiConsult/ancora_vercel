@@ -1,7 +1,7 @@
 
 
 import React from 'react';
-import { LayoutDashboard, Users, PieChart, DollarSign, BarChart3, Contact, UserCog, LogOut, List, CalendarClock, Bell, HelpCircle, Database, ChevronsLeft, Award } from 'lucide-react';
+import { Users, DollarSign, UserCog, LogOut, List, Bell, Database, ChevronsLeft, Package, Zap } from 'lucide-react';
 import { User } from '../types';
 
 interface SidebarProps {
@@ -18,16 +18,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
   const isAdmin = currentUser.role === 'admin';
 
   const menuItems = [
-    { id: 'dashboard', label: 'Visão Geral', icon: LayoutDashboard, restricted: false },
-    { id: 'deals', label: 'Negociações', icon: BarChart3, restricted: false },
     { id: 'finance', label: 'Gestão Financeira', icon: DollarSign, restricted: true },
+    { id: 'billing', label: 'Cobranças', icon: Zap, restricted: true },
     { id: 'companies', label: 'Clientes', icon: Users, restricted: false },
-    { id: 'appointments', label: 'Compromissos', icon: CalendarClock, restricted: false },
+    { id: 'products', label: 'Produtos', icon: Package, restricted: false },
     { id: 'alerts', label: 'Alertas', icon: Bell, restricted: false, badge: unreadCount > 0 ? unreadCount : 0 },
-    { id: 'tutorials', label: 'Tutoriais', icon: HelpCircle, restricted: false },
     { id: 'lists', label: 'Cadastros', icon: List, restricted: true },
-    { id: 'analysis', label: 'Dashboard', icon: PieChart, restricted: false },
-    { id: 'performance', label: 'Performance', icon: Award, restricted: true },
     { id: 'database', label: 'Banco de Dados', icon: Database, restricted: true },
     { id: 'settings', label: 'Configurações', icon: UserCog, restricted: true },
   ];

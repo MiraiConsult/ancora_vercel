@@ -1,41 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { KanbanBoard } from './components/KanbanBoard';
 import { FinanceDashboard } from './components/FinanceDashboard';
 import { CompaniesModule } from './components/CompaniesModule';
-import { ContactsModule } from './components/ContactsModule';
-import { AppointmentsModule } from './components/AppointmentsModule';
-import { AIAnalysisDashboard } from './components/AIAnalysisDashboard';
+import { ProductsModule } from './components/ProductsModule';
+import { BillingModule } from './components/BillingModule';
 import { LoginScreen } from './components/LoginScreen';
 import { LandingPage } from './components/LandingPage';
-import { SettingsModule } from './components/SettingsModule'; 
+import { SettingsModule } from './components/SettingsModule';
 import { ListsModule } from './components/ListsModule';
 import { AlertsModule } from './components/AlertsModule';
-import { DashboardModule } from './components/DashboardModule'; 
-import { TutorialsModule } from './components/TutorialsModule';
 import { DataExportModule } from './components/DataExportModule';
-import { PerformanceModule } from './components/PerformanceModule';
 import { TenantSelector } from './components/TenantSelector';
 import { AuthCallback } from './components/AuthCallback';
-import { User, ListItem, RevenueType, Bank, Deal, Company, Contact, Task, FinancialRecord, Tenant, SystemNotification, DealStage, TransactionType, TransactionStatus, ChartOfAccount, GeneralNote, DealStageConfig, TaskStageConfig, FinancialRecordSplit, Tag } from './types';
+import { User, RevenueType, Bank, Company, FinancialRecord, Tenant, SystemNotification, ChartOfAccount, GeneralNote, Product, Subscription } from './types';
 import { ShieldAlert, Bell, Wifi, WifiOff, AlertTriangle, HelpCircle, X, Database, Building2 } from 'lucide-react';
 import { supabase, supabaseUrl, supabaseKey } from './lib/supabaseClient'; // Import credentials
-// FIX: Removed MOCK_SECTORS as it is not exported from constants and the 'sectors' feature is being phased out.
-import { 
-  MOCK_USERS, 
-  MOCK_REVENUE_TYPES, 
-  MOCK_BANKS, 
-  MOCK_DEAL_STAGES, 
-  MOCK_TASK_TYPES, 
-  MOCK_NOTIFICATIONS, 
-  MOCK_SEGMENTS, 
+import {
+  MOCK_USERS,
+  MOCK_REVENUE_TYPES,
+  MOCK_BANKS,
+  MOCK_NOTIFICATIONS,
   MOCK_CHART_OF_ACCOUNTS,
-  MOCK_DEALS,
   MOCK_COMPANIES,
-  MOCK_CONTACTS,
-  MOCK_TASKS,
-  MOCK_FINANCE,
-  MOCK_FINANCE_SPLITS
+  MOCK_FINANCE
 } from './constants';
 
 interface HelpModalProps {
@@ -69,44 +56,37 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState<'pending' | 'connected' | 'error' | 'missing_tables'>('pending');
   const [showLoginScreen, setShowLoginScreen] = useState(false);
-  
+
   // Super Admin Impersonation
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [showTenantSelector, setShowTenantSelector] = useState(false);
   const [impersonatedTenantId, setImpersonatedTenantId] = useState<string | null>(null);
   const [impersonatedTenantName, setImpersonatedTenantName] = useState<string | null>(null);
 
-  const [currentPage, setCurrentPage] = useState('deals');
+  const [currentPage, setCurrentPage] = useState('finance');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [currentTenant, setCurrentTenant] = useState<Tenant | null>({
       id: 'default',
       name: 'Ancóra Demo',
       plan: 'Premium',
-      description: 'Plataforma de inteligência e gestão comercial.'
-  }); 
+      description: 'Plataforma de gestão financeira.'
+  });
 
   // Help Modal State
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [helpContent, setHelpContent] = useState<{ title: string; content: React.ReactNode }>({ title: '', content: null });
 
-  const [deals, setDeals] = useState<Deal[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
   const [financeRecords, setFinanceRecords] = useState<FinancialRecord[]>([]);
-  const [financeRecordSplits, setFinanceRecordSplits] = useState<FinancialRecordSplit[]>([]);
   const [generalNotes, setGeneralNotes] = useState<GeneralNote[]>([]);
-  
+  const [products, setProducts] = useState<Product[]>([]);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]); 
-  // FIX: Removed 'sectors' state as the feature is being phased out in favor of 'segments'.
-  const [segments, setSegments] = useState<ListItem[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [revenueTypes, setRevenueTypes] = useState<RevenueType[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
   const [chartOfAccounts, setChartOfAccounts] = useState<ChartOfAccount[]>([]);
-  const [dealStages, setDealStages] = useState<DealStageConfig[]>([]);
-  const [taskStages, setTaskStages] = useState<TaskStageConfig[]>([]);
-  const [tags, setTags] = useState<Tag[]>([]);
 
   useEffect(() => {
     // Safety timeout: If Supabase hangs, force stop loading after 8 seconds
@@ -141,25 +121,23 @@ const App: React.FC = () => {
 
   const checkSupabaseConnection = async () => {
     try {
-        const { error } = await supabase.from('deals').select('count', { count: 'exact', head: true });
+        const { error } = await supabase.from('financial_records').select('count', { count: 'exact', head: true });
         if (error && error.code === '42P01') setConnectionStatus('missing_tables');
         else if (error && (error.code === 'PGRST301' || error.message?.includes('fetch') || error.message?.includes('network'))) setConnectionStatus('error');
         else setConnectionStatus('connected');
     } catch (err) { setConnectionStatus('error'); }
   };
-  
+
   const handleLogout = () => {
     console.log("[LOGOUT] Clearing application state.");
     setUser(null);
     setShowLoginScreen(false);
-    
+
     // Clear all application data
-    setDeals([]);
     setCompanies([]);
-    setContacts([]);
-    setTasks([]);
     setFinanceRecords([]);
-    setFinanceRecordSplits([]);
+    setProducts([]);
+    setSubscriptions([]);
     setNotifications([]);
     setAllUsers([]);
     setChartOfAccounts([]);
@@ -171,20 +149,20 @@ const App: React.FC = () => {
 
     if (session?.user) {
       console.log(`[AUTH] Session ACTIVE. User ID: ${session.user.id}`);
-      
+
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
         .single();
-      
+
       if (error || !profile) {
         console.error("Error fetching profile, logging out.", error?.message || error);
         await signOut();
         setLoading(false);
         return;
       }
-      
+
       const appUser: User = {
         id: session.user.id,
         tenant_id: session.user.app_metadata?.tenant_id,
@@ -195,19 +173,19 @@ const App: React.FC = () => {
         permissions: profile.permissions || {},
         is_super_admin: profile.is_super_admin || false
       };
-      
+
       console.log('[AUTH] Authenticated User set in App state:', appUser);
       setUser(appUser);
       setIsSuperAdmin(appUser.is_super_admin || false);
       setShowLoginScreen(false); // Fechar tela de login para usuários reais
-      
+
       // Se é super admin e não tem tenant impersonado, mostrar seletor
       if (appUser.is_super_admin && !impersonatedTenantId) {
         setShowTenantSelector(true);
         setLoading(false);
         return;
       }
-      
+
       await fetchAppData(appUser);
 
     } else {
@@ -226,45 +204,40 @@ const App: React.FC = () => {
       }
 
       const isMockUser = effectiveUser.id.startsWith('u');
-      
+
       // Se é super admin, usar tenant impersonado ao invés do tenant próprio
       // Priorizar parâmetro impersonatedTenant se fornecido
       const effectiveTenantId = impersonatedTenant !== undefined
         ? impersonatedTenant
-        : (effectiveUser.is_super_admin && impersonatedTenantId) 
-          ? impersonatedTenantId 
+        : (effectiveUser.is_super_admin && impersonatedTenantId)
+          ? impersonatedTenantId
           : effectiveUser.tenant_id;
-      
+
       console.log('[FETCH] effectiveTenantId:', effectiveTenantId, '| impersonatedTenant param:', impersonatedTenant, '| impersonatedTenantId state:', impersonatedTenantId);
 
       if (isMockUser) {
-        setDeals(MOCK_DEALS);
         setCompanies(MOCK_COMPANIES);
-        setContacts(MOCK_CONTACTS);
-        setTasks(MOCK_TASKS);
         setFinanceRecords(MOCK_FINANCE);
-        setFinanceRecordSplits(MOCK_FINANCE_SPLITS);
+        setProducts([]);
+        setSubscriptions([]);
         setBanks(MOCK_BANKS);
         setRevenueTypes(MOCK_REVENUE_TYPES);
-        setSegments(MOCK_SEGMENTS);
         setNotifications(MOCK_NOTIFICATIONS);
         setAllUsers(MOCK_USERS);
         setChartOfAccounts(MOCK_CHART_OF_ACCOUNTS);
         setGeneralNotes([]);
-        setDealStages(MOCK_DEAL_STAGES);
         setCurrentTenant({
           id: 'default',
           name: 'Ancóra Demo',
           plan: 'Premium',
           website: 'https://mcsystem.com.br/',
           email: 'contato@mcsystem.com',
-          description: 'Plataforma de inteligência e gestão comercial.'
+          description: 'Plataforma de gestão financeira.'
         });
         setLoading(false);
         return;
       }
 
-      // Helper para adicionar filtro de tenant quando necessário
       // Helper to fetch ALL records with automatic pagination (no limits)
       const queryWithTenant = async (table: string, orderBy?: string) => {
         let allData: any[] = [];
@@ -283,7 +256,7 @@ const App: React.FC = () => {
           query = query.range(from, from + pageSize - 1);
 
           const { data, error, count } = await query;
-          
+
           if (error) {
             console.error(`Error fetching ${table}:`, error);
             return { data: allData, error };
@@ -292,7 +265,7 @@ const App: React.FC = () => {
           if (data && data.length > 0) {
             allData = allData.concat(data);
             from += pageSize;
-            
+
             // Check if we've fetched all records
             if (count !== null && allData.length >= count) {
               hasMore = false;
@@ -308,14 +281,10 @@ const App: React.FC = () => {
       };
 
       const responses = await Promise.all([
-        queryWithTenant('deals'),
         queryWithTenant('clients'),
-        queryWithTenant('contacts'),
-        queryWithTenant('tasks'),
         queryWithTenant('financial_records'),
         queryWithTenant('banks'),
         queryWithTenant('revenue_types'),
-        queryWithTenant('segments'),
         queryWithTenant('notifications'),
         queryWithTenant('profiles'),
         queryWithTenant('chart_of_accounts'),
@@ -323,14 +292,14 @@ const App: React.FC = () => {
           ? supabase.from('organization_settings').select('*').eq('id', effectiveTenantId).single()
           : supabase.from('organization_settings').select('*').eq('tenant_id', effectiveTenantId),
         queryWithTenant('general_notes'),
-        queryWithTenant('deal_stages', 'order_position'),
-        queryWithTenant('task_stages', 'order_position'),
+        queryWithTenant('products'),
+        queryWithTenant('subscriptions'),
       ]);
 
       const [
-          dealsRes, companiesRes, contactsRes, tasksRes, financeRes, banksRes,
-          revenueTypesRes, segmentsRes, notificationsRes, profilesRes,
-          coaRes, orgRes, generalNotesRes, dealStagesRes, taskStagesRes
+          companiesRes, financeRes, banksRes, revenueTypesRes,
+          notificationsRes, profilesRes, coaRes, orgRes,
+          generalNotesRes, productsRes, subscriptionsRes
       ] = responses;
 
       const checkError = (res: any, name: string) => {
@@ -338,36 +307,17 @@ const App: React.FC = () => {
           return res.data || [];
       }
 
-      setDeals(checkError(dealsRes, 'deals'));
       setCompanies(checkError(companiesRes, 'clients'));
-      setContacts(checkError(contactsRes, 'contacts'));
-      setTasks(checkError(tasksRes, 'tasks'));
       setFinanceRecords(checkError(financeRes, 'financial_records'));
-      setFinanceRecordSplits([]); // Table removed from database
       setBanks(checkError(banksRes, 'banks'));
       setRevenueTypes(checkError(revenueTypesRes, 'revenue_types'));
-      setSegments(checkError(segmentsRes, 'segments'));
       setNotifications(checkError(notificationsRes, 'notifications'));
       setAllUsers(checkError(profilesRes, 'profiles'));
       setChartOfAccounts(checkError(coaRes, 'chart_of_accounts'));
       setGeneralNotes(checkError(generalNotesRes, 'general_notes'));
-      // Mapear order_position para order e adicionar is_visible
-      const rawDealStages = checkError(dealStagesRes, 'deal_stages');
-      const mappedDealStages = rawDealStages.map((stage: any) => ({
-        ...stage,
-        order: stage.order_position,
-        is_visible: stage.name !== 'Perdido'  // Perdido fica oculto por padrão
-      }));
-      setDealStages(mappedDealStages);
-      
-      // Mapear task_stages
-      const rawTaskStages = checkError(taskStagesRes, 'task_stages');
-      const mappedTaskStages = rawTaskStages.map((stage: any) => ({
-        ...stage,
-        order: stage.order_position
-      }));
-      setTaskStages(mappedTaskStages);
-      
+      setProducts(checkError(productsRes, 'products'));
+      setSubscriptions(checkError(subscriptionsRes, 'subscriptions'));
+
       // Para super admin, orgRes.data é um objeto (single), não array
       if (orgRes.data) {
         const tenantData = Array.isArray(orgRes.data) ? orgRes.data[0] : orgRes.data;
@@ -375,10 +325,10 @@ const App: React.FC = () => {
           setCurrentTenant(tenantData);
         }
       } else if (effectiveTenantId) {
-         const newTenant: Tenant = { 
-            id: effectiveTenantId, 
-            name: effectiveUser.name, 
-            plan: 'Premium', 
+         const newTenant: Tenant = {
+            id: effectiveTenantId,
+            name: effectiveUser.name,
+            plan: 'Premium',
             email: effectiveUser.email
          };
          await supabase.from('organization_settings').upsert(newTenant);
@@ -392,9 +342,9 @@ const App: React.FC = () => {
     }
   };
 
-  const signOut = async () => { 
+  const signOut = async () => {
     const { error } = await supabase.auth.signOut();
-    
+
     // Explicitly call the logout handler to ensure immediate UI update
     // and state cleanup, making the logout process more robust.
     handleLogout();
@@ -408,20 +358,20 @@ const App: React.FC = () => {
       console.log('[LOGIN] Processing login for user:', loggedInUser.email);
       setUser(loggedInUser);
       setShowLoginScreen(false); // Fechar tela de login
-      
+
       // Se é usuário mock, usar dados mock
       if (loggedInUser.id.startsWith('u')) {
           await fetchAppData(loggedInUser);
           return;
       }
-      
+
       // Para usuários reais, verificar se é super admin
       if (loggedInUser.is_super_admin && !impersonatedTenantId) {
           setIsSuperAdmin(true);
           setShowTenantSelector(true);
           return;
       }
-      
+
       // Para usuários normais, buscar dados
       setLoading(true);
       await fetchAppData(loggedInUser);
@@ -491,7 +441,7 @@ const handleAddUser = async (newUser: User) => {
     if (updateData.role === 'admin') {
       updateData.permissions = {};
     }
-    
+
     const { data, error } = await supabase
       .from('profiles')
       .update(updateData)
@@ -526,87 +476,6 @@ const handleAddUser = async (newUser: User) => {
     setAllUsers(prev => prev.filter(u => u.id !== userId));
     alert('Colaborador excluído com sucesso.');
   };
-  
-  const handleDealWon = async (deal: Deal, saleData: { value: number, rubricId: string, dueDate: string, description: string }) => {
-    const originalDeals = [...deals];
-    const originalFinanceRecords = [...financeRecords];
-    const originalNotifications = [...notifications];
-
-    const selectedRubric = chartOfAccounts.find(c => c.id === saleData.rubricId);
-    
-    const saleDetailsDescription = saleData.description ? `. Detalhes: ${saleData.description}` : '';
-
-    const updatedDeal: Deal = {
-        ...deal, 
-        stage: DealStage.CLOSED_WON, 
-        value: saleData.value, 
-        lastActivity: new Date().toISOString(),
-        history: [...(deal.history || []), { 
-            id: `h${Date.now()}`, 
-            type: 'System', 
-            description: `Venda Fechada. Valor Final: R$ ${saleData.value}. Forma Pagto: ${selectedRubric?.rubricName || 'N/A'}${saleDetailsDescription}`, 
-            date: new Date().toISOString(), 
-            author: user?.name || 'Sistema' 
-        }]
-    };
-    
-    const companyName = companies.find(c => c.id === deal.companyId)?.name || 'Cliente';
-    
-    const financialDescription = saleData.description 
-        ? `Venda: ${deal.title} - ${companyName} (${saleData.description})` 
-        : `Venda: ${deal.title} - ${companyName}`;
-
-    const newRecord: Omit<FinancialRecord, 'tenant_id'> = { 
-      id: `f${Date.now()}`, 
-      description: financialDescription, 
-      amount: saleData.value, 
-      type: TransactionType.INCOME, 
-      status: TransactionStatus.PENDING, 
-      dueDate: saleData.dueDate,
-      competenceDate: saleData.dueDate,
-      category: selectedRubric?.rubricName || 'Vendas', 
-      rubricId: saleData.rubricId, 
-      revenueTypeId: deal.revenueTypeId,
-      dealId: deal.id, 
-      companyId: deal.companyId,
-      needsValidation: true 
-    };
-    
-    const newNotification: Omit<SystemNotification, 'tenant_id'> = { 
-        id: `n${Date.now()}`, 
-        title: 'Negociação Ganha!', 
-        message: `A negociação "${deal.title}" com ${companyName} foi fechada no valor de R$ ${saleData.value}.`, 
-        type: 'Success', 
-        entityType: 'Deal', 
-        entityId: deal.id, 
-        createdAt: new Date().toISOString(), 
-        read: false 
-    };
-
-    setDeals(prev => prev.map(d => d.id === deal.id ? updatedDeal : d));
-    setFinanceRecords(prev => [ { ...newRecord, tenant_id: user!.tenant_id }, ...prev]);
-    setNotifications(prev => [{ ...newNotification, tenant_id: user!.tenant_id }, ...prev]);
-
-    try {
-      const dealRes = await supabase.from('deals').upsert(updatedDeal);
-      if (dealRes.error) throw dealRes.error;
-      
-      const finRes = await supabase.from('financial_records').insert(newRecord);
-      if (finRes.error) throw finRes.error;
-      
-      const notifRes = await supabase.from('notifications').insert(newNotification);
-      if (notifRes.error) throw notifRes.error;
-
-    } catch (error: any) {
-        const errorMessage = error?.message || 'Ocorreu um erro desconhecido. Verifique o console para detalhes.';
-        console.error("Erro ao processar o ganho do negócio:", error);
-        alert(`Ocorreu um erro ao registrar a venda: ${errorMessage}. As alterações foram desfeitas.`);
-        
-        setDeals(originalDeals);
-        setFinanceRecords(originalFinanceRecords);
-        setNotifications(originalNotifications);
-    }
-  };
 
   if (loading) return (
       <div className="h-screen w-full flex items-center justify-center bg-slate-50">
@@ -622,203 +491,123 @@ const handleAddUser = async (newUser: User) => {
       if (showLoginScreen) return <LoginScreen onLogin={handleLogin} onBack={() => setShowLoginScreen(false)} connectionStatus={connectionStatus} />;
       else return <LandingPage onLoginClick={() => setShowLoginScreen(true)} />;
   }
-  
+
   const isAdmin = user.role === 'admin';
   const unreadNotifications = notifications.filter(n => !n.read).length;
-
-  // CORREÇÃO 2: Corrigir lógica de controle de acesso no App.tsx
-//
-// No arquivo src/App.tsx, na função renderContent()
-// Substitua as linhas 690-743 por este código:
 
   const renderContent = () => {
     // Função auxiliar para verificar permissões
     const hasPermission = (moduleId: string): boolean => {
       // Admin sempre tem acesso
       if (user.role === 'admin') return true;
-      
+
       // Colaborador precisa ter a permissão específica
       return user.permissions?.[moduleId] === true;
     };
 
     switch (currentPage) {
-      case 'dashboard':
-        return hasPermission('dashboard') ? (
-          <DashboardModule deals={deals} tasks={tasks} financeRecords={financeRecords} companies={companies} onNavigate={setCurrentPage} />
-        ) : <AccessDenied />;
-        
-      case 'deals':
-        return hasPermission('deals') ? (
-          <KanbanBoard 
-            deals={deals} 
-            setDeals={setDeals} 
-            companies={companies} 
-            setCompanies={setCompanies}
-            contacts={contacts} 
-            allUsers={allUsers} 
-            segments={segments}
-            revenueTypes={revenueTypes} 
-            setRevenueTypes={setRevenueTypes}
-            chartOfAccounts={chartOfAccounts}
-            onDealWon={handleDealWon}
-            tasks={tasks}
-            financeRecords={financeRecords}
-            generalNotes={generalNotes}
-            setTasks={setTasks}
-            setFinanceRecords={setFinanceRecords}
-            setGeneralNotes={setGeneralNotes}
-            currentUser={user}
-            onOpenHelp={openHelp}
-            dealStages={dealStages}
-            setDealStages={setDealStages}
-          />
-        ) : <AccessDenied />;
-        
-      case 'companies':
-        return hasPermission('companies') ? (
-          <CompaniesModule 
-            companies={companies} 
-            setCompanies={setCompanies} 
-            contacts={contacts} 
-            setContacts={setContacts} 
-            deals={deals} 
-            setDeals={setDeals} 
-            tasks={tasks} 
-            setTasks={setTasks} 
-            financeRecords={financeRecords} 
-            setFinanceRecords={setFinanceRecords} 
-            generalNotes={generalNotes} 
-            setGeneralNotes={setGeneralNotes} 
-            segments={segments} 
-            setSegments={setSegments} 
-            revenueTypes={revenueTypes} 
-            banks={banks} 
-            allUsers={allUsers} 
-            currentUser={user} 
-            onOpenHelp={openHelp} 
-          />
-        ) : <AccessDenied />;
-        
-      case 'contacts':
-        return <ContactsModule contacts={contacts} setContacts={setContacts} companies={companies} />;
-        
-      case 'appointments':
-        return hasPermission('appointments') ? (
-          <AppointmentsModule 
-            tasks={tasks} 
-            setTasks={setTasks} 
-            companies={companies} 
-            users={allUsers} 
-            generalNotes={generalNotes} 
-            setGeneralNotes={setGeneralNotes} 
-            taskStages={taskStages} 
-            setTaskStages={setTaskStages} 
-            currentUser={user} 
-          />
-        ) : <AccessDenied />;
-        
       case 'finance':
         return hasPermission('finance') ? (
-          <FinanceDashboard 
-            records={financeRecords} 
-            setRecords={setFinanceRecords} 
-            revenueTypes={revenueTypes} 
-            setRevenueTypes={setRevenueTypes} 
-            banks={banks} 
-            setBanks={setBanks} 
-            chartOfAccounts={chartOfAccounts} 
-            setChartOfAccounts={setChartOfAccounts} 
-            companies={companies} 
-            setCompanies={setCompanies} 
-            currentUser={user} 
+          <FinanceDashboard
+            records={financeRecords}
+            setRecords={setFinanceRecords}
+            revenueTypes={revenueTypes}
+            setRevenueTypes={setRevenueTypes}
+            banks={banks}
+            setBanks={setBanks}
+            chartOfAccounts={chartOfAccounts}
+            setChartOfAccounts={setChartOfAccounts}
+            companies={companies}
+            setCompanies={setCompanies}
+            currentUser={user}
           />
         ) : <AccessDenied />;
-        
+
+      case 'companies':
+        return hasPermission('companies') ? (
+          <CompaniesModule
+            companies={companies}
+            setCompanies={setCompanies}
+            financeRecords={financeRecords}
+            setFinanceRecords={setFinanceRecords}
+            generalNotes={generalNotes}
+            setGeneralNotes={setGeneralNotes}
+            revenueTypes={revenueTypes}
+            banks={banks}
+            allUsers={allUsers}
+            currentUser={user}
+            onOpenHelp={openHelp}
+          />
+        ) : <AccessDenied />;
+
+      case 'products':
+        return hasPermission('products') ? (
+          <ProductsModule
+            products={products}
+            setProducts={setProducts}
+            currentUser={user}
+          />
+        ) : <AccessDenied />;
+
+      case 'billing':
+        return hasPermission('billing') ? (
+          <BillingModule
+            companies={companies}
+            products={products}
+            financeRecords={financeRecords}
+            setFinanceRecords={setFinanceRecords}
+            subscriptions={subscriptions}
+            setSubscriptions={setSubscriptions}
+            revenueTypes={revenueTypes}
+            currentUser={user}
+          />
+        ) : <AccessDenied />;
+
       case 'settings':
         return isAdmin ? (
-          <SettingsModule 
-            tenant={currentTenant} 
-            users={allUsers} 
-            onAddUser={handleAddUser} 
-            onUpdateUser={handleUpdateUser} 
-            onDeleteUser={handleDeleteUser} 
-            onUpdateTenant={handleUpdateTenant} 
-            onOpenHelp={openHelp} 
-            currentUser={user} 
+          <SettingsModule
+            tenant={currentTenant}
+            users={allUsers}
+            onAddUser={handleAddUser}
+            onUpdateUser={handleUpdateUser}
+            onDeleteUser={handleDeleteUser}
+            onUpdateTenant={handleUpdateTenant}
+            onOpenHelp={openHelp}
+            currentUser={user}
           />
         ) : <AccessDenied />;
-        
+
       case 'alerts':
         return hasPermission('alerts') ? (
-          <AlertsModule 
-            notifications={notifications} 
-            setNotifications={setNotifications} 
-            users={allUsers} 
-            currentUser={user} 
+          <AlertsModule
+            notifications={notifications}
+            setNotifications={setNotifications}
+            users={allUsers}
+            currentUser={user}
           />
         ) : <AccessDenied />;
-        
+
       case 'lists':
         return hasPermission('lists') ? (
-          <ListsModule 
-            revenueTypes={revenueTypes} 
-            setRevenueTypes={setRevenueTypes} 
-            banks={banks} 
-            setBanks={setBanks} 
-            segments={segments} 
-            setSegments={setSegments} 
-            dealStages={dealStages} 
-            setDealStages={setDealStages} 
-            taskStages={taskStages} 
-            setTaskStages={setTaskStages} 
-            tags={tags} 
-            setTags={setTags} 
-            currentUser={user} 
+          <ListsModule
+            revenueTypes={revenueTypes}
+            setRevenueTypes={setRevenueTypes}
+            banks={banks}
+            setBanks={setBanks}
+            currentUser={user}
           />
         ) : <AccessDenied />;
-        
-      case 'analysis':
-        return hasPermission('analysis') ? (
-          <AIAnalysisDashboard 
-            deals={deals} 
-            tasks={tasks} 
-            financeRecords={financeRecords} 
-            companies={companies} 
-            users={allUsers} 
-          />
-        ) : <AccessDenied />;
-        
-      case 'tutorials':
-        return hasPermission('tutorials') ? (
-          <TutorialsModule onNavigate={setCurrentPage} />
-        ) : <AccessDenied />;
-        
+
       case 'database':
         return hasPermission('database') ? (
-          <DataExportModule 
-            companies={companies} 
-            contacts={contacts} 
-            deals={deals} 
-            tasks={tasks} 
-            financeRecords={financeRecords} 
-            chartOfAccounts={chartOfAccounts} 
-            users={allUsers} 
+          <DataExportModule
+            companies={companies}
+            financeRecords={financeRecords}
+            chartOfAccounts={chartOfAccounts}
+            users={allUsers}
           />
         ) : <AccessDenied />;
-        
-      case 'performance':
-        return hasPermission('performance') ? (
-          <PerformanceModule 
-            users={allUsers} 
-            deals={deals} 
-            companies={companies} 
-            tasks={tasks} 
-            financeRecords={financeRecords} 
-            revenueTypes={revenueTypes} 
-            dealStages={dealStages} 
-          />
-        ) : <AccessDenied />;
-        
+
       default:
         return <div>Página não encontrada</div>;
     }
@@ -833,13 +622,13 @@ const handleAddUser = async (newUser: User) => {
     await fetchAppData(user!, tenantId);  // ✅ Passa tenantId diretamente
     setLoading(false);
   };
-  
+
   const handleExitImpersonation = () => {
     setImpersonatedTenantId(null);
     setImpersonatedTenantName(null);
     setShowTenantSelector(true);
   };
-  
+
   // Roteamento para página de callback de autenticação
   if (window.location.pathname === '/auth/callback') {
     return <AuthCallback supabase={supabase} />;
@@ -873,7 +662,7 @@ const handleAddUser = async (newUser: User) => {
             </div>
           </div>
         )}
-        
+
         <Sidebar
           currentPage={currentPage}
           onNavigate={setCurrentPage}
@@ -885,7 +674,7 @@ const handleAddUser = async (newUser: User) => {
         />
         <main className={`flex-1 p-8 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'ml-20' : 'ml-64'} ${isSuperAdmin && impersonatedTenantName ? 'mt-14' : ''} min-w-0`}>
            <header className="flex-shrink-0 flex justify-between items-center mb-8">
-              <h1 className="text-xl font-semibold text-gray-800 capitalize">{currentPage === 'dashboard' ? 'Visão Geral' : currentPage === 'settings' ? 'Configurações & Banco de Dados' : currentPage}</h1>
+              <h1 className="text-xl font-semibold text-gray-800 capitalize">{currentPage === 'finance' ? 'Gestão Financeira' : currentPage === 'settings' ? 'Configurações & Banco de Dados' : currentPage === 'companies' ? 'Clientes' : currentPage === 'products' ? 'Produtos' : currentPage === 'billing' ? 'Cobranças' : currentPage === 'lists' ? 'Cadastros' : currentPage === 'database' ? 'Banco de Dados' : currentPage}</h1>
               <div className="flex items-center space-x-4">
                   <div onClick={() => setCurrentPage('alerts')} className="relative cursor-pointer hover:bg-gray-100 p-2 rounded-full transition-colors">
                        {unreadNotifications > 0 && <span className="absolute top-1 right-1 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white animate-ping"></span>}

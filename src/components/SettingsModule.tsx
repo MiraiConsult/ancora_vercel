@@ -15,17 +15,13 @@ interface SettingsModuleProps {
 }
 
 const permissionableModules = [
-  { id: 'dashboard', label: 'Visão Geral' },
-  { id: 'deals', label: 'Negociações' },
   { id: 'finance', label: 'Gestão Financeira' },
+  { id: 'billing', label: 'Cobranças' },
   { id: 'companies', label: 'Clientes' },
-  { id: 'appointments', label: 'Compromissos' },
+  { id: 'products', label: 'Produtos' },
   { id: 'alerts', label: 'Alertas' },
-  { id: 'tutorials', label: 'Tutoriais' },
   { id: 'lists', label: 'Cadastros' },
-  { id: 'analysis', label: 'Dashboard' },
   { id: 'database', label: 'Banco de Dados' },
-  { id: 'performance', label: 'Performance' }, // ✅ ADICIONADO
 ];
 
 export const SettingsModule: React.FC<SettingsModuleProps> = ({ tenant, users, onAddUser, onUpdateUser, onDeleteUser, onUpdateTenant, onOpenHelp, currentUser }) => {

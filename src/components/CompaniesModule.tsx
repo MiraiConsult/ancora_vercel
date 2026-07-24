@@ -1,48 +1,30 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Company, Contact, Deal, ListItem, CompanyNote, User, NoteColor, Task, FinancialRecord, TransactionType, TransactionStatus, RevenueType, Bank, DealStage, TaskType, GeneralNote } from '../types';
-// FIX: Added ChevronRight to the import list from lucide-react
-import { Search, MapPin, Building2, Plus, Pencil, Trash2, X, Save, Phone, Mail, DollarSign, Calendar, Briefcase, User as UserIcon, Upload, Download, FileText, ChevronDown, ChevronRight, StickyNote, Send, Palette, Tag, Maximize2, Minimize2, MoreHorizontal, ArrowLeft, TrendingUp, Clock, CheckCircle2, Wallet, AlertCircle, Contact as ContactIcon, LayoutDashboard, Video, CheckSquare, HelpCircle, LayoutGrid, LayoutList, Check, Square, Copy } from 'lucide-react';
+import { Company, User, NoteColor, FinancialRecord, TransactionType, TransactionStatus, RevenueType, Bank, GeneralNote } from '../types';
+import { Search, Plus, Pencil, Trash2, X, Save, User as UserIcon, ChevronDown, StickyNote, TrendingUp, LayoutDashboard, CheckSquare, HelpCircle, LayoutGrid, LayoutList, Square, Copy } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 
-// FIX: Removed unused 'sectors' prop.
 interface CompaniesModuleProps {
   companies: Company[];
   setCompanies: React.Dispatch<React.SetStateAction<Company[]>>;
-  contacts?: Contact[];
-  setContacts?: React.Dispatch<React.SetStateAction<Contact[]>>;
-  
-  deals?: Deal[];
-  setDeals?: React.Dispatch<React.SetStateAction<Deal[]>>;
-  
-  tasks?: Task[];
-  setTasks?: React.Dispatch<React.SetStateAction<Task[]>>;
-  
-  financeRecords?: FinancialRecord[];
-  setFinanceRecords?: React.Dispatch<React.SetStateAction<FinancialRecord[]>>;
-  
+  financeRecords: FinancialRecord[];
+  setFinanceRecords: React.Dispatch<React.SetStateAction<FinancialRecord[]>>;
   generalNotes: GeneralNote[];
   setGeneralNotes: React.Dispatch<React.SetStateAction<GeneralNote[]>>;
-
-  segments: ListItem[];
-  setSegments: React.Dispatch<React.SetStateAction<ListItem[]>>;
-  revenueTypes?: RevenueType[];
-  banks?: Bank[];
-  allUsers?: User[];
+  revenueTypes: RevenueType[];
+  banks: Bank[];
+  allUsers: User[];
   currentUser: User;
   onOpenHelp: (title: string, content: React.ReactNode) => void;
 }
 
-type CompanyTab = 'OVERVIEW' | 'CONTACTS' | 'DEALS' | 'FINANCE' | 'TASKS' | 'NOTES';
+type CompanyTab = 'OVERVIEW' | 'FINANCE' | 'NOTES';
 
-export const CompaniesModule: React.FC<CompaniesModuleProps> = ({ 
-    companies, setCompanies, 
-    contacts = [], setContacts,
-    deals = [], setDeals,
-    tasks = [], setTasks,
+export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
+    companies, setCompanies,
     financeRecords = [], setFinanceRecords,
     generalNotes, setGeneralNotes,
-    segments, setSegments, revenueTypes = [], banks = [], allUsers = [], currentUser,
-    onOpenHelp 
+    revenueTypes = [], banks = [], allUsers = [], currentUser,
+    onOpenHelp
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -67,22 +49,6 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
   const [editingFinId, setEditingFinId] = useState<string | null>(null);
   const [finForm, setFinForm] = useState<Partial<FinancialRecord>>({ description: '', amount: 0, type: TransactionType.INCOME, status: TransactionStatus.PENDING, dueDate: '', bankId: '' });
 
-  // 2. Deal Modal
-  const [isDealModalOpen, setIsDealModalOpen] = useState(false);
-  const [editingDealId, setEditingDealId] = useState<string | null>(null);
-  const [dealForm, setDealForm] = useState<Partial<Deal>>({ title: '', value: 0, stage: DealStage.PROSPECTING, probability: 50 });
-
-  // 3. Task/Meeting Modal
-  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
-  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  const [activityType, setActivityType] = useState<'TASK' | 'MEETING'>('TASK');
-  const [taskForm, setTaskForm] = useState<Partial<Task>>({ title: '', type: TaskType.CALL, dueDate: '', priority: 'Medium' });
-
-  // 4. Contact Modal (New)
-  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
-  const [editingContactId, setEditingContactId] = useState<string | null>(null);
-  const [contactForm, setContactForm] = useState<Partial<Contact>>({ name: '', role: '', email: '', phone: '' });
-
   // Note Modal State
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -101,10 +67,6 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<Company>>({ name: '', cnpj: '', segment: '', location: '', status: 'Prospect' });
-
-  // New Segment Modal State
-  const [isNewSegmentModalOpen, setIsNewSegmentModalOpen] = useState(false);
-  const [newSegmentName, setNewSegmentName] = useState('');
 
   // Admin Check
   const isAdmin = currentUser.role === 'admin';
@@ -134,18 +96,15 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
 
   // --- Derived Data ---
   const companyData = useMemo(() => {
-      if (!selectedCompany) return { contacts: [], deals: [], tasks: [], finance: [], notes: [] };
+      if (!selectedCompany) return { finance: [], notes: [] };
       return {
-          contacts: contacts.filter(c => c.companyId === selectedCompany.id),
-          deals: deals.filter(d => d.companyId === selectedCompany.id),
-          tasks: tasks.filter(t => t.companyId === selectedCompany.id || t.relatedTo?.toLowerCase() === selectedCompany.name.toLowerCase()),
           finance: financeRecords.filter(f => f.companyId === selectedCompany.id || f.description.toLowerCase().includes(selectedCompany.name.toLowerCase())),
           notes: [
               ...(selectedCompany.notes || []),
               ...generalNotes.filter(n => n.companyId === selectedCompany.id)
           ].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       };
-  }, [selectedCompany, contacts, deals, tasks, financeRecords, generalNotes]);
+  }, [selectedCompany, financeRecords, generalNotes]);
 
   // Financial Stats
   const financialStats = useMemo(() => {
@@ -162,13 +121,13 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                 <strong>Visão Geral da Carteira:</strong> A lista principal exibe todos os seus clientes. Utilize a barra de busca para encontrar uma empresa por nome ou CNPJ.
             </li>
             <li>
-                <strong>Painel Detalhado 360º:</strong> Ao clicar em um cliente, um painel lateral se abre, fornecendo uma visão completa e integrada de todas as informações: contatos, negócios, histórico financeiro, tarefas e notas.
+                <strong>Painel Detalhado:</strong> Ao clicar em um cliente, um painel se abre, fornecendo uma visão completa das informações do cliente: dados gerais, histórico financeiro e notas.
             </li>
             <li>
-                <strong>Ações Contextuais:</strong> Dentro do painel detalhado de um cliente, você pode adicionar novos contatos, iniciar negociações, lançar registros financeiros e agendar compromissos, tudo já vinculado automaticamente àquela empresa.
+                <strong>Registros Financeiros:</strong> Na aba "Financeiro" do painel, você pode lançar e acompanhar as movimentações financeiras vinculadas automaticamente àquele cliente.
             </li>
             <li>
-                <strong>Gerenciamento de Contatos:</strong> Na aba "Contatos" do painel, você pode gerenciar todas as pessoas de contato daquela empresa, mantendo sua base de dados organizada.
+                <strong>Notas:</strong> Na aba "Notas" do painel, registre lembretes e observações organizadas por cliente.
             </li>
         </ul>
     ));
@@ -203,155 +162,6 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
       await supabase.from('financial_records').delete().eq('id', id);
   };
 
-  // --- HANDLERS: DEALS ---
-  const handleOpenDealModal = (deal?: Deal) => {
-      if (deal) { setEditingDealId(deal.id); setDealForm(deal); } 
-      else { setEditingDealId(null); setDealForm({ title: '', value: 0, stage: DealStage.PROSPECTING, probability: 50 }); }
-      setIsDealModalOpen(true);
-  };
-  const handleSaveDeal = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!selectedCompany || !setDeals) return;
-      
-      // FIX: Cast object to satisfy the Omit<Deal, 'tenant_id'> type, as the form data is a Partial type.
-      const deal: Omit<Deal, 'tenant_id'> = editingDealId 
-          ? { ...deals.find(d => d.id === editingDealId)!, ...dealForm } as Deal
-          : { id: `d${Date.now()}`, companyId: selectedCompany.id, lastActivity: new Date().toISOString(), history: [], ...dealForm } as Omit<Deal, 'tenant_id'>;
-
-      if (editingDealId) setDeals(prev => prev.map(d => d.id === editingDealId ? { ...deal, tenant_id: selectedCompany.tenant_id } as Deal : d)); 
-      else setDeals(prev => [{ ...deal, tenant_id: selectedCompany.tenant_id } as Deal, ...prev]);
-      
-      setIsDealModalOpen(false);
-      if (isMockUser) return;
-      await supabase.from('deals').upsert(deal);
-  };
-  const handleDeleteDeal = async (id: string) => {
-      if (!window.confirm('Excluir negociação?') || !setDeals) return;
-      setDeals(prev => prev.filter(d => d.id !== id));
-      if (isMockUser) return;
-      await supabase.from('deals').delete().eq('id', id);
-  };
-
-  // --- HANDLERS: TASKS & MEETINGS ---
-  const handleOpenTaskModal = (task?: Task, type: string = TaskType.CALL) => {
-      if (task) { 
-          setEditingTaskId(task.id); 
-          // If editing, determine if it's a meeting or task based on existing type
-          const isMeeting = task.type === TaskType.MEETING;
-          setActivityType(isMeeting ? 'MEETING' : 'TASK');
-          setTaskForm(task); 
-      } else { 
-          setEditingTaskId(null);
-          // If new, rely on the passed 'type' argument (Meeting vs Call/Task)
-          const isMeeting = type === TaskType.MEETING;
-          setActivityType(isMeeting ? 'MEETING' : 'TASK');
-          
-          setTaskForm({ 
-              title: '', 
-              type: type, 
-              dueDate: isMeeting ? new Date().toISOString().slice(0,16) : new Date().toISOString().split('T')[0], 
-              priority: isMeeting ? 'High' : 'Medium', 
-          }); 
-      }
-      setIsTaskModalOpen(true);
-  };
-
-  const handleSaveTask = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedCompany || !setTasks) return;
-  
-    if (editingTaskId) {
-      // --- UPDATE LOGIC ---
-      const originalTask = tasks.find(t => t.id === editingTaskId);
-      if (!originalTask) return;
-  
-      const finalType = activityType === 'MEETING' ? TaskType.MEETING : (taskForm.type || TaskType.CALL);
-      const updatedTask = { ...originalTask, ...taskForm, type: finalType };
-  
-      setTasks(prev => prev.map(t => (t.id === editingTaskId ? updatedTask : t)));
-      setIsTaskModalOpen(false);
-      
-      const { id, tenant_id, createdAt, ...payload } = updatedTask;
-      try {
-        const { error } = await supabase.from('tasks').update(payload).eq('id', id);
-        if (error) throw error;
-      } catch (error: any) {
-        console.error("Erro ao atualizar tarefa:", error.message);
-        alert(`Falha ao salvar alterações da tarefa: ${error.message}`);
-        setTasks(prev => prev.map(t => (t.id === editingTaskId ? originalTask : t))); // Revert on failure
-      }
-    } else {
-      // --- INSERT LOGIC ---
-      const finalType = activityType === 'MEETING' ? TaskType.MEETING : (taskForm.type || TaskType.CALL);
-      const finalDueDate = taskForm.dueDate || new Date().toISOString();
-  
-      const newTaskDataForDb: Omit<Task, 'id' | 'tenant_id' | 'createdAt'> = {
-        title: taskForm.title || 'Nova Tarefa',
-        description: taskForm.description,
-        type: finalType,
-        dueDate: finalDueDate,
-        priority: (activityType === 'MEETING' ? 'High' : taskForm.priority || 'Medium') as 'High' | 'Medium' | 'Low',
-        status: 'Pending' as const,
-        companyId: selectedCompany.id,
-        relatedTo: selectedCompany.name,
-      };
-      
-      const now = new Date().toISOString();
-      const tempId = `temp-${now}`;
-      const tempTask: Task = { ...newTaskDataForDb, createdAt: now, id: tempId, tenant_id: selectedCompany.tenant_id };
-      
-      setTasks(prev => [...prev, tempTask]);
-      setIsTaskModalOpen(false);
-  
-      try {
-        const { data, error } = await supabase.from('tasks').insert(newTaskDataForDb).select().single();
-        if (error) throw error;
-  
-        if (data) {
-          setTasks(prev => prev.map(t => (t.id === tempId ? { ...t, ...data } : t)));
-        }
-      } catch (error: any) {
-        console.error("Erro ao criar tarefa:", error.message);
-        alert(`A tarefa foi criada localmente, mas falhou ao salvar no servidor: ${error.message}`);
-      }
-    }
-  };
-
-  const handleDeleteTask = async (id: string) => {
-      if (!window.confirm('Excluir item?') || !setTasks) return;
-      setTasks(prev => prev.filter(t => t.id !== id));
-      if (isMockUser) return;
-      await supabase.from('tasks').delete().eq('id', id);
-  };
-
-  // --- HANDLERS: CONTACTS ---
-  const handleOpenContactModal = (contact?: Contact) => {
-      if (contact) { setEditingContactId(contact.id); setContactForm(contact); }
-      else { setEditingContactId(null); setContactForm({ name: '', role: '', email: '', phone: '' }); }
-      setIsContactModalOpen(true);
-  };
-  const handleSaveContact = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!selectedCompany || !setContacts) return;
-      
-      // FIX: Cast object to satisfy the Omit<Contact, 'tenant_id'> type, as the form data is a Partial type.
-      const contact: Omit<Contact, 'tenant_id'> = editingContactId 
-        ? { ...contacts.find(c => c.id === editingContactId)!, ...contactForm } as Contact
-        : { id: `ct${Date.now()}`, companyId: selectedCompany.id, ...contactForm } as Omit<Contact, 'tenant_id'>;
-      
-      if (editingContactId) setContacts(prev => prev.map(c => c.id === editingContactId ? { ...contact, tenant_id: selectedCompany.tenant_id } as Contact : c));
-      else setContacts(prev => [...prev, { ...contact, tenant_id: selectedCompany.tenant_id } as Contact]);
-      
-      setIsContactModalOpen(false);
-      if (isMockUser) return;
-      await supabase.from('contacts').upsert(contact);
-  };
-  const handleDeleteContact = async (id: string) => {
-      if (!window.confirm('Excluir contato?') || !setContacts) return;
-      setContacts(prev => prev.filter(c => c.id !== id));
-      if (isMockUser) return;
-      await supabase.from('contacts').delete().eq('id', id);
-  };
 
   // --- HANDLERS: NOTES ---
   const handleOpenNoteModal = (note?: any) => { 
@@ -446,7 +256,7 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
       const newCompanyBase: Omit<Company, 'id' | 'tenant_id'> = {
           name: formData.name || 'Nova Empresa',
           cnpj: formData.cnpj || '',
-          segment: formData.segment || (segments[0]?.name || 'Small'),
+          segment: formData.segment || '',
           location: formData.location || '',
           status: (formData.status as any) || 'Prospect',
           responsible_users: formData.responsible_users || [],
@@ -499,35 +309,6 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
       }
   };
 
-  const handleSaveNewSegment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSegmentName.trim() || !currentUser) return;
-
-    const newSegment: ListItem = {
-      id: `seg_${Date.now()}`,
-      tenant_id: currentUser.tenant_id,
-      name: newSegmentName.trim(),
-    };
-
-    // Optimistic update
-    setSegments(prev => [...prev, newSegment]);
-    setFormData(prev => ({ ...prev, segment: newSegment.name }));
-
-    if (!isMockUser) {
-      const { error } = await supabase.from('segments').upsert(newSegment);
-      if (error) {
-        console.error("Error saving new segment:", error);
-        // Revert on error
-        setSegments(prev => prev.filter(s => s.id !== newSegment.id));
-        setFormData(prev => ({ ...prev, segment: segments[0]?.name || '' }));
-        alert("Erro ao salvar novo segmento.");
-      }
-    }
-
-    setIsNewSegmentModalOpen(false);
-    setNewSegmentName('');
-  };
-
   const handleEditClick = (e: React.MouseEvent, company: Company) => { e.stopPropagation(); openEditModal(company); };
   const openEditModal = (company: Company) => { setEditingId(company.id); setFormData(company); setIsModalOpen(true); };
   const handleDeleteClick = async (e: React.MouseEvent, id: string) => { 
@@ -542,7 +323,7 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
           }
       } 
   };
-  const handleNewClick = () => { setEditingId(null); setFormData({ name: '', cnpj: '', segment: segments[0]?.name || '', location: '', status: 'Prospect' }); setIsModalOpen(true); };
+  const handleNewClick = () => { setEditingId(null); setFormData({ name: '', cnpj: '', segment: '', location: '', status: 'Prospect' }); setIsModalOpen(true); };
   const closeModal = () => { setIsModalOpen(false); setEditingId(null); };
 
   // --- BULK EDIT HANDLERS ---
@@ -914,10 +695,7 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                        <div className="flex space-x-6 overflow-x-auto scrollbar-hide -mb-px">
                            {[
                                { id: 'OVERVIEW', label: 'Visão Geral', icon: LayoutDashboard },
-                               { id: 'CONTACTS', label: 'Contatos', icon: ContactIcon, count: companyData.contacts.length },
-                               { id: 'DEALS', label: 'Negócios', icon: DollarSign, count: companyData.deals.length },
                                { id: 'FINANCE', label: 'Financeiro', icon: TrendingUp },
-                               { id: 'TASKS', label: 'Compromissos', icon: Calendar, count: companyData.tasks.length },
                                { id: 'NOTES', label: 'Notas', icon: StickyNote, count: companyData.notes.length }
                            ].map(tab => (
                                <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex items-center pb-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id ? 'border-mcsystem-500 text-mcsystem-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}><tab.icon size={16} className={`mr-2 ${activeTab === tab.id ? 'text-mcsystem-500' : 'text-gray-400'}`} />{tab.label}{tab.count !== undefined && (<span className={`ml-2 text-xs py-0.5 px-1.5 rounded-full ${activeTab === tab.id ? 'bg-mcsystem-100 text-mcsystem-600' : 'bg-gray-100 text-gray-500'}`}>{tab.count}</span>)}</button>
@@ -956,36 +734,7 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                                     </div>
                                 </div>
 
-                               {/* 2. COMPROMISSOS (REUNIÕES E TAREFAS) - Restaurado */}
-                               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                                   <div className="flex justify-between items-center mb-4">
-                                       <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center"><Clock size={14} className="mr-2 text-indigo-500" /> Próximos Compromissos</h3>
-                                       <button onClick={() => handleOpenTaskModal(undefined, TaskType.CALL)} className="text-[10px] text-indigo-500 font-bold hover:underline">+ Adicionar</button>
-                                   </div>
-                                   <div className="space-y-3">
-                                       {companyData.tasks.filter(t => t.status !== 'Done').slice(0, 3).map(task => (
-                                           <div key={task.id} onClick={() => handleOpenTaskModal(task)} className="bg-slate-50 p-3 rounded-lg border border-gray-100 hover:border-indigo-200 transition-colors cursor-pointer group">
-                                               <div className="flex justify-between items-start">
-                                                   <div className="flex items-center">
-                                                       <div className={`p-1.5 rounded-md mr-3 ${task.type === TaskType.MEETING ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
-                                                           {task.type === TaskType.MEETING ? <Video size={12} /> : <Clock size={12} />}
-                                                       </div>
-                                                       <div>
-                                                           <p className="text-xs font-bold text-gray-800 line-clamp-1">{task.title}</p>
-                                                           <p className="text-[10px] text-gray-500 mt-0.5">{new Date(task.dueDate).toLocaleDateString()} {task.type === TaskType.MEETING ? ' às ' + new Date(task.dueDate).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ''}</p>
-                                                       </div>
-                                                   </div>
-                                                   <ChevronRight size={14} className="text-gray-300 group-hover:text-indigo-400 transition-all" />
-                                               </div>
-                                           </div>
-                                       ))}
-                                       {companyData.tasks.filter(t => t.status !== 'Done').length === 0 && (
-                                           <p className="text-xs text-gray-400 italic py-2 text-center">Sem tarefas pendentes.</p>
-                                       )}
-                                   </div>
-                               </div>
-
-                               {/* 3. NOTAS RECENTES - Restaurado */}
+                               {/* 2. NOTAS RECENTES */}
                                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                                    <div className="flex justify-between items-center mb-4">
                                        <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center"><StickyNote size={14} className="mr-2 text-yellow-500" /> Notas Recentes</h3>
@@ -1022,11 +771,6 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                                        </div>
                                    </div>
                                )}
-                               <div onClick={() => setActiveTab('DEALS')} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 cursor-pointer hover:shadow-md transition-shadow group relative">
-                                   <div className="absolute top-5 right-5 text-gray-300 group-hover:text-mcsystem-500 transition-colors"><ChevronDown size={16} className="-rotate-90" /></div>
-                                   <div className="flex justify-between items-center mb-3"><h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center group-hover:text-mcsystem-600 transition-colors"><DollarSign size={14} className="mr-2 text-mcsystem-500" /> Negociações Recentes</h3></div>
-                                   <div className="space-y-3 pointer-events-none">{companyData.deals.slice(0,2).map(deal => (<div key={deal.id} className="bg-slate-50 rounded-lg p-3 border border-gray-100 border-l-4 border-l-mcsystem-500"><div className="flex justify-between items-start mb-1"><span className="text-xs font-bold text-gray-800 truncate">{deal.title}</span><span className="text-xs font-bold text-green-600">R$ {(deal.value || 0).toLocaleString('pt-BR')}</span></div><span className="text-[10px] text-gray-500">{deal.stage}</span></div>))}{companyData.deals.length === 0 && <p className="text-sm text-gray-400 italic">Nenhuma negociação.</p>}</div>
-                               </div>
                            </div>
                        )}
 
@@ -1036,146 +780,6 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                                <div className="space-y-3">
                                    {companyData.finance.map(f => (<div key={f.id} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex justify-between items-center group"><div><p className="text-sm font-bold text-gray-800">{f.description}</p><div className="flex gap-2 mt-1"><span className={`text-[10px] px-2 py-0.5 rounded ${f.status === TransactionStatus.PAID ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{f.status}</span><span className="text-[10px] text-gray-500 border px-2 py-0.5 rounded">{new Date(f.dueDate).toLocaleDateString()}</span></div></div><div className="text-right flex items-center gap-3"><span className={`font-bold ${f.type === TransactionType.INCOME ? 'text-green-600' : 'text-red-500'}`}>{f.type === TransactionType.INCOME ? '+' : '-'} R$ {(f.amount || 0).toLocaleString('pt-BR')}</span><div className="flex opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleOpenFinModal(f)} className="p-1.5 text-gray-400 hover:text-blue-500"><Pencil size={14}/></button><button onClick={() => handleDeleteFinance(f.id)} className="p-1.5 text-gray-400 hover:text-red-500"><Trash2 size={14}/></button></div></div></div>))}
                                    {companyData.finance.length === 0 && <div className="text-center py-8 text-gray-400">Nenhum registro financeiro.</div>}
-                               </div>
-                           </div>
-                       )}
-
-                       {activeTab === 'DEALS' && (
-                           <div className="animate-in slide-in-from-right-4 duration-200">
-                               <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-800 flex items-center"><DollarSign size={20} className="mr-2 text-mcsystem-500" /> Negociações</h3><button onClick={() => handleOpenDealModal()} className="text-sm bg-mcsystem-500 text-white px-3 py-1.5 rounded hover:bg-mcsystem-400 flex items-center"><Plus size={16} className="mr-1"/> Nova</button></div>
-                                <div className="space-y-3">
-                                    {companyData.deals.map(d => (
-                                      <div key={d.id} className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 group">
-                                        <div className="flex justify-between items-start">
-                                          <div>
-                                            <p className="text-sm font-bold text-gray-800">{d.title}</p>
-                                            <p className="text-xs text-gray-500 mt-0.5">Estágio: <span className="font-medium text-mcsystem-600">{d.stage}</span></p>
-                                            {d.responsible_users && d.responsible_users.length > 0 && (
-                                              <div className="flex flex-wrap gap-1 mt-2">
-                                                {d.responsible_users.slice(0, 2).map(userId => {
-                                                  const user = allUsers.find(u => u.id === userId);
-                                                  return user ? (
-                                                    <div key={userId} className="flex items-center bg-mcsystem-50 text-mcsystem-700 px-2 py-0.5 rounded text-[10px]" title={user.name}>
-                                                      <UserIcon size={10} className="mr-1" />
-                                                      {user.name.split(' ')[0]}
-                                                    </div>
-                                                  ) : null;
-                                                })}
-                                                {d.responsible_users.length > 2 && (
-                                                  <span className="text-[10px] text-gray-500">+{d.responsible_users.length - 2}</span>
-                                                )}
-                                              </div>
-                                            )}
-                                          </div>
-                                          <div className="text-right">
-                                            <p className="font-bold text-green-600 text-sm">R$ {(d.value || 0).toLocaleString('pt-BR')}</p>
-                                            <p className="text-[10px] text-gray-400">{d.probability}% Prob.</p>
-                                          </div>
-                                        </div>
-                                        <div className="flex justify-end mt-2 opacity-0 group-hover:opacity-100 transition-opacity border-t border-gray-50 pt-2">
-                                          <button onClick={() => handleOpenDealModal(d)} className="text-xs text-blue-500 hover:underline mr-3">Editar</button>
-                                          <button onClick={() => handleDeleteDeal(d.id)} className="text-xs text-red-500 hover:underline">Excluir</button>
-                                        </div>
-                                      </div>
-                                    ))}
-                                    {companyData.deals.length === 0 && <div className="text-center py-8 text-gray-400">Nenhuma negociação ativa.</div>}
-                                </div>
-                           </div>
-                       )}
-
-                       {activeTab === 'TASKS' && (
-                           <div className="animate-in slide-in-from-right-4 duration-200 space-y-8">
-                               {/* Meetings Section */}
-                               <div>
-                                   <div className="flex justify-between items-center mb-4">
-                                       <h3 className="text-sm font-bold text-gray-800 flex items-center uppercase tracking-wide">
-                                           <Video size={16} className="mr-2 text-purple-500" /> Reuniões
-                                       </h3>
-                                       <button onClick={() => handleOpenTaskModal(undefined, TaskType.MEETING)} className="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-3 py-1.5 rounded hover:bg-purple-100 flex items-center font-bold transition-colors">
-                                           <Plus size={14} className="mr-1"/> Agendar
-                                       </button>
-                                   </div>
-                                   <div className="space-y-3">
-                                       {companyData.tasks.filter(t => t.type === TaskType.MEETING).map(t => (
-                                           <div key={t.id} className="bg-white p-3 rounded-lg shadow-sm border border-gray-100 flex items-center justify-between group hover:border-purple-200 transition-colors">
-                                               <div className="flex items-center">
-                                                   <div className="w-10 h-10 rounded-lg bg-purple-50 text-purple-700 flex flex-col items-center justify-center border border-purple-100 mr-3">
-                                                       <span className="text-[10px] font-bold uppercase">{new Date(t.dueDate).toLocaleString('default', { month: 'short' }).replace('.','')}</span>
-                                                       <span className="text-sm font-bold leading-none">{new Date(t.dueDate).getDate()}</span>
-                                                   </div>
-                                                   <div>
-                                                       <p className="text-sm font-bold text-gray-800">{t.title}</p>
-                                                       <p className="text-xs text-gray-500 flex items-center mt-0.5">
-                                                           <Clock size={10} className="mr-1"/> {t.dueDate.includes('T') ? new Date(t.dueDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Todo o dia'}
-                                                           <span className="mx-2">•</span>
-                                                           
-                                                       </p>
-                                                   </div>
-                                               </div>
-                                               <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
-                                                   <button onClick={() => handleOpenTaskModal(t)} className="p-1.5 text-gray-400 hover:text-blue-500"><Pencil size={14}/></button>
-                                                   <button onClick={() => handleDeleteTask(t.id)} className="p-1.5 text-gray-400 hover:text-red-500"><Trash2 size={14}/></button>
-                                               </div>
-                                           </div>
-                                       ))}
-                                       {companyData.tasks.filter(t => t.type === TaskType.MEETING).length === 0 && <p className="text-xs text-gray-400 italic">Nenhuma reunião agendada.</p>}
-                                   </div>
-                               </div>
-
-                               {/* Tasks Section */}
-                               <div>
-                                   <div className="flex justify-between items-center mb-4">
-                                       <h3 className="text-sm font-bold text-gray-800 flex items-center uppercase tracking-wide">
-                                           <CheckSquare size={16} className="mr-2 text-blue-500" /> Tarefas
-                                       </h3>
-                                       <button onClick={() => handleOpenTaskModal(undefined, TaskType.CALL)} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded hover:bg-blue-100 flex items-center font-bold transition-colors">
-                                           <Plus size={14} className="mr-1"/> Nova Tarefa
-                                       </button>
-                                   </div>
-                                   <div className="space-y-3">
-                                       {companyData.tasks.filter(t => t.type !== TaskType.MEETING).map(t => (
-                                           <div key={t.id} className="bg-white p-3 rounded-lg shadow-sm border border-gray-100 flex items-start group hover:border-blue-200 transition-colors">
-                                               <div className={`mt-1 mr-3 w-2 h-2 rounded-full flex-shrink-0 ${t.status === 'Done' ? 'bg-green-500' : 'bg-orange-400'}`}></div>
-                                               <div className="flex-1">
-                                                   <p className={`text-sm font-bold text-gray-800 ${t.status === 'Done' ? 'line-through text-gray-400' : ''}`}>{t.title}</p>
-                                                   <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                                                       <span className="bg-gray-100 px-1.5 py-0.5 rounded">{t.type}</span>
-                                                       <span>{new Date(t.dueDate).toLocaleDateString()}</span>
-                                                       <span></span>
-                                                   </div>
-                                               </div>
-                                               <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
-                                                   <button onClick={() => handleOpenTaskModal(t)} className="p-1.5 text-gray-400 hover:text-blue-500"><Pencil size={14}/></button>
-                                                   <button onClick={() => handleDeleteTask(t.id)} className="p-1.5 text-gray-400 hover:text-red-500"><Trash2 size={14}/></button>
-                                               </div>
-                                           </div>
-                                       ))}
-                                       {companyData.tasks.filter(t => t.type !== TaskType.MEETING).length === 0 && <p className="text-xs text-gray-400 italic">Nenhuma tarefa pendente.</p>}
-                                   </div>
-                               </div>
-                           </div>
-                       )}
-
-                       {activeTab === 'CONTACTS' && (
-                           <div className="animate-in slide-in-from-right-4 duration-200">
-                               <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-gray-800 flex items-center"><ContactIcon size={20} className="mr-2 text-indigo-500" /> Contatos ({companyData.contacts.length})</h3><button onClick={() => handleOpenContactModal()} className="text-sm bg-indigo-500 text-white px-3 py-1.5 rounded hover:bg-indigo-400 flex items-center"><Plus size={16} className="mr-1"/> Novo</button></div>
-                               <div className="space-y-3">
-                                   {companyData.contacts.length > 0 ? companyData.contacts.map(c => (
-                                       <div key={c.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between hover:shadow-md transition-shadow group">
-                                           <div className="flex items-center flex-1 min-w-0">
-                                               <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold mr-3 text-gray-500">{c.name.substring(0,1)}</div>
-                                               <div className="flex-1 min-w-0">
-                                                   <p className="text-sm font-bold text-gray-900 truncate">{c.name}</p>
-                                                   <p className="text-xs text-gray-500 truncate">{c.role}</p>
-                                                   <div className="flex items-center mt-1 space-x-3 text-xs text-gray-400">{c.email && <span className="flex items-center truncate"><Mail size={10} className="mr-1"/> {c.email}</span>}</div>
-                                               </div>
-                                           </div>
-                                           <div className="flex flex-col space-y-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
-                                               <button onClick={() => handleOpenContactModal(c)} className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded"><Pencil size={14}/></button>
-                                               <button onClick={() => handleDeleteContact(c.id)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"><Trash2 size={14}/></button>
-                                           </div>
-                                       </div>
-                                   )) : <div className="text-center py-8 text-gray-400 italic">Nenhum contato vinculado.</div>}
                                </div>
                            </div>
                        )}
@@ -1224,135 +828,6 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
            </div>
        )}
 
-       {isDealModalOpen && (
-           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
-               <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
-                   <div className="p-4 border-b flex justify-between items-center"><h3 className="font-bold">Negociação</h3><button onClick={() => setIsDealModalOpen(false)}><X size={20}/></button></div>
-                    <form onSubmit={handleSaveDeal} className="p-4 space-y-3">
-                        <input type="text" placeholder="Título da Oportunidade" className="w-full border p-2 rounded text-sm" value={dealForm.title} onChange={e => setDealForm({...dealForm, title: e.target.value})} />
-                        <div className="grid grid-cols-2 gap-2">
-                            <input type="number" placeholder="Valor" className="w-full border p-2 rounded text-sm" value={dealForm.value} onChange={e => setDealForm({...dealForm, value: Number(e.target.value)})} />
-                            <input type="number" placeholder="Probabilidade (%)" className="w-full border p-2 rounded text-sm" value={dealForm.probability} onChange={e => setDealForm({...dealForm, probability: Number(e.target.value)})} />
-                        </div>
-                        <select className="w-full border p-2 rounded text-sm" value={dealForm.stage} onChange={e => setDealForm({...dealForm, stage: e.target.value as any})}>{Object.values(DealStage).map(s => <option key={s} value={s}>{s}</option>)}</select>
-                        
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">Responsáveis</label>
-                          <div className="border border-gray-300 rounded p-2 max-h-32 overflow-y-auto space-y-1">
-                            {allUsers.length === 0 ? (
-                              <p className="text-xs text-gray-500">Nenhum usuário disponível</p>
-                            ) : (
-                              allUsers.map(user => (
-                                <label key={user.id} className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={(dealForm.responsible_users || []).includes(user.id)}
-                                    onChange={(e) => {
-                                      const currentResponsibles = dealForm.responsible_users || [];
-                                      if (e.target.checked) {
-                                        setDealForm({...dealForm, responsible_users: [...currentResponsibles, user.id]});
-                                      } else {
-                                        setDealForm({...dealForm, responsible_users: currentResponsibles.filter(id => id !== user.id)});
-                                      }
-                                    }}
-                                    className="rounded border-gray-300 text-mcsystem-500 focus:ring-mcsystem-500"
-                                  />
-                                  <span className="text-xs text-gray-700">{user.name}</span>
-                                </label>
-                              ))
-                            )}
-                          </div>
-                          <p className="text-[10px] text-gray-500 mt-1">
-                            {(dealForm.responsible_users || []).length} responsável(is) selecionado(s)
-                          </p>
-                        </div>
-                        
-                        <button type="submit" className="w-full bg-mcsystem-500 text-white p-2 rounded text-sm font-bold">Salvar</button>
-                    </form>
-               </div>
-           </div>
-       )}
-
-       {isTaskModalOpen && (
-           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4 backdrop-blur-sm">
-               <div className="bg-white rounded-xl shadow-xl w-full max-w-sm animate-in zoom-in-95 overflow-hidden">
-                   <div className={`p-4 border-b flex justify-between items-center text-white ${activityType === 'MEETING' ? 'bg-purple-600' : 'bg-blue-600'}`}>
-                       <h3 className="font-bold flex items-center">
-                           {activityType === 'MEETING' ? <Video size={18} className="mr-2" /> : <CheckSquare size={18} className="mr-2" />}
-                           {activityType === 'MEETING' ? 'Agendar Reunião' : 'Nova Tarefa'}
-                       </h3>
-                       <button onClick={() => setIsTaskModalOpen(false)} className="text-white/80 hover:text-white"><X size={20}/></button>
-                   </div>
-                   
-                   {/* Toggle */}
-                   <div className="flex bg-gray-100 p-1 mx-4 mt-4 rounded-lg">
-                        <button 
-                            type="button" 
-                            onClick={() => { setActivityType('TASK'); setTaskForm(prev => ({...prev, type: TaskType.CALL})); }} 
-                            className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${activityType === 'TASK' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}
-                        >
-                            Tarefa
-                        </button>
-                        <button 
-                            type="button" 
-                            onClick={() => { setActivityType('MEETING'); setTaskForm(prev => ({...prev, type: TaskType.MEETING})); }} 
-                            className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${activityType === 'MEETING' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500'}`}
-                        >
-                            Reunião
-                        </button>
-                   </div>
-
-                   <form onSubmit={handleSaveTask} className="p-4 space-y-3">
-                       <input required type="text" placeholder={activityType === 'MEETING' ? "Assunto da Reunião" : "Título da Tarefa"} className="w-full border p-2 rounded text-sm outline-none focus:ring-1 focus:ring-mcsystem-500" value={taskForm.title} onChange={e => setTaskForm({...taskForm, title: e.target.value})} />
-                       
-                       {activityType === 'TASK' && (
-                           <div className="grid grid-cols-2 gap-2">
-                               <select className="w-full border p-2 rounded text-sm bg-white" value={taskForm.type} onChange={e => setTaskForm({...taskForm, type: e.target.value as any})}>
-                                   <option value={TaskType.CALL}>Ligação</option>
-                                   <option value={TaskType.EMAIL}>Email</option>
-                                   <option value={TaskType.FOLLOW_UP}>Follow-up</option>
-                               </select>
-                               <input required type="date" className="w-full border p-2 rounded text-sm" value={taskForm.dueDate} onChange={e => setTaskForm({...taskForm, dueDate: e.target.value})} />
-                           </div>
-                       )}
-
-                       {activityType === 'MEETING' && (
-                           <input required type="datetime-local" className="w-full border p-2 rounded text-sm outline-none focus:ring-1 focus:ring-purple-500" value={taskForm.dueDate} onChange={e => setTaskForm({...taskForm, dueDate: e.target.value})} />
-                       )}
-
-                       {activityType === 'TASK' && (
-                           <select className="w-full border p-2 rounded text-sm bg-white" value={taskForm.priority} onChange={e => setTaskForm({...taskForm, priority: e.target.value as any})}>
-                               <option value="High">Alta Prioridade</option>
-                               <option value="Medium">Média Prioridade</option>
-                               <option value="Low">Baixa Prioridade</option>
-                           </select>
-                       )}
-
-                       <select className="w-full border p-2 rounded text-sm bg-white"  onChange={e => setTaskForm({...taskForm})}>
-                           <option value="">{activityType === 'MEETING' ? 'Responsável / Organizador' : 'Atribuir a...'}</option>
-                           {allUsers?.map(u => <option key={u.id} value={u.name}>{u.name}</option>)}
-                       </select>
-
-                       <button type="submit" className={`w-full text-white p-2 rounded text-sm font-bold mt-2 ${activityType === 'MEETING' ? 'bg-purple-600 hover:bg-purple-500' : 'bg-blue-500 hover:bg-blue-400'}`}>Salvar</button>
-                   </form>
-               </div>
-           </div>
-       )}
-
-       {isContactModalOpen && (
-           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
-               <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
-                   <div className="p-4 border-b flex justify-between items-center"><h3 className="font-bold">Contato</h3><button onClick={() => setIsContactModalOpen(false)}><X size={20}/></button></div>
-                   <form onSubmit={handleSaveContact} className="p-4 space-y-3">
-                       <input type="text" placeholder="Nome Completo" className="w-full border p-2 rounded text-sm" value={contactForm.name} onChange={e => setContactForm({...contactForm, name: e.target.value})} />
-                       <input type="text" placeholder="Cargo" className="w-full border p-2 rounded text-sm" value={contactForm.role} onChange={e => setContactForm({...contactForm, role: e.target.value})} />
-                       <input type="email" placeholder="E-mail" className="w-full border p-2 rounded text-sm" value={contactForm.email} onChange={e => setContactForm({...contactForm, email: e.target.value})} />
-                       <input type="text" placeholder="Telefone / Celular" className="w-full border p-2 rounded text-sm" value={contactForm.phone} onChange={e => setContactForm({...contactForm, phone: e.target.value})} />
-                       <button type="submit" className="w-full bg-indigo-500 text-white p-2 rounded text-sm font-bold">Salvar</button>
-                   </form>
-               </div>
-           </div>
-       )}
 
        {isNoteModalOpen && (
            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[110] p-4 overflow-visible">
@@ -1439,20 +914,9 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Segmento</label>
-                <div className="flex items-center gap-2">
-                    <select className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-1 focus:ring-mcsystem-500 outline-none bg-white"
-                        value={formData.segment} onChange={e => setFormData({...formData, segment: e.target.value})}>
-                        {segments.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                    </select>
-                    <button 
-                      type="button" 
-                      onClick={() => setIsNewSegmentModalOpen(true)} 
-                      className="p-2.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-600 border border-gray-300"
-                      title="Adicionar Novo Segmento"
-                    >
-                        <Plus size={16} />
-                    </button>
-                </div>
+                <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-1 focus:ring-mcsystem-500 outline-none"
+                    placeholder="Ex: E-commerce B2B"
+                    value={formData.segment || ''} onChange={e => setFormData({...formData, segment: e.target.value})} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
@@ -1493,40 +957,6 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
               
               <div className="flex justify-end space-x-2 pt-2">
                 <button type="button" onClick={closeModal} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancelar</button>
-                <button type="submit" className="px-4 py-2 bg-mcsystem-500 text-white rounded hover:bg-mcsystem-400 flex items-center">
-                   <Save size={16} className="mr-2" /> Salvar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* New Segment Modal */}
-       {isNewSegmentModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[110] p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm">
-            <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-                <h3 className="font-bold text-gray-800">Novo Segmento</h3>
-                <button onClick={() => setIsNewSegmentModalOpen(false)} className="text-gray-400 hover:text-gray-600">
-                  <X size={20} />
-                </button>
-            </div>
-            <form onSubmit={handleSaveNewSegment} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nome do Segmento</label>
-                <input 
-                    required 
-                    autoFocus
-                    type="text" 
-                    value={newSegmentName}
-                    onChange={e => setNewSegmentName(e.target.value)}
-                    placeholder="Ex: E-commerce B2B"
-                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-1 focus:ring-mcsystem-500 outline-none"
-                />
-              </div>
-              <div className="flex justify-end space-x-2 pt-2">
-                <button type="button" onClick={() => setIsNewSegmentModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancelar</button>
                 <button type="submit" className="px-4 py-2 bg-mcsystem-500 text-white rounded hover:bg-mcsystem-400 flex items-center">
                    <Save size={16} className="mr-2" /> Salvar
                 </button>
@@ -1583,14 +1013,13 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                     </select>
                 )}
                 {bulkEditField === 'segment' && (
-                    <select 
+                    <input
+                        type="text"
                         className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mcsystem-500 outline-none bg-white text-sm"
+                        placeholder="Digite o segmento..."
                         value={bulkEditValue}
                         onChange={e => setBulkEditValue(e.target.value)}
-                    >
-                        <option value="">Selecione um segmento...</option>
-                        {segments.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                    </select>
+                    />
                 )}
                 {bulkEditField === 'responsible' && (
                     <div className="border border-gray-300 rounded-lg p-3 max-h-64 overflow-y-auto space-y-2 bg-white">

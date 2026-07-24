@@ -2,7 +2,7 @@
   "name": "ancora",
   "private": true,
   "version": "1.0.0",
-  "description": "Sistema de Gestão Empresarial Ancóra - Plataforma completa para gestão financeira, comercial e operacional",
+  "description": "Ancóra - Sistema de gestão financeira (integração com Asaas)",
   "type": "module",
   "scripts": {
     "dev": "vite",

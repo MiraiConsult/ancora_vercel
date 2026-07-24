@@ -41,3 +41,6 @@ coverage
 .cache
 .temp
 *.tsbuildinfo
+
+# Backups de dados (contêm dados de clientes — não versionar)
+backups/

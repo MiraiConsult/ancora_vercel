@@ -55,6 +55,29 @@ export interface CreateSubscriptionParams {
 export const asaasSyncCustomer = (clientId: string) =>
   invoke('sync_customer', { clientId });
 
+/**
+ * Importa/sincroniza clientes, cobranças e assinaturas existentes da conta Asaas.
+ * Chama a Edge Function 'asaas-sync' (idempotente).
+ */
+export async function asaasSyncAll() {
+  const { data, error } = await supabase.functions.invoke('asaas-sync', { body: {} });
+  if (error) {
+    let message = error.message || 'Erro ao sincronizar com o Asaas.';
+    try {
+      const ctx = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        const j = await ctx.json();
+        if (j?.error) message = j.error;
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  if (data && data.success === false) throw new Error(data.error || 'Erro Asaas.');
+  return data as { customers_new: number; customers_linked: number; payments: number; subscriptions: number };
+}
+
 export const asaasCreateCharge = (params: CreateChargeParams) =>
   invoke('create_charge', params);
 

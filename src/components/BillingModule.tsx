@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { Company, Product, FinancialRecord, Subscription, RevenueType, User } from '../types';
-import { asaasCreateCharge, asaasCreateSubscription } from '../services/asaasService';
+import { asaasCreateCharge, asaasCreateSubscription, asaasSyncAll } from '../services/asaasService';
 import {
   FileText, Repeat, Plus, X, Save, Search, ExternalLink, Loader2,
-  CheckCircle2, Clock, AlertCircle, DollarSign, Zap,
+  CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw,
 } from 'lucide-react';
 
 interface BillingModuleProps {
@@ -15,6 +15,7 @@ interface BillingModuleProps {
   setSubscriptions: React.Dispatch<React.SetStateAction<Subscription[]>>;
   revenueTypes: RevenueType[];
   currentUser: User;
+  onRefresh: () => void | Promise<void>;
 }
 
 const BILLING_TYPES = [
@@ -37,12 +38,32 @@ const formatBRL = (v: number) =>
 
 export const BillingModule: React.FC<BillingModuleProps> = ({
   companies, products, financeRecords, setFinanceRecords,
-  subscriptions, setSubscriptions, revenueTypes, currentUser,
+  subscriptions, setSubscriptions, revenueTypes, currentUser, onRefresh,
 }) => {
   const [tab, setTab] = useState<'CHARGES' | 'SUBSCRIPTIONS'>('CHARGES');
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<null | 'charge' | 'subscription'>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const r = await asaasSyncAll();
+      await onRefresh();
+      alert(
+        `Sincronização concluída!\n\n` +
+        `Clientes novos: ${r.customers_new}\n` +
+        `Clientes vinculados: ${r.customers_linked}\n` +
+        `Cobranças: ${r.payments}\n` +
+        `Assinaturas: ${r.subscriptions}`,
+      );
+    } catch (e: any) {
+      alert(`Erro ao sincronizar com o Asaas: ${e.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const activeProducts = useMemo(() => products.filter(p => p.active), [products]);
   const clientName = (id?: string) => companies.find(c => c.id === id)?.name || '—';
@@ -97,12 +118,22 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
             </p>
           </div>
         </div>
-        <button
-          onClick={() => setModal(tab === 'CHARGES' ? 'charge' : 'subscription')}
-          className="px-5 py-3 bg-mcsystem-900 text-white rounded-xl font-semibold hover:bg-mcsystem-800 transition-all shadow-md flex items-center justify-center gap-2 flex-shrink-0"
-        >
-          <Plus size={18} /> {tab === 'CHARGES' ? 'Nova Cobrança' : 'Nova Assinatura'}
-        </button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="px-4 py-3 bg-white text-mcsystem-700 border border-mcsystem-200 rounded-xl font-semibold hover:bg-mcsystem-50 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+            title="Importar clientes, cobranças e assinaturas existentes do Asaas"
+          >
+            <RefreshCw size={18} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Sincronizando...' : 'Sincronizar'}
+          </button>
+          <button
+            onClick={() => setModal(tab === 'CHARGES' ? 'charge' : 'subscription')}
+            className="px-5 py-3 bg-mcsystem-900 text-white rounded-xl font-semibold hover:bg-mcsystem-800 transition-all shadow-md flex items-center justify-center gap-2"
+          >
+            <Plus size={18} /> {tab === 'CHARGES' ? 'Nova Cobrança' : 'Nova Assinatura'}
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}

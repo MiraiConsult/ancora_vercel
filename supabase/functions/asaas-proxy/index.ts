@@ -6,6 +6,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const ASAAS_BASE_URL = Deno.env.get('ASAAS_BASE_URL') || 'https://api.asaas.com/v3';
 const ASAAS_API_KEY = Deno.env.get('ASAAS_API_KEY') || '';
+// Asaas é exclusivo de um único tenant (conta única). Bloqueia qualquer outro.
+const ASAAS_TENANT_ID = Deno.env.get('ASAAS_TENANT_ID') || '';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -47,6 +49,12 @@ Deno.serve(async (req: Request) => {
 
     const { data: { user }, error: userErr } = await supabase.auth.getUser();
     if (userErr || !user) throw new Error('Sessão inválida.');
+
+    // Guard: Asaas habilitado só para o tenant configurado.
+    const { data: profile } = await supabase.from('profiles').select('tenant_id').eq('id', user.id).single();
+    if (ASAAS_TENANT_ID && profile?.tenant_id !== ASAAS_TENANT_ID) {
+      throw new Error('Asaas não está habilitado para esta empresa.');
+    }
 
     const { action, ...params } = await req.json();
 

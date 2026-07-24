@@ -3,6 +3,7 @@
 import React from 'react';
 import { Users, DollarSign, UserCog, LogOut, List, Bell, Database, ChevronsLeft, Package, Zap } from 'lucide-react';
 import { User } from '../types';
+import { isAsaasEnabled } from '../config';
 
 interface SidebarProps {
   currentPage: string;
@@ -19,7 +20,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
 
   const menuItems = [
     { id: 'finance', label: 'Gestão Financeira', icon: DollarSign, restricted: true },
-    { id: 'billing', label: 'Cobranças', icon: Zap, restricted: true },
+    // Cobranças (Asaas) é exclusivo do tenant habilitado
+    ...(isAsaasEnabled(currentUser.tenant_id) ? [{ id: 'billing', label: 'Cobranças', icon: Zap, restricted: true }] : []),
     { id: 'companies', label: 'Clientes', icon: Users, restricted: false },
     { id: 'products', label: 'Produtos', icon: Package, restricted: false },
     { id: 'alerts', label: 'Alertas', icon: Bell, restricted: false, badge: unreadCount > 0 ? unreadCount : 0 },

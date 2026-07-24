@@ -15,6 +15,7 @@ import { AuthCallback } from './components/AuthCallback';
 import { User, RevenueType, Bank, Company, FinancialRecord, Tenant, SystemNotification, ChartOfAccount, GeneralNote, Product, Subscription } from './types';
 import { ShieldAlert, Bell, Wifi, WifiOff, AlertTriangle, HelpCircle, X, Database, Building2 } from 'lucide-react';
 import { supabase, supabaseUrl, supabaseKey } from './lib/supabaseClient'; // Import credentials
+import { isAsaasEnabled } from './config';
 import {
   MOCK_USERS,
   MOCK_REVENUE_TYPES,
@@ -550,7 +551,7 @@ const handleAddUser = async (newUser: User) => {
         ) : <AccessDenied />;
 
       case 'billing':
-        return hasPermission('billing') ? (
+        return (hasPermission('billing') && isAsaasEnabled(user.tenant_id)) ? (
           <BillingModule
             companies={companies}
             products={products}
@@ -560,6 +561,7 @@ const handleAddUser = async (newUser: User) => {
             setSubscriptions={setSubscriptions}
             revenueTypes={revenueTypes}
             currentUser={user}
+            onRefresh={() => fetchAppData(user)}
           />
         ) : <AccessDenied />;
 

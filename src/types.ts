@@ -70,7 +70,7 @@ export interface FinancialRecord {
   needsValidation?: boolean;
   dealId?: string; // Legado — mantido para compatibilidade com registros existentes
   seriesId?: string;
-  split_revenue?: { revenue_type_id: string; amount: number; }[];
+  split_revenue?: { revenue_type_id?: string; product_id?: string; amount: number; }[];
   // Integração Asaas
   asaas_payment_id?: string;
   asaas_invoice_url?: string;

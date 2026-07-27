@@ -396,14 +396,14 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
     const isChecked = e.target.checked;
     setIsSplittingRevenue(isChecked);
     if (isChecked && (!newRecord.split_revenue || newRecord.split_revenue.length === 0)) {
-        setNewRecord(prev => ({...prev, split_revenue: [{ revenue_type_id: '', amount: 0 }]}));
+        setNewRecord(prev => ({...prev, split_revenue: [{ product_id: '', amount: 0 }]}));
     } else if (!isChecked) {
         // Clear split data if unchecked to prevent accidental saving
         setNewRecord(prev => ({...prev, split_revenue: [] }));
     }
   };
 
-  const handleSplitChange = (index: number, field: 'revenue_type_id' | 'amount', value: string | number) => {
+  const handleSplitChange = (index: number, field: 'product_id' | 'amount', value: string | number) => {
       const updatedSplits = [...(newRecord.split_revenue || [])];
       const finalValue = field === 'amount' ? Number(value) : value;
       updatedSplits[index] = { ...updatedSplits[index], [field]: finalValue };
@@ -413,7 +413,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   const addSplit = () => {
       setNewRecord(prev => ({
           ...prev,
-          split_revenue: [...(prev.split_revenue || []), { revenue_type_id: '', amount: 0 }]
+          split_revenue: [...(prev.split_revenue || []), { product_id: '', amount: 0 }]
       }));
   };
 
@@ -1253,7 +1253,7 @@ const newRecords: FinancialRecord[] = [];
 
     // Prepare revenue split payload if applicable
     const splitPayload = (newRecord.type === TransactionType.INCOME && newRecord.split_revenue && newRecord.split_revenue.length > 0)
-        ? newRecord.split_revenue.filter(s => s.revenue_type_id && s.amount > 0)
+        ? newRecord.split_revenue.filter(s => s.product_id && s.amount > 0)
         : null;
 
     if (installmentCount > 1 && !editingTransactionId) {
@@ -1681,9 +1681,16 @@ const newRecords: FinancialRecord[] = [];
                   if (monthMap.has(key)) { const entry = monthMap.get(key)!; if (isPositive) entry.income += amt; else entry.expense += Math.abs(amt); entry.balance = entry.income - entry.expense; }
                   if (isPositive) {
                       totalIncome += amt;
-                      // Receita por Produto
-                      const prodName = productName(r.product_id) || 'Sem produto';
-                      revenueTypeMap.set(prodName, (revenueTypeMap.get(prodName) || 0) + amt);
+                      // Receita por Produto (respeita split por produto)
+                      if (r.split_revenue && r.split_revenue.length > 0) {
+                          r.split_revenue.forEach(sp => {
+                              const pn = productName(sp.product_id) || 'Sem produto';
+                              revenueTypeMap.set(pn, (revenueTypeMap.get(pn) || 0) + Math.abs(sp.amount));
+                          });
+                      } else {
+                          const prodName = productName(r.product_id) || 'Sem produto';
+                          revenueTypeMap.set(prodName, (revenueTypeMap.get(prodName) || 0) + amt);
+                      }
                   } else {
                       const catName = r.category || 'Outros';
                       categoryMap.set(catName, (categoryMap.get(catName) || 0) + Math.abs(amt));
@@ -1729,8 +1736,15 @@ const newRecords: FinancialRecord[] = [];
       }).forEach(r => {
           const key = r.dueDate.slice(0,7);
           const monthMap2 = revenueTypeMonthlyMap.get(key)!;
-          const prodName = productName(r.product_id) || 'Sem produto';
-          monthMap2.set(prodName, (monthMap2.get(prodName) || 0) + r.amount);
+          if (r.split_revenue && r.split_revenue.length > 0) {
+              r.split_revenue.forEach(sp => {
+                  const pn = productName(sp.product_id) || 'Sem produto';
+                  monthMap2.set(pn, (monthMap2.get(pn) || 0) + sp.amount);
+              });
+          } else {
+              const prodName = productName(r.product_id) || 'Sem produto';
+              monthMap2.set(prodName, (monthMap2.get(prodName) || 0) + r.amount);
+          }
       });
       const allRevenueTypeNames = Array.from(new Set(Array.from(revenueTypeMonthlyMap.values()).flatMap(m => Array.from(m.keys()))));
       const revenueTypeMonthlyData = primaryKeys.map(k => {
@@ -1870,7 +1884,7 @@ const newRecords: FinancialRecord[] = [];
         return vals; 
       };
       
-      const calculateValueForRevenueType = (revenueTypeId: string, keys: string[]) => {
+      const calculateValueForRevenueType = (productId: string | null, keys: string[]) => {
           const vals: Record<string, number> = {};
           keys.forEach(key => {
               let totalForMonth = 0;
@@ -1884,14 +1898,14 @@ const newRecords: FinancialRecord[] = [];
 
               monthRecords.forEach(record => {
                   if (record.split_revenue && record.split_revenue.length > 0) {
-                      // Case 1: Record has revenue splits. Sum amounts from splits matching the revenueTypeId.
+                      // Case 1: Record has splits. Sum amounts from splits matching the product.
                       const relevantSplitAmount = record.split_revenue
-                          .filter(split => split.revenue_type_id === revenueTypeId)
+                          .filter(split => (split.product_id ?? null) === productId)
                           .reduce((sum, split) => sum + split.amount, 0);
                       totalForMonth += relevantSplitAmount;
                   } else {
-                      // Case 2: Record has no splits. Use original logic.
-                      if (record.revenueTypeId === revenueTypeId) {
+                      // Case 2: Record has no splits. Match by product.
+                      if ((record.product_id ?? null) === productId) {
                           totalForMonth += record.amount;
                       }
                   }
@@ -1903,7 +1917,7 @@ const newRecords: FinancialRecord[] = [];
       };
 
       // Helper: calculate cashflow value for a revenue type (uses payment/due date, not competence)
-      const calculateValueForRevenueTypeCashflow = (revenueTypeId: string, keys: string[]) => {
+      const calculateValueForRevenueTypeCashflow = (productId: string | null, keys: string[]) => {
           const vals: Record<string, number> = {};
           keys.forEach(key => {
               let totalForMonth = 0;
@@ -1921,11 +1935,11 @@ const newRecords: FinancialRecord[] = [];
               monthRecords.forEach(record => {
                   if (record.split_revenue && record.split_revenue.length > 0) {
                       const relevantSplitAmount = record.split_revenue
-                          .filter(split => split.revenue_type_id === revenueTypeId)
+                          .filter(split => (split.product_id ?? null) === productId)
                           .reduce((sum, split) => sum + split.amount, 0);
                       totalForMonth += relevantSplitAmount;
                   } else {
-                      if (record.revenueTypeId === revenueTypeId) {
+                      if ((record.product_id ?? null) === productId) {
                           totalForMonth += record.amount;
                       }
                   }
@@ -1943,14 +1957,18 @@ const newRecords: FinancialRecord[] = [];
         const outflowCenters = uniqueCenters.filter(c => c.classificationCode !== '1').sort((a,b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
         
         if (cashflowViewMode === 'REVENUE_TYPE') {
-            // REVENUE_TYPE mode: group inflows by revenue type (cash-based dates)
-            revenueTypes.forEach(rt => {
+            // Agrupa entradas por Produto (datas de caixa)
+            const productBuckets: { id: string | null, name: string }[] = [
+                ...products.filter(p => p.active).map(p => ({ id: p.id as string | null, name: p.name })),
+                { id: null, name: 'Sem produto' },
+            ];
+            productBuckets.forEach(pb => {
                 const rtNode = {
-                    code: rt.id,
-                    name: rt.name,
+                    code: pb.id || 'SEM_PRODUTO',
+                    name: pb.name,
                     type: 'RUBRIC',
-                    values: calculateValueForRevenueTypeCashflow(rt.id, primaryKeys),
-                    prevValues: calculateValueForRevenueTypeCashflow(rt.id, compareKeys)
+                    values: calculateValueForRevenueTypeCashflow(pb.id, primaryKeys),
+                    prevValues: calculateValueForRevenueTypeCashflow(pb.id, compareKeys)
                 };
                 inflowNode.children.push(rtNode);
             });
@@ -2014,9 +2032,13 @@ const newRecords: FinancialRecord[] = [];
               const clsNode: any = { code: clsCode, name: clsName, type: 'CLASSIFICATION', values: {}, prevValues: {}, children: [] };
               const isExpense = clsCode !== '1';
               
-              if (clsCode === '1') { // DRE Receitas are by Revenue Type
-                  revenueTypes.forEach(rt => {
-                      const rtNode = { code: rt.id, name: rt.name, type: 'RUBRIC', values: calculateValueForRevenueType(rt.id, primaryKeys), prevValues: calculateValueForRevenueType(rt.id, compareKeys) };
+              if (clsCode === '1') { // DRE Receitas são por Produto
+                  const productBuckets: { id: string | null, name: string }[] = [
+                      ...products.filter(p => p.active).map(p => ({ id: p.id as string | null, name: p.name })),
+                      { id: null, name: 'Sem produto' },
+                  ];
+                  productBuckets.forEach(pb => {
+                      const rtNode = { code: pb.id || 'SEM_PRODUTO', name: pb.name, type: 'RUBRIC', values: calculateValueForRevenueType(pb.id, primaryKeys), prevValues: calculateValueForRevenueType(pb.id, compareKeys) };
                       clsNode.children.push(rtNode);
                   });
               } else { // DRE Despesas are by COA hierarchy
@@ -2260,7 +2282,7 @@ const newRecords: FinancialRecord[] = [];
 
       return (
           <div className="space-y-4 animate-in fade-in">
-              <div className="flex flex-col md:flex-row justify-between items-center gap-4"><h3 className="font-bold text-gray-800 text-lg">{mode === 'DRE' ? `DRE Matriz` : `Fluxo de Caixa`}</h3><div className="flex flex-wrap gap-2 items-center"><div className="relative" ref={periodMenuRef}><button onClick={() => setIsPeriodMenuOpen(!isPeriodMenuOpen)} className="px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg font-medium flex items-center shadow-sm hover:bg-gray-50 text-gray-700"><Calendar size={16} className="mr-2 text-mcsystem-500" /> Configurar Período <ChevronDown size={14} className="ml-2 text-gray-400" /></button>{isPeriodMenuOpen && (<div className="absolute top-full right-0 mt-2 w-[400px] bg-white border border-gray-200 rounded-lg shadow-xl z-30 p-4 animate-in fade-in zoom-in-95"><div className="mb-4"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Principal</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={primaryPeriod.year} onChange={e => setPrimaryPeriod({...primaryPeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, false)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${primaryPeriod.months.includes(i + 1) ? 'bg-mcsystem-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{m}</button>))}</div><div className="flex justify-between text-xs text-mcsystem-600"><button onClick={() => selectAllMonths(false)} className="hover:underline">Selecionar Todos</button><button onClick={() => clearMonths(false)} className="text-red-500 hover:underline">Limpar</button></div></div><div className="h-px bg-gray-200 my-4"></div><div className="flex items-center justify-between mb-3"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={isCompareEnabled} onChange={() => setIsCompareEnabled(!isCompareEnabled)} className="sr-only peer"/><div className="relative w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-mcsystem-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-mcsystem-500"></div><span className="ms-2 text-sm font-medium text-gray-700">Comparar com outro período</span></label></div>{isCompareEnabled && (<div className="bg-gray-50 p-3 rounded-lg border border-gray-100 animate-in slide-in-from-top-2"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Comparativo</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none" value={comparePeriod.year} onChange={e => setComparePeriod({...comparePeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, true)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${comparePeriod.months.includes(i + 1) ? 'bg-purple-500 text-white' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-100'}`}>{m}</button>))}</div><div className="flex justify-between text-xs"><button onClick={copyPrimaryToCompare} className="text-purple-600 hover:underline flex items-center"><Copy size={10} className="mr-1"/> Copiar Principal</button><div className="space-x-2"><button onClick={() => selectAllMonths(true)} className="text-purple-600 hover:underline">Todos</button><button onClick={() => clearMonths(true)} className="text-red-500 hover:underline">Limpar</button></div></div></div>)}</div>)}</div>{mode === 'CASHFLOW' && (<><div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><div className="flex items-center bg-gray-100 rounded-lg p-1 gap-1"><button onClick={() => setCashflowViewMode('COA')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${cashflowViewMode === 'COA' ? 'bg-white text-mcsystem-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Plano de Contas</button><button onClick={() => setCashflowViewMode('REVENUE_TYPE')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${cashflowViewMode === 'REVENUE_TYPE' ? 'bg-white text-mcsystem-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Tipo de Receita</button></div></>)}<div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><button onClick={() => setIncludeProjections(!includeProjections)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${includeProjections ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{includeProjections ? <CheckSquare size={16} className="mr-2"/> : <Square size={16} className="mr-2"/>}{'Incluir Pendentes'}</button><button onClick={() => setHideEmptyRows(!hideEmptyRows)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${!hideEmptyRows ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{hideEmptyRows ? <Eye size={16} className="mr-2"/> : <EyeOff size={16} className="mr-2"/>}{hideEmptyRows ? 'Mostrar Vazios' : 'Ocultar Vazios'}</button><button onClick={() => setReportViewMode('SUMMARY')} className="px-4 py-2 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 font-medium">Voltar</button><button onClick={handleExportExcel} className="px-4 py-2 text-sm bg-mcsystem-500 text-white rounded-lg flex items-center font-medium shadow-sm hover:bg-mcsystem-400"><Download size={14} className="mr-2"/> Excel</button></div></div>
+              <div className="flex flex-col md:flex-row justify-between items-center gap-4"><h3 className="font-bold text-gray-800 text-lg">{mode === 'DRE' ? `DRE Matriz` : `Fluxo de Caixa`}</h3><div className="flex flex-wrap gap-2 items-center"><div className="relative" ref={periodMenuRef}><button onClick={() => setIsPeriodMenuOpen(!isPeriodMenuOpen)} className="px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg font-medium flex items-center shadow-sm hover:bg-gray-50 text-gray-700"><Calendar size={16} className="mr-2 text-mcsystem-500" /> Configurar Período <ChevronDown size={14} className="ml-2 text-gray-400" /></button>{isPeriodMenuOpen && (<div className="absolute top-full right-0 mt-2 w-[400px] bg-white border border-gray-200 rounded-lg shadow-xl z-30 p-4 animate-in fade-in zoom-in-95"><div className="mb-4"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Principal</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={primaryPeriod.year} onChange={e => setPrimaryPeriod({...primaryPeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, false)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${primaryPeriod.months.includes(i + 1) ? 'bg-mcsystem-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{m}</button>))}</div><div className="flex justify-between text-xs text-mcsystem-600"><button onClick={() => selectAllMonths(false)} className="hover:underline">Selecionar Todos</button><button onClick={() => clearMonths(false)} className="text-red-500 hover:underline">Limpar</button></div></div><div className="h-px bg-gray-200 my-4"></div><div className="flex items-center justify-between mb-3"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={isCompareEnabled} onChange={() => setIsCompareEnabled(!isCompareEnabled)} className="sr-only peer"/><div className="relative w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-mcsystem-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-mcsystem-500"></div><span className="ms-2 text-sm font-medium text-gray-700">Comparar com outro período</span></label></div>{isCompareEnabled && (<div className="bg-gray-50 p-3 rounded-lg border border-gray-100 animate-in slide-in-from-top-2"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Comparativo</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none" value={comparePeriod.year} onChange={e => setComparePeriod({...comparePeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, true)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${comparePeriod.months.includes(i + 1) ? 'bg-purple-500 text-white' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-100'}`}>{m}</button>))}</div><div className="flex justify-between text-xs"><button onClick={copyPrimaryToCompare} className="text-purple-600 hover:underline flex items-center"><Copy size={10} className="mr-1"/> Copiar Principal</button><div className="space-x-2"><button onClick={() => selectAllMonths(true)} className="text-purple-600 hover:underline">Todos</button><button onClick={() => clearMonths(true)} className="text-red-500 hover:underline">Limpar</button></div></div></div>)}</div>)}</div>{mode === 'CASHFLOW' && (<><div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><div className="flex items-center bg-gray-100 rounded-lg p-1 gap-1"><button onClick={() => setCashflowViewMode('COA')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${cashflowViewMode === 'COA' ? 'bg-white text-mcsystem-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Plano de Contas</button><button onClick={() => setCashflowViewMode('REVENUE_TYPE')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${cashflowViewMode === 'REVENUE_TYPE' ? 'bg-white text-mcsystem-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Produto</button></div></>)}<div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><button onClick={() => setIncludeProjections(!includeProjections)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${includeProjections ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{includeProjections ? <CheckSquare size={16} className="mr-2"/> : <Square size={16} className="mr-2"/>}{'Incluir Pendentes'}</button><button onClick={() => setHideEmptyRows(!hideEmptyRows)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${!hideEmptyRows ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{hideEmptyRows ? <Eye size={16} className="mr-2"/> : <EyeOff size={16} className="mr-2"/>}{hideEmptyRows ? 'Mostrar Vazios' : 'Ocultar Vazios'}</button><button onClick={() => setReportViewMode('SUMMARY')} className="px-4 py-2 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 font-medium">Voltar</button><button onClick={handleExportExcel} className="px-4 py-2 text-sm bg-mcsystem-500 text-white rounded-lg flex items-center font-medium shadow-sm hover:bg-mcsystem-400"><Download size={14} className="mr-2"/> Excel</button></div></div>
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
                   <table className="w-full text-xs text-gray-600 whitespace-nowrap table-fixed min-w-[1400px]">
                       <thead className="bg-gray-100 text-gray-600 font-bold uppercase tracking-wider text-[10px]">
@@ -2993,7 +3015,7 @@ const newRecords: FinancialRecord[] = [];
                                         className="h-4 w-4 rounded border-gray-300 text-mcsystem-600 focus:ring-mcsystem-500"
                                       />
                                       <label htmlFor="split-revenue-checkbox" className="ml-3 block text-sm font-medium text-gray-700">
-                                        Dividir receita por tipo
+                                        Dividir receita por produto
                                       </label>
                                     </div>
 
@@ -3003,10 +3025,10 @@ const newRecords: FinancialRecord[] = [];
                                           <div key={index} className="flex items-center gap-2">
                                             <div className="flex-1">
                                               <SearchableSelect
-                                                options={revenueTypes.map(rt => ({ value: rt.id, label: rt.name }))}
-                                                value={split.revenue_type_id}
-                                                onChange={val => handleSplitChange(index, 'revenue_type_id', val)}
-                                                placeholder="Tipo de Receita"
+                                                options={products.filter(p => p.active).map(p => ({ value: p.id, label: p.name }))}
+                                                value={split.product_id}
+                                                onChange={val => handleSplitChange(index, 'product_id', val)}
+                                                placeholder="Produto"
                                               />
                                             </div>
                                             <div className="relative w-32">

@@ -16,13 +16,13 @@ interface SettingsModuleProps {
 
 const permissionableModules = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'finance', label: 'Gestão Financeira' },
+  { id: 'finance', label: 'Financeiro (lançamentos, relatórios e plano de contas)' },
   { id: 'billing', label: 'Cobranças' },
   { id: 'companies', label: 'Clientes' },
   { id: 'products', label: 'Produtos' },
   { id: 'alerts', label: 'Alertas' },
-  { id: 'lists', label: 'Cadastros' },
-  { id: 'database', label: 'Banco de Dados' },
+  { id: 'lists', label: 'Bancos & Receitas' },
+  { id: 'database', label: 'Exportar Dados' },
 ];
 
 export const SettingsModule: React.FC<SettingsModuleProps> = ({ tenant, users, onAddUser, onUpdateUser, onDeleteUser, onUpdateTenant, onOpenHelp, currentUser }) => {

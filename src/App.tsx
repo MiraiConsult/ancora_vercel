@@ -5,6 +5,36 @@ import { CompaniesModule } from './components/CompaniesModule';
 import { ProductsModule } from './components/ProductsModule';
 import { BillingModule } from './components/BillingModule';
 import { OverviewDashboard } from './components/OverviewDashboard';
+import type { MainTab } from './components/FinanceDashboard';
+
+// Páginas do menu que abrem o módulo financeiro numa aba específica
+const FINANCE_TABS: Record<string, MainTab> = {
+  finance: 'RECONCILIATION',
+  entries: 'RECONCILIATION',
+  dre: 'DRE',
+  cashflow: 'CASHFLOW',
+  'cash-evolution': 'CASH_EVOLUTION',
+  coa: 'COA',
+  validation: 'VALIDATION',
+};
+
+const PAGE_TITLES: Record<string, string> = {
+  dashboard: 'Dashboard',
+  entries: 'Lançamentos',
+  finance: 'Lançamentos',
+  billing: 'Cobranças',
+  validation: 'Validação',
+  dre: 'DRE Gerencial',
+  cashflow: 'Fluxo de Caixa',
+  'cash-evolution': 'Evolução do Caixa',
+  companies: 'Clientes',
+  products: 'Produtos',
+  coa: 'Plano de Contas',
+  lists: 'Bancos & Receitas',
+  alerts: 'Alertas',
+  database: 'Exportar Dados',
+  settings: 'Configurações',
+};
 import { LoginScreen } from './components/LoginScreen';
 import { LandingPage } from './components/LandingPage';
 import { SettingsModule } from './components/SettingsModule';
@@ -65,7 +95,7 @@ const App: React.FC = () => {
   const [impersonatedTenantId, setImpersonatedTenantId] = useState<string | null>(null);
   const [impersonatedTenantName, setImpersonatedTenantName] = useState<string | null>(null);
 
-  const [currentPage, setCurrentPage] = useState('finance');
+  const [currentPage, setCurrentPage] = useState('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [currentTenant, setCurrentTenant] = useState<Tenant | null>({
       id: 'default',
@@ -516,12 +546,22 @@ const handleAddUser = async (newUser: User) => {
             companies={companies}
             subscriptions={subscriptions}
             currentUser={user}
+            onNavigate={setCurrentPage}
           />
         ) : <AccessDenied />;
 
       case 'finance':
+      case 'entries':
+      case 'dre':
+      case 'cashflow':
+      case 'cash-evolution':
+      case 'coa':
+      case 'validation':
         return hasPermission('finance') ? (
           <FinanceDashboard
+            key={currentPage}
+            initialTab={FINANCE_TABS[currentPage] || 'RECONCILIATION'}
+            hideTabs
             records={financeRecords}
             setRecords={setFinanceRecords}
             revenueTypes={revenueTypes}
@@ -684,12 +724,13 @@ const handleAddUser = async (newUser: User) => {
           currentUser={user}
           onLogout={signOut}
           unreadCount={unreadNotifications}
+          pendingValidationCount={financeRecords.filter(r => r.needsValidation).length}
           isCollapsed={isSidebarCollapsed}
           onToggle={toggleSidebar}
         />
         <main className={`flex-1 p-8 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'ml-20' : 'ml-64'} ${isSuperAdmin && impersonatedTenantName ? 'mt-14' : ''} min-w-0`}>
            <header className="flex-shrink-0 flex justify-between items-center mb-8">
-              <h1 className="text-xl font-semibold text-gray-800 capitalize">{currentPage === 'dashboard' ? 'Dashboard' : currentPage === 'finance' ? 'Gestão Financeira' : currentPage === 'settings' ? 'Configurações & Banco de Dados' : currentPage === 'companies' ? 'Clientes' : currentPage === 'products' ? 'Produtos' : currentPage === 'billing' ? 'Cobranças' : currentPage === 'lists' ? 'Cadastros' : currentPage === 'database' ? 'Banco de Dados' : currentPage}</h1>
+              <h1 className="text-xl font-semibold text-gray-800 capitalize">{PAGE_TITLES[currentPage] || currentPage}</h1>
               <div className="flex items-center space-x-4">
                   <div onClick={() => setCurrentPage('alerts')} className="relative cursor-pointer hover:bg-gray-100 p-2 rounded-full transition-colors">
                        {unreadNotifications > 0 && <span className="absolute top-1 right-1 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white animate-ping"></span>}

@@ -1,7 +1,10 @@
 
 
 import React from 'react';
-import { Users, DollarSign, UserCog, LogOut, List, Bell, Database, ChevronsLeft, Package, Zap, LayoutDashboard } from 'lucide-react';
+import {
+  Users, UserCog, LogOut, List, Bell, Database, ChevronsLeft, Package, Zap,
+  LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Landmark, Tags, FileCheck,
+} from 'lucide-react';
 import { User } from '../types';
 import { isAsaasEnabled } from '../config';
 
@@ -11,25 +14,62 @@ interface SidebarProps {
   currentUser: User;
   onLogout: () => void;
   unreadCount: number;
+  pendingValidationCount?: number;
   isCollapsed: boolean;
   onToggle: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, currentUser, onLogout, unreadCount, isCollapsed, onToggle }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, currentUser, onLogout, unreadCount, pendingValidationCount = 0, isCollapsed, onToggle }) => {
   const isAdmin = currentUser.role === 'admin';
 
-  const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, restricted: true },
-    { id: 'finance', label: 'Gestão Financeira', icon: DollarSign, restricted: true },
-    // Cobranças (Asaas) é exclusivo do tenant habilitado
-    ...(isAsaasEnabled(currentUser.tenant_id) ? [{ id: 'billing', label: 'Cobranças', icon: Zap, restricted: true }] : []),
-    { id: 'companies', label: 'Clientes', icon: Users, restricted: false },
-    { id: 'products', label: 'Produtos', icon: Package, restricted: false },
-    { id: 'alerts', label: 'Alertas', icon: Bell, restricted: false, badge: unreadCount > 0 ? unreadCount : 0 },
-    { id: 'lists', label: 'Cadastros', icon: List, restricted: true },
-    { id: 'database', label: 'Banco de Dados', icon: Database, restricted: true },
-    { id: 'settings', label: 'Configurações', icon: UserCog, restricted: true },
+  // Menu agrupado — o sistema inteiro é financeiro, então a navegação é por
+  // atividade (operação, relatórios, cadastros) em vez de um item "financeiro".
+  const menuGroups: { section?: string; items: any[] }[] = [
+    {
+      items: [
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, perm: 'dashboard' },
+      ],
+    },
+    {
+      section: 'Operação',
+      items: [
+        { id: 'entries', label: 'Lançamentos', icon: ArrowRightLeft, perm: 'finance' },
+        ...(isAsaasEnabled(currentUser.tenant_id) ? [{ id: 'billing', label: 'Cobranças', icon: Zap, perm: 'billing' }] : []),
+        { id: 'validation', label: 'Validação', icon: FileCheck, perm: 'finance', badge: pendingValidationCount },
+      ],
+    },
+    {
+      section: 'Relatórios',
+      items: [
+        { id: 'dre', label: 'DRE Gerencial', icon: FileText, perm: 'finance' },
+        { id: 'cashflow', label: 'Fluxo de Caixa', icon: TrendingUp, perm: 'finance' },
+        { id: 'cash-evolution', label: 'Evolução do Caixa', icon: Landmark, perm: 'finance' },
+      ],
+    },
+    {
+      section: 'Cadastros',
+      items: [
+        { id: 'companies', label: 'Clientes', icon: Users, perm: 'companies' },
+        { id: 'products', label: 'Produtos', icon: Package, perm: 'products' },
+        { id: 'coa', label: 'Plano de Contas', icon: Tags, perm: 'finance' },
+        { id: 'lists', label: 'Bancos & Receitas', icon: List, perm: 'lists' },
+      ],
+    },
+    {
+      section: 'Sistema',
+      items: [
+        { id: 'alerts', label: 'Alertas', icon: Bell, perm: 'alerts', badge: unreadCount > 0 ? unreadCount : 0 },
+        { id: 'database', label: 'Exportar Dados', icon: Database, perm: 'database' },
+        { id: 'settings', label: 'Configurações', icon: UserCog, perm: 'settings', adminOnly: true },
+      ],
+    },
   ];
+
+  const canSee = (item: any) => {
+    if (isAdmin) return true;
+    if (item.adminOnly) return false;
+    return currentUser.permissions?.[item.perm] === true;
+  };
 
   return (
     <div className={`bg-mcsystem-900 text-white h-screen fixed left-0 top-0 flex flex-col shadow-2xl z-50 transition-all duration-300 ease-in-out ${isCollapsed ? 'w-20' : 'w-64'}`}>
@@ -57,50 +97,47 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
         </div>
       </div>
 
-      <nav className="flex-1 py-6 overflow-y-auto">
-        <ul className="space-y-1 px-3">
-          {menuItems.map((item) => {
-            let hasPermission = false;
-            if (isAdmin) {
-                hasPermission = true;
-            } else {
-                // For collaborators, check permissions object if it exists.
-                // If it doesn't exist, fall back to the default 'restricted' flag.
-                if (currentUser.permissions) {
-                    hasPermission = !!currentUser.permissions[item.id];
-                } else {
-                    hasPermission = !item.restricted;
-                }
-            }
-
-            if (!hasPermission) return null;
-
-            const Icon = item.icon;
-            const isActive = currentPage === item.id;
-            return (
-              <li key={item.id} title={isCollapsed ? item.label : undefined}>
-                <button
-                  onClick={() => onNavigate(item.id)}
-                  className={`w-full flex items-center px-4 py-3 rounded-lg transition-all duration-200 group ${isCollapsed ? 'justify-center' : 'justify-between'}
-                    ${isActive
-                      ? 'text-white bg-mcsystem-800 shadow-md border border-mcsystem-700'
-                      : 'text-gray-400 hover:text-white hover:bg-mcsystem-800/50 border border-transparent'
-                    }`}
-                >
-                  <div className="flex items-center">
-                    <Icon size={18} className={`transition-colors ${isCollapsed ? '' : 'mr-3'} ${isActive ? 'text-mcsystem-500' : 'text-gray-500 group-hover:text-gray-300'}`} />
-                    {!isCollapsed && <span className="text-sm font-medium tracking-wide">{item.label}</span>}
-                  </div>
-                  {!isCollapsed && item.badge && item.badge > 0 && (
-                    <span className="bg-red-500 text-white text-[10px] font-bold rounded-full h-5 w-5 flex items-center justify-center shadow-sm">
-                      {item.badge}
-                    </span>
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+      <nav className="flex-1 py-5 overflow-y-auto">
+        {menuGroups.map((group, gi) => {
+          const visible = group.items.filter(canSee);
+          if (visible.length === 0) return null;
+          return (
+            <div key={gi} className={gi > 0 ? 'mt-5' : ''}>
+              {group.section && !isCollapsed && (
+                <p className="px-6 mb-2 text-[10px] font-bold uppercase tracking-widest text-gray-600">{group.section}</p>
+              )}
+              {group.section && isCollapsed && <div className="mx-4 mb-2 h-px bg-mcsystem-800" />}
+              <ul className="space-y-1 px-3">
+                {visible.map(item => {
+                  const Icon = item.icon;
+                  const isActive = currentPage === item.id;
+                  return (
+                    <li key={item.id} title={isCollapsed ? item.label : undefined}>
+                      <button
+                        onClick={() => onNavigate(item.id)}
+                        className={`w-full flex items-center px-4 py-2.5 rounded-lg transition-all duration-200 group ${isCollapsed ? 'justify-center' : 'justify-between'}
+                          ${isActive
+                            ? 'text-white bg-mcsystem-800 shadow-md border border-mcsystem-700'
+                            : 'text-gray-400 hover:text-white hover:bg-mcsystem-800/50 border border-transparent'
+                          }`}
+                      >
+                        <div className="flex items-center min-w-0">
+                          <Icon size={18} className={`transition-colors flex-shrink-0 ${isCollapsed ? '' : 'mr-3'} ${isActive ? 'text-mcsystem-500' : 'text-gray-500 group-hover:text-gray-300'}`} />
+                          {!isCollapsed && <span className="text-sm font-medium tracking-wide truncate">{item.label}</span>}
+                        </div>
+                        {!isCollapsed && item.badge > 0 && (
+                          <span className="bg-red-500 text-white text-[10px] font-bold rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center shadow-sm flex-shrink-0">
+                            {item.badge}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })}
       </nav>
 
       <div className="p-4 border-t border-mcsystem-800 bg-mcsystem-900 mt-auto">

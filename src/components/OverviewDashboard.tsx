@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   BarChart, LineChart, Cell,
 } from 'recharts';
-import { ChevronDown, Check, ArrowUp, ArrowDown } from 'lucide-react';
+import { ChevronDown, Check, ArrowUp, ArrowDown, X, ExternalLink } from 'lucide-react';
 
 interface OverviewDashboardProps {
   records: FinancialRecord[];
@@ -12,6 +12,7 @@ interface OverviewDashboardProps {
   companies: Company[];
   subscriptions: Subscription[];
   currentUser: User;
+  onNavigate?: (page: string) => void;
 }
 
 const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
@@ -74,7 +75,7 @@ const monthlyFactor = (cycle?: string) => {
   }
 };
 
-export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, products, companies, subscriptions }) => {
+export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, products, companies, subscriptions, onNavigate }) => {
   const productName = (id?: string | null) => products.find(p => p.id === id)?.name || null;
   const companyName = (id?: string) => companies.find(c => c.id === id)?.name || 'Sem cliente';
 
@@ -295,7 +296,18 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     });
     const activeClientsByProduct = Array.from(byProduct.entries())
       .map(([name, set]) => ({ name, value: set.size })).sort((a, b) => b.value - a.value);
-    return { mrr, arr: mrr * 12, activeSubscribers, activeClientsByProduct };
+    // Um item por cliente, somando o MRR de todas as assinaturas dele
+    const perClient = new Map<string, { label: string; tag?: string; value: number }>();
+    active.forEach(s => {
+      const key = s.client_id || s.id;
+      const cur = perClient.get(key) || { label: companyName(s.client_id), tag: productName(s.product_id) || undefined, value: 0 };
+      cur.value += (s.value || 0) * monthlyFactor(s.cycle);
+      perClient.set(key, cur);
+    });
+    const activeClientList = Array.from(perClient.entries())
+      .map(([id, v]) => ({ id, label: v.label, sub: 'Assinatura ativa', tag: v.tag, value: v.value }))
+      .sort((a, b) => b.value - a.value);
+    return { mrr, arr: mrr * 12, activeSubscribers, activeClientsByProduct, activeClientList };
   }, [subscriptions, productSet, products]);
 
   const arpu = recurring.activeSubscribers > 0 ? recurring.mrr / recurring.activeSubscribers : 0;
@@ -303,6 +315,29 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
 
   const siglaFat = useMemo(() => buildSiglas(derived.topProductNames), [derived.topProductNames]);
   const siglaCli = useMemo(() => buildSiglas(derived.clientProdNames), [derived.clientProdNames]);
+
+  // ---- Drill-down dos KPIs ----
+  const [drill, setDrill] = useState<null | { title: string; rows: DrillRow[]; goTo?: string }>(null);
+
+  const inPeriod = (r: FinancialRecord) => {
+    const d = r.dueDate || '';
+    if (!d.startsWith(String(year))) return false;
+    return monthsSorted.includes(parseInt(d.slice(5, 7)));
+  };
+  const toRow = (r: FinancialRecord): DrillRow => ({
+    id: r.id,
+    label: r.description || 'Lançamento',
+    sub: companyName(r.companyId),
+    tag: (r.split_revenue?.length ? 'Múltiplos' : productName(r.product_id)) || undefined,
+    date: r.dueDate,
+    value: r.amount >= 0 ? incomeUnderFilter(r) : -Math.abs(r.amount),
+    status: r.status as string,
+  });
+  const incomeRows = (extra?: (r: FinancialRecord) => boolean) =>
+    validRecords.filter(r => r.amount >= 0 && inPeriod(r) && incomeUnderFilter(r) !== 0 && (!extra || extra(r)))
+      .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '')).map(toRow);
+
+  const openDrill = (title: string, rows: DrillRow[], goTo?: string) => setDrill({ title, rows, goTo });
 
   const monthsLabel = monthsSorted.length === 12 ? 'Ano cheio'
     : monthsSorted.length === 1 ? MONTHS[monthsSorted[0] - 1]
@@ -401,17 +436,33 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
           <SectionTitle title="Resumo" context={`${scopeLabel}${compare ? ` contra ${compareYear}` : ''}`} />
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <Kpi label="Receita total" value={brl(primary.totalIncome)}
-              delta={compare ? deltaOf(primary.totalIncome, compare.totalIncome) : null} compareYear={compareYear} />
+              delta={compare ? deltaOf(primary.totalIncome, compare.totalIncome) : null} compareYear={compareYear}
+              onClick={() => openDrill('Receita total', incomeRows(), 'entries')} />
             <Kpi label="Recebido" value={brl(primary.receivedIncome)}
-              delta={compare ? deltaOf(primary.receivedIncome, compare.receivedIncome) : null} compareYear={compareYear} />
+              delta={compare ? deltaOf(primary.receivedIncome, compare.receivedIncome) : null} compareYear={compareYear}
+              onClick={() => openDrill('Recebido', incomeRows(r => (r.status as string) === 'Pago'), 'entries')} />
             <Kpi label="Saldo" value={brl(primary.balance)} hint={`Margem ${pct(primary.margin)}`}
-              delta={compare ? deltaOf(primary.balance, compare.balance) : null} compareYear={compareYear} />
-            <Kpi label="MRR" value={brl(recurring.mrr)} hint={`ARR ${brl(recurring.arr)}`} />
-            <Kpi label="Clientes ativos" value={String(recurring.activeSubscribers)} hint={`+${derived.newLastMonth} no último mês`} />
+              delta={compare ? deltaOf(primary.balance, compare.balance) : null} compareYear={compareYear}
+              onClick={() => openDrill('Despesas do período',
+                validRecords.filter(r => r.amount < 0 && inPeriod(r))
+                  .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '')).map(toRow), 'entries')} />
+            <Kpi label="MRR" value={brl(recurring.mrr)} hint={`ARR ${brl(recurring.arr)}`}
+              onClick={() => openDrill('Assinaturas ativas', subscriptions
+                .filter(s => (s.status || 'ACTIVE') === 'ACTIVE' && productSet.has(productName(s.product_id) || NO_PRODUCT))
+                .sort((a, b) => (b.value || 0) - (a.value || 0))
+                .map(s => ({
+                  id: s.id, label: s.description || 'Assinatura', sub: companyName(s.client_id),
+                  tag: productName(s.product_id) || undefined, date: s.next_due_date,
+                  value: s.value || 0, status: s.cycle,
+                })), 'billing')} />
+            <Kpi label="Clientes ativos" value={String(recurring.activeSubscribers)} hint={`+${derived.newLastMonth} no último mês`}
+              onClick={() => openDrill('Clientes com assinatura ativa', recurring.activeClientList, 'companies')} />
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Kpi label="Em atraso" value={brl(primary.overdueIncome)} hint={`${pct(primary.overdueRate)} da receita`} />
-            <Kpi label="A receber" value={brl(primary.pendingIncome)} />
+            <Kpi label="Em atraso" value={brl(primary.overdueIncome)} hint={`${pct(primary.overdueRate)} da receita`}
+              onClick={() => openDrill('Cobranças em atraso', incomeRows(r => (r.status as string) === 'Atrasado'), 'entries')} />
+            <Kpi label="A receber" value={brl(primary.pendingIncome)}
+              onClick={() => openDrill('A receber', incomeRows(r => (r.status as string) === 'Pendente'), 'entries')} />
             <Kpi label="ARPU" value={brl(arpu)} hint={ltv !== null ? `LTV ${brl(ltv)}` : undefined} />
             <Kpi label="Churn médio" value={pct(derived.avgChurn)} hint={`Retenção ${pct(100 - derived.avgChurn)}`} />
           </div>
@@ -607,6 +658,98 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
           Churn e novos clientes calculados a partir do histórico de cobranças. MRR, ARPU e base ativa consideram as assinaturas ativas.
         </p>
       </div>
+
+      {drill && (
+        <DrillModal
+          title={drill.title}
+          rows={drill.rows}
+          onClose={() => setDrill(null)}
+          onGoTo={drill.goTo && onNavigate ? () => { onNavigate(drill.goTo!); setDrill(null); } : undefined}
+        />
+      )}
+    </div>
+  );
+};
+
+// ---------- Drill-down ----------
+
+interface DrillRow {
+  id: string;
+  label: string;
+  sub?: string;
+  tag?: string;
+  date?: string;
+  value: number;
+  status?: string;
+}
+
+const statusChip = (s?: string) => {
+  if (!s) return null;
+  const map: Record<string, string> = {
+    Pago: 'text-green-700 bg-green-50',
+    Pendente: 'text-amber-700 bg-amber-50',
+    Atrasado: 'text-red-700 bg-red-50',
+  };
+  return <span className={`text-[11px] font-medium px-2 py-0.5 rounded-md ${map[s] || 'text-gray-500 bg-gray-100'}`}>{s}</span>;
+};
+
+const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => void; onGoTo?: () => void }> = ({ title, rows, onClose, onGoTo }) => {
+  const total = rows.reduce((s, r) => s + r.value, 0);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-150"
+        onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-gray-900">{title}</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{rows.length} registro(s) · {brlExact(total)}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {onGoTo && (
+              <button onClick={onGoTo}
+                className="text-xs font-semibold text-gray-700 hover:text-gray-900 border border-gray-200 hover:border-gray-300 rounded-lg px-3 py-1.5 flex items-center gap-1.5">
+                Abrir módulo <ExternalLink size={12} />
+              </button>
+            )}
+            <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-y-auto">
+          {rows.length === 0 ? (
+            <div className="py-16 text-center text-gray-300 text-sm">Nenhum registro no período</div>
+          ) : (
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-gray-100">
+                {rows.map(r => (
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-3">
+                      <div className="font-medium text-gray-800 truncate max-w-md">{r.label}</div>
+                      <div className="text-xs text-gray-400 flex items-center gap-2 mt-0.5">
+                        {r.sub}
+                        {r.tag && <span className="text-[11px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{r.tag}</span>}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{r.date}</td>
+                    <td className="px-3 py-3">{statusChip(r.status)}</td>
+                    <td className={`px-6 py-3 text-right font-semibold tabular-nums whitespace-nowrap ${r.value < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                      {brlExact(r.value)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -640,11 +783,16 @@ const SectionTitle: React.FC<{ title: string; context?: string }> = ({ title, co
   </div>
 );
 
-const Kpi: React.FC<{ label: string; value: string; hint?: string; delta?: number | null; compareYear?: number }> = ({ label, value, hint, delta, compareYear }) => {
+const Kpi: React.FC<{ label: string; value: string; hint?: string; delta?: number | null; compareYear?: number; onClick?: () => void }> = ({ label, value, hint, delta, compareYear, onClick }) => {
   const up = (delta ?? 0) >= 0;
+  const Tag: any = onClick ? 'button' : 'div';
   return (
-    <div className="bg-white rounded-2xl border border-gray-200/80 p-5">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{label}</div>
+    <Tag onClick={onClick}
+      className={`bg-white rounded-2xl border border-gray-200/80 p-5 text-left w-full transition-all ${onClick ? 'cursor-pointer hover:border-gray-300 hover:shadow-md hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-gray-900/10' : ''}`}>
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{label}</div>
+        {onClick && <ChevronDown size={13} className="text-gray-300 -rotate-90" />}
+      </div>
       <div className="mt-2 text-2xl font-bold text-gray-900 tracking-tight tabular-nums">{value}</div>
       <div className="mt-2 flex items-center gap-2 min-h-[22px]">
         {delta !== null && delta !== undefined && (
@@ -656,7 +804,7 @@ const Kpi: React.FC<{ label: string; value: string; hint?: string; delta?: numbe
         {delta !== null && delta !== undefined && compareYear && <span className="text-xs text-gray-400">vs. {compareYear}</span>}
         {hint && <span className="text-xs text-gray-500">{hint}</span>}
       </div>
-    </div>
+    </Tag>
   );
 };
 

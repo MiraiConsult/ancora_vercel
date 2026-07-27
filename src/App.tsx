@@ -520,6 +520,7 @@ const handleAddUser = async (newUser: User) => {
             setChartOfAccounts={setChartOfAccounts}
             companies={companies}
             setCompanies={setCompanies}
+            products={products}
             currentUser={user}
           />
         ) : <AccessDenied />;

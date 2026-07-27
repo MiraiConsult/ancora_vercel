@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { FinancialRecord, TransactionType, TransactionStatus, ChartOfAccount, RevenueType, Bank, Company, User, FinancialRecordSplit } from '../types';
+import { FinancialRecord, TransactionType, TransactionStatus, ChartOfAccount, RevenueType, Bank, Company, User, FinancialRecordSplit, Product } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, AreaChart, Area, Line, PieChart, Pie, ComposedChart, LineChart, ReferenceLine } from 'recharts';
-import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as PieIcon, DollarSign, Plus, X, Save, List, Hash, Tag, Search, Pencil, Trash2, Landmark, Tags, Grid3X3, CalendarRange, FileCheck, Filter, Upload, Download, ChevronDown, TrendingUp, Wallet, ArrowRightLeft, LayoutDashboard, ChevronRight, Eye, EyeOff, Calendar, ArrowUpRight, ArrowDownRight, Minus, Settings2, Check, Copy, RefreshCw, BarChart3, TrendingDown, Sparkles, CreditCard, Clock, CalendarClock, Lock, CheckSquare, Square, CheckCircle2, Calculator, Split, Building, Edit3, Table, BookTemplate, BookOpen, ArrowUp, ArrowDown, ArrowUpDown, Users } from 'lucide-react';
+import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as PieIcon, DollarSign, Plus, X, Save, List, Hash, Tag, Search, Pencil, Trash2, Landmark, Tags, Grid3X3, CalendarRange, FileCheck, Filter, Upload, Download, ChevronDown, TrendingUp, Wallet, ArrowRightLeft, LayoutDashboard, ChevronRight, Eye, EyeOff, Calendar, ArrowUpRight, ArrowDownRight, Minus, Settings2, Check, Copy, RefreshCw, BarChart3, TrendingDown, Sparkles, CreditCard, Clock, CalendarClock, Lock, CheckSquare, Square, CheckCircle2, Calculator, Split, Building, Edit3, Table, BookTemplate, BookOpen, ArrowUp, ArrowDown, ArrowUpDown, Users, Package } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { generateFinancialInsight } from '../services/geminiService';
 import { supabase } from '../lib/supabaseClient';
@@ -18,6 +18,7 @@ interface FinanceDashboardProps {
   setChartOfAccounts: React.Dispatch<React.SetStateAction<ChartOfAccount[]>>;
   companies: Company[];
   setCompanies: React.Dispatch<React.SetStateAction<Company[]>>;
+  products: Product[];
   currentUser: User;
 }
 
@@ -103,8 +104,10 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
     setChartOfAccounts,
     companies,
     setCompanies,
+    products,
     currentUser
 }) => {
+  const productName = (id?: string | null) => products.find(p => p.id === id)?.name || null;
   const [activeTab, setActiveTab] = useState<MainTab>('RECONCILIATION');
   const [reportViewMode, setReportViewMode] = useState<ReportViewMode>('SUMMARY');
   const [cashflowViewMode, setCashflowViewMode] = useState<'COA' | 'REVENUE_TYPE'>('COA');
@@ -1281,6 +1284,7 @@ const newRecords: FinancialRecord[] = [];
                 bankId: newRecord.bankId,
                 companyId: newRecord.companyId,
                 revenueTypeId: splitPayload ? undefined : newRecord.revenueTypeId,
+                product_id: newRecord.product_id,
                 split_revenue: proratedSplits || undefined,
                 seriesId: seriesId,
             } as FinancialRecord;
@@ -1443,6 +1447,7 @@ const newRecords: FinancialRecord[] = [];
                 type: firstInstallment.type,
                 rubricId: firstInstallment.rubricId,
                 revenueTypeId: firstInstallment.revenueTypeId,
+                product_id: firstInstallment.product_id,
                 bankId: firstInstallment.bankId,
                 companyId: firstInstallment.companyId,
                 category: firstInstallment.category,
@@ -1676,16 +1681,9 @@ const newRecords: FinancialRecord[] = [];
                   if (monthMap.has(key)) { const entry = monthMap.get(key)!; if (isPositive) entry.income += amt; else entry.expense += Math.abs(amt); entry.balance = entry.income - entry.expense; }
                   if (isPositive) {
                       totalIncome += amt;
-                      // Revenue type breakdown
-                      if (r.split_revenue && r.split_revenue.length > 0) {
-                          r.split_revenue.forEach(split => {
-                              const rtName = revenueTypes.find(rt => rt.id === split.revenue_type_id)?.name || 'Outros';
-                              revenueTypeMap.set(rtName, (revenueTypeMap.get(rtName) || 0) + Math.abs(split.amount));
-                          });
-                      } else {
-                          const rtName = revenueTypes.find(rt => rt.id === r.revenueTypeId)?.name || 'Receita';
-                          revenueTypeMap.set(rtName, (revenueTypeMap.get(rtName) || 0) + amt);
-                      }
+                      // Receita por Produto
+                      const prodName = productName(r.product_id) || 'Sem produto';
+                      revenueTypeMap.set(prodName, (revenueTypeMap.get(prodName) || 0) + amt);
                   } else {
                       const catName = r.category || 'Outros';
                       categoryMap.set(catName, (categoryMap.get(catName) || 0) + Math.abs(amt));
@@ -1731,15 +1729,8 @@ const newRecords: FinancialRecord[] = [];
       }).forEach(r => {
           const key = r.dueDate.slice(0,7);
           const monthMap2 = revenueTypeMonthlyMap.get(key)!;
-          if (r.split_revenue && r.split_revenue.length > 0) {
-              r.split_revenue.forEach(split => {
-                  const rtName = revenueTypes.find(rt => rt.id === split.revenue_type_id)?.name || 'Outros';
-                  monthMap2.set(rtName, (monthMap2.get(rtName) || 0) + split.amount);
-              });
-          } else {
-              const rtName = revenueTypes.find(rt => rt.id === r.revenueTypeId)?.name || 'Receita';
-              monthMap2.set(rtName, (monthMap2.get(rtName) || 0) + r.amount);
-          }
+          const prodName = productName(r.product_id) || 'Sem produto';
+          monthMap2.set(prodName, (monthMap2.get(prodName) || 0) + r.amount);
       });
       const allRevenueTypeNames = Array.from(new Set(Array.from(revenueTypeMonthlyMap.values()).flatMap(m => Array.from(m.keys()))));
       const revenueTypeMonthlyData = primaryKeys.map(k => {
@@ -2638,7 +2629,7 @@ const newRecords: FinancialRecord[] = [];
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="mb-4">
                             <h3 className="font-bold text-gray-900 text-base">Composição da Receita</h3>
-                            <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Por Tipo de Receita</p>
+                            <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Por Produto</p>
                         </div>
                         <div className="h-64">
                             <ResponsiveContainer width="100%" height="100%">
@@ -2727,7 +2718,7 @@ const newRecords: FinancialRecord[] = [];
                 {dashboardChartsData.revenueTypeMonthlyData.length > 0 && dashboardChartsData.allRevenueTypeNames.length > 0 && (
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="mb-4">
-                            <h3 className="font-bold text-gray-900 text-base">Receita por Tipo de Receita</h3>
+                            <h3 className="font-bold text-gray-900 text-base">Receita por Produto</h3>
                             <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">Evolução Mensal por Categoria</p>
                         </div>
                         <div className="h-72">
@@ -2983,9 +2974,8 @@ const newRecords: FinancialRecord[] = [];
                                         </div>
                                         {newRecord.type === TransactionType.INCOME && (
                                         <div className="flex items-center gap-2">
-                                            <div className="p-1.5 rounded-md bg-white border"><List size={16} className="text-gray-400"/></div>
-                                            <div className="flex-1"><SearchableSelect required options={revenueTypes.map(rt => ({ value: rt.id, label: rt.name }))} value={newRecord.revenueTypeId} onChange={val => setNewRecord({...newRecord, revenueTypeId: val})} placeholder="Selecione o Tipo de Receita" /></div>
-                                            <button type="button" onClick={() => setIsNewRevenueTypeModalOpen(true)} className="p-3 bg-white hover:bg-gray-100 rounded-lg border border-gray-200" title="Novo Tipo de Receita"><Plus size={16}/></button>
+                                            <div className="p-1.5 rounded-md bg-white border"><Package size={16} className="text-gray-400"/></div>
+                                            <div className="flex-1"><SearchableSelect options={products.filter(p => p.active).map(p => ({ value: p.id, label: p.name }))} value={newRecord.product_id} onChange={val => setNewRecord({...newRecord, product_id: val})} placeholder="Selecione o Produto" /></div>
                                         </div>
                                         )}
                                     </div>

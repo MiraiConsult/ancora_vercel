@@ -4,6 +4,7 @@ import {
   asaasCreateCharge, asaasCreateSubscription, asaasSyncAll,
   asaasUpdateCharge, asaasDeleteCharge, asaasUpdateSubscription, asaasDeleteSubscription,
 } from '../services/asaasService';
+import { supabase } from '../lib/supabaseClient';
 import {
   FileText, Repeat, Plus, X, Save, Search, ExternalLink, Loader2,
   CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown,
@@ -88,6 +89,25 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
     } finally {
       setSyncing(false);
     }
+  };
+
+  // Pergunta se quer aplicar o mesmo produto às demais cobranças do cliente (local)
+  const applyProductToClient = async (companyId: string | undefined, productId: string | null) => {
+    if (!companyId) return;
+    const targets = financeRecords.filter(r =>
+      r.companyId === companyId && r.asaas_payment_id && (r.product_id || null) !== (productId || null));
+    if (targets.length === 0) return;
+    const pname = products.find(p => p.id === productId)?.name || 'Sem produto';
+    if (!window.confirm(`Aplicar o produto "${pname}" às outras ${targets.length} cobrança(s) deste cliente?`)) return;
+
+    const ids = new Set(targets.map(t => t.id));
+    setFinanceRecords(prev => prev.map(r => ids.has(r.id) ? { ...r, product_id: (productId || undefined) as any } : r));
+    const { error } = await supabase
+      .from('financial_records')
+      .update({ product_id: productId })
+      .eq('companyId', companyId)
+      .not('asaas_payment_id', 'is', null);
+    if (error) alert('Erro ao aplicar aos demais lançamentos: ' + error.message);
   };
 
   const handleDeleteCharge = async (r: FinancialRecord) => {
@@ -279,9 +299,14 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
           charge={editCharge}
           products={products}
           onClose={() => setEditCharge(null)}
-          onSaved={(updated) => {
+          onSaved={async (updated) => {
+            const original = editCharge;
             setFinanceRecords(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated } : x));
             setEditCharge(null);
+            const newProduct = (updated.product_id ?? null) as string | null;
+            if (original && (original.product_id || null) !== newProduct) {
+              await applyProductToClient(original.companyId, newProduct);
+            }
           }}
         />
       )}

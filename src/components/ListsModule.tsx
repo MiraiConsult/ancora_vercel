@@ -1,24 +1,28 @@
 import React, { useState, useRef } from 'react';
-import { RevenueType, Bank, User } from '../types';
-import { Plus, Trash2, Save, X, Building, Wallet, Upload, Download } from 'lucide-react';
+import { RevenueType, Bank, User, Product } from '../types';
+import { Plus, Trash2, Save, X, Building, Upload, Download, Package } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import { ProductsModule } from './ProductsModule';
 
 interface ListsModuleProps {
   revenueTypes: RevenueType[];
   setRevenueTypes: React.Dispatch<React.SetStateAction<RevenueType[]>>;
   banks: Bank[];
   setBanks: React.Dispatch<React.SetStateAction<Bank[]>>;
+  products: Product[];
+  setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
   currentUser: User;
 }
 
-type ListType = 'REVENUE' | 'BANKS';
+type ListType = 'PRODUCTS' | 'BANKS';
 
 export const ListsModule: React.FC<ListsModuleProps> = ({
     revenueTypes, setRevenueTypes,
     banks, setBanks,
+    products, setProducts,
     currentUser
 }) => {
-  const [activeList, setActiveList] = useState<ListType>('REVENUE');
+  const [activeList, setActiveList] = useState<ListType>('PRODUCTS');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -123,11 +127,6 @@ export const ListsModule: React.FC<ListsModuleProps> = ({
         rows = [['Banco Exemplo', '0001', '12345-6', '1000,50']];
         filename = 'modelo_bancos.csv';
         break;
-      case 'REVENUE':
-        headers = ['Nome'];
-        rows = [['Venda de Produto']];
-        filename = 'modelo_tipos_receita.csv';
-        break;
       default:
         return;
     }
@@ -231,8 +230,8 @@ export const ListsModule: React.FC<ListsModuleProps> = ({
       <div className="flex flex-col lg:flex-row gap-6">
             {/* Sidebar Tabs */}
             <div className="lg:w-64 flex flex-col space-y-2">
-                <button onClick={() => setActiveList('REVENUE')} className={`p-3 rounded-lg text-left flex items-center font-medium ${activeList === 'REVENUE' ? 'bg-mcsystem-500 text-white shadow-md' : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200'}`}>
-                    <Wallet size={18} className="mr-3" /> Tipos de Receita
+                <button onClick={() => setActiveList('PRODUCTS')} className={`p-3 rounded-lg text-left flex items-center font-medium ${activeList === 'PRODUCTS' ? 'bg-mcsystem-500 text-white shadow-md' : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200'}`}>
+                    <Package size={18} className="mr-3" /> Produtos
                 </button>
                 <button onClick={() => setActiveList('BANKS')} className={`p-3 rounded-lg text-left flex items-center font-medium ${activeList === 'BANKS' ? 'bg-mcsystem-500 text-white shadow-md' : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200'}`}>
                     <Building size={18} className="mr-3" /> Contas Bancárias
@@ -240,12 +239,14 @@ export const ListsModule: React.FC<ListsModuleProps> = ({
             </div>
 
             {/* Content Area */}
+            {activeList === 'PRODUCTS' ? (
+              <div className="flex-1 min-w-0">
+                <ProductsModule products={products} setProducts={setProducts} currentUser={currentUser} />
+              </div>
+            ) : (
             <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-100 p-6">
                 <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-lg font-bold text-gray-800">
-                        {activeList === 'REVENUE' && 'Formas de Recebimento'}
-                        {activeList === 'BANKS' && 'Contas Bancárias'}
-                    </h3>
+                    <h3 className="text-lg font-bold text-gray-800">Contas Bancárias</h3>
                     <div className="flex items-center gap-2">
                         <button onClick={handleDownloadTemplate} className="text-sm bg-white border border-gray-200 text-gray-600 px-3 py-1.5 rounded-md hover:bg-gray-50 flex items-center shadow-sm">
                             <Download size={14} className="mr-1.5"/> Modelo
@@ -260,33 +261,22 @@ export const ListsModule: React.FC<ListsModuleProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                    {activeList === 'BANKS' ? (
-                        banks.map(bank => (
-                            <div key={bank.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
-                                <div>
-                                    <p className="font-bold text-gray-800">{bank.name}</p>
-                                    <p className="text-xs text-gray-500">Ag: {bank.agency} / CC: {bank.account}</p>
-                                    <p className="text-xs text-green-600 font-medium">Saldo Inicial: R$ {bank.initialBalance?.toLocaleString('pt-BR')}</p>
-                                </div>
-                                <div className="flex space-x-2">
-                                    <button onClick={() => openEditModal(bank)} className="text-gray-400 hover:text-blue-500 p-1">Editar</button>
-                                    <button onClick={() => handleDelete(bank.id)} className="text-gray-400 hover:text-red-500 p-1"><Trash2 size={16}/></button>
-                                </div>
+                    {banks.map(bank => (
+                        <div key={bank.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+                            <div>
+                                <p className="font-bold text-gray-800">{bank.name}</p>
+                                <p className="text-xs text-gray-500">Ag: {bank.agency} / CC: {bank.account}</p>
+                                <p className="text-xs text-green-600 font-medium">Saldo Inicial: R$ {bank.initialBalance?.toLocaleString('pt-BR')}</p>
                             </div>
-                        ))
-                    ) : (
-                        revenueTypes.map(item => (
-                            <div key={item.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
-                                <p className="font-medium text-gray-800">{item.name}</p>
-                                <div className="flex space-x-2">
-                                    <button onClick={() => openEditModal(item)} className="text-xs text-gray-500 hover:text-blue-600 font-bold">EDITAR</button>
-                                    <button onClick={() => handleDelete(item.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
-                                </div>
+                            <div className="flex space-x-2">
+                                <button onClick={() => openEditModal(bank)} className="text-gray-400 hover:text-blue-500 p-1">Editar</button>
+                                <button onClick={() => handleDelete(bank.id)} className="text-gray-400 hover:text-red-500 p-1"><Trash2 size={16}/></button>
                             </div>
-                        ))
-                    )}
+                        </div>
+                    ))}
                 </div>
             </div>
+            )}
         </div>
 
         {/* Modal */}

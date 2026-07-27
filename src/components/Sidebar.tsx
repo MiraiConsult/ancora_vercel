@@ -52,7 +52,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
         { id: 'companies', label: 'Clientes', icon: Users, perm: 'companies' },
         { id: 'products', label: 'Produtos', icon: Package, perm: 'products' },
         { id: 'coa', label: 'Plano de Contas', icon: Tags, perm: 'finance' },
-        { id: 'lists', label: 'Bancos & Receitas', icon: List, perm: 'lists' },
+        { id: 'lists', label: 'Contas Bancárias', icon: List, perm: 'lists' },
       ],
     },
     {

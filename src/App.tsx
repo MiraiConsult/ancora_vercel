@@ -30,7 +30,7 @@ const PAGE_TITLES: Record<string, string> = {
   companies: 'Clientes',
   products: 'Produtos',
   coa: 'Plano de Contas',
-  lists: 'Bancos & Receitas',
+  lists: 'Cadastros Auxiliares',
   alerts: 'Alertas',
   database: 'Exportar Dados',
   settings: 'Configurações',
@@ -649,6 +649,8 @@ const handleAddUser = async (newUser: User) => {
             setRevenueTypes={setRevenueTypes}
             banks={banks}
             setBanks={setBanks}
+            products={products}
+            setProducts={setProducts}
             currentUser={user}
           />
         ) : <AccessDenied />;

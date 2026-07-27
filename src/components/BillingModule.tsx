@@ -8,8 +8,9 @@ import { supabase } from '../lib/supabaseClient';
 import {
   FileText, Repeat, Plus, X, Save, Search, ExternalLink, Loader2,
   CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown,
-  Pencil, Trash2,
+  Pencil, Trash2, CalendarClock,
 } from 'lucide-react';
+import { ReceivablesAgenda } from './ReceivablesAgenda';
 
 interface BillingModuleProps {
   companies: Company[];
@@ -45,7 +46,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   companies, products, financeRecords, setFinanceRecords,
   subscriptions, setSubscriptions, revenueTypes, currentUser, onRefresh,
 }) => {
-  const [tab, setTab] = useState<'CHARGES' | 'SUBSCRIPTIONS'>('CHARGES');
+  const [tab, setTab] = useState<'AGENDA' | 'CHARGES' | 'SUBSCRIPTIONS'>('AGENDA');
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<null | 'charge' | 'subscription'>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -54,9 +55,9 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [statusFilter, setStatusFilter] = useState<'all' | 'Pendente' | 'Pago' | 'Atrasado'>('all');
 
-  const changeTab = (t: 'CHARGES' | 'SUBSCRIPTIONS') => {
+  const changeTab = (t: 'AGENDA' | 'CHARGES' | 'SUBSCRIPTIONS') => {
     setTab(t);
-    setSortField(t === 'CHARGES' ? 'dueDate' : 'next_due_date');
+    if (t !== 'AGENDA') setSortField(t === 'CHARGES' ? 'dueDate' : 'next_due_date');
   };
 
   const requestSort = (field: string) => {
@@ -233,16 +234,22 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
             <RefreshCw size={18} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Sincronizando...' : 'Sincronizar'}
           </button>
           <button
-            onClick={() => setModal(tab === 'CHARGES' ? 'charge' : 'subscription')}
+            onClick={() => setModal(tab === 'SUBSCRIPTIONS' ? 'subscription' : 'charge')}
             className="px-5 py-3 bg-mcsystem-900 text-white rounded-xl font-semibold hover:bg-mcsystem-800 transition-all shadow-md flex items-center justify-center gap-2"
           >
-            <Plus size={18} /> {tab === 'CHARGES' ? 'Nova Cobrança' : 'Nova Assinatura'}
+            <Plus size={18} /> {tab === 'SUBSCRIPTIONS' ? 'Nova Assinatura' : 'Nova Cobrança'}
           </button>
         </div>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-2">
+        <button
+          onClick={() => changeTab('AGENDA')}
+          className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${tab === 'AGENDA' ? 'bg-mcsystem-900 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
+        >
+          <CalendarClock size={16} /> Agenda de recebimentos
+        </button>
         <button
           onClick={() => changeTab('CHARGES')}
           className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${tab === 'CHARGES' ? 'bg-mcsystem-900 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
@@ -258,6 +265,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
       </div>
 
       {/* Busca + ordenação */}
+      {tab !== 'AGENDA' && (
       <div className="flex flex-col md:flex-row gap-3">
         <div className="relative flex-1">
           <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -283,9 +291,12 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
           </select>
         )}
       </div>
+      )}
 
       {/* Content */}
-      {tab === 'CHARGES' ? (
+      {tab === 'AGENDA' ? (
+        <ReceivablesAgenda records={financeRecords} companies={companies} products={products} />
+      ) : tab === 'CHARGES' ? (
         <>
           {revenueByProduct.length > 0 && <RevenueByProduct rows={revenueByProduct} />}
           <ChargeList charges={filteredCharges} clientName={clientName} productName={productName} statusBadge={statusBadge} onEdit={setEditCharge} onDelete={handleDeleteCharge} {...sortProps} />

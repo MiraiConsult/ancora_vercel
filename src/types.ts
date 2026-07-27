@@ -38,6 +38,7 @@ export interface Company {
   location: string;
   notes?: CompanyNote[];
   responsible_users?: string[];  // IDs dos usuários responsáveis
+  asaas_customer_id?: string;    // vínculo com o customer no Asaas
 }
 
 export enum TransactionType {

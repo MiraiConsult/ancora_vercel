@@ -99,3 +99,11 @@ export const asaasUpdateSubscription = (params: {
 
 export const asaasDeleteSubscription = (params: { rowId: string; subscriptionId?: string }) =>
   invoke('delete_subscription', params);
+
+export interface AsaasContact { id: string; name: string; phone: string | null; email: string | null }
+
+/** Telefone/e-mail dos clientes, direto do Asaas (para cobrança via WhatsApp) */
+export const asaasCustomerContacts = async (): Promise<AsaasContact[]> => {
+  const data = await invoke('customer_contacts');
+  return (data?.contacts || []) as AsaasContact[];
+};

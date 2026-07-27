@@ -149,6 +149,28 @@ Deno.serve(async (req: Request) => {
         break;
       }
 
+      case 'customer_contacts': {
+        // Lista telefone/e-mail dos clientes direto do Asaas (não guardamos no banco)
+        const all: any[] = [];
+        let offset = 0;
+        while (true) {
+          const page = await asaas(`/customers?limit=100&offset=${offset}`, 'GET');
+          all.push(...(page.data || []));
+          if (!page.hasMore) break;
+          offset += 100;
+          if (offset > 10000) break;
+        }
+        result = {
+          contacts: all.map((c: any) => ({
+            id: c.id,
+            name: c.name,
+            phone: c.mobilePhone || c.phone || null,
+            email: c.email || null,
+          })),
+        };
+        break;
+      }
+
       case 'update_charge': {
         // params: paymentId, recordId, value?, dueDate?, description?, billingType?, productId?
         const asaasPayload: Record<string, unknown> = {};

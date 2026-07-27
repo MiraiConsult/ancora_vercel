@@ -103,16 +103,19 @@ Deno.serve(async (req: Request) => {
     }
 
     // Produtos para casar com a descrição das cobranças (o nome do produto costuma
-    // aparecer na descrição). Casa pelo nome mais longo primeiro (mais específico).
+    // aparecer na descrição, ex: "Mensalidade - HelloGrowth"). Normaliza removendo
+    // espaços/pontuação/acentos para casar "HelloGrowth" == "Hello Growth".
+    // Casa pelo nome (normalizado) mais longo primeiro (mais específico).
+    const normalize = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const { data: products } = await admin.from('products').select('id, name').eq('tenant_id', tenantId);
     const productList = (products || [])
-      .filter((p: any) => p.name && p.name.trim().length >= 3)
-      .map((p: any) => ({ id: p.id, name: p.name.toLowerCase() }))
-      .sort((a: any, b: any) => b.name.length - a.name.length);
+      .map((p: any) => ({ id: p.id, key: normalize(p.name) }))
+      .filter((p: any) => p.key.length >= 3)
+      .sort((a: any, b: any) => b.key.length - a.key.length);
     const matchProduct = (desc?: string): string | null => {
       if (!desc) return null;
-      const d = desc.toLowerCase();
-      for (const p of productList) { if (d.includes(p.name)) return p.id; }
+      const d = normalize(desc);
+      for (const p of productList) { if (d.includes(p.key)) return p.id; }
       return null;
     };
 

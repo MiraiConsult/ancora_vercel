@@ -137,6 +137,33 @@ export interface Product {
   created_at?: string;
 }
 
+export interface ContractTemplate {
+  id: string;
+  tenant_id: string;
+  product_id?: string | null;   // null = modelo padrão (sem produto)
+  name: string;
+  content: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Contract {
+  id: string;
+  tenant_id: string;
+  number?: string;
+  client_id?: string;
+  product_id?: string;
+  template_id?: string;
+  title?: string;
+  content: string;
+  variables?: Record<string, string>;
+  value?: number;
+  start_date?: string;
+  end_date?: string;
+  status?: 'DRAFT' | 'ACTIVE' | 'ENDED' | 'CANCELED';
+  created_at?: string;
+}
+
 export interface AIInsight {
   score: number;
   summary: string;

@@ -5,6 +5,7 @@ import { CompaniesModule } from './components/CompaniesModule';
 import { ProductsModule } from './components/ProductsModule';
 import { BillingModule } from './components/BillingModule';
 import { OverviewDashboard } from './components/OverviewDashboard';
+import { ContractsModule } from './components/ContractsModule';
 import type { MainTab } from './components/FinanceDashboard';
 
 // Páginas do menu que abrem o módulo financeiro numa aba específica
@@ -23,6 +24,7 @@ const PAGE_TITLES: Record<string, string> = {
   entries: 'Lançamentos',
   finance: 'Lançamentos',
   billing: 'Cobranças',
+  contracts: 'Contratos',
   validation: 'Validação',
   dre: 'DRE Gerencial',
   cashflow: 'Fluxo de Caixa',
@@ -599,6 +601,16 @@ const handleAddUser = async (newUser: User) => {
           <ProductsModule
             products={products}
             setProducts={setProducts}
+            currentUser={user}
+          />
+        ) : <AccessDenied />;
+
+      case 'contracts':
+        return hasPermission('contracts') ? (
+          <ContractsModule
+            companies={companies}
+            products={products}
+            tenant={currentTenant}
             currentUser={user}
           />
         ) : <AccessDenied />;

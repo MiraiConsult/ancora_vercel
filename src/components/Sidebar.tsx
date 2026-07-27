@@ -3,7 +3,7 @@
 import React from 'react';
 import {
   Users, UserCog, LogOut, List, Bell, Database, ChevronsLeft, Package, Zap,
-  LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Landmark, Tags, FileCheck,
+  LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Landmark, Tags, FileCheck, FileSignature,
 } from 'lucide-react';
 import { User } from '../types';
 import { isAsaasEnabled } from '../config';
@@ -35,6 +35,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
       items: [
         { id: 'entries', label: 'Lançamentos', icon: ArrowRightLeft, perm: 'finance' },
         ...(isAsaasEnabled(currentUser.tenant_id) ? [{ id: 'billing', label: 'Cobranças', icon: Zap, perm: 'billing' }] : []),
+        { id: 'contracts', label: 'Contratos', icon: FileSignature, perm: 'contracts' },
         { id: 'validation', label: 'Validação', icon: FileCheck, perm: 'finance', badge: pendingValidationCount },
       ],
     },

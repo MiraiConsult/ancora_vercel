@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Company, User, NoteColor, FinancialRecord, TransactionType, TransactionStatus, RevenueType, Bank, GeneralNote } from '../types';
-import { Search, Plus, Pencil, Trash2, X, Save, User as UserIcon, ChevronDown, StickyNote, TrendingUp, LayoutDashboard, CheckSquare, HelpCircle, LayoutGrid, LayoutList, Square, Copy } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, X, Save, User as UserIcon, ChevronDown, StickyNote, TrendingUp, LayoutDashboard, CheckSquare, HelpCircle, LayoutGrid, LayoutList, Square, Copy, ArrowUpDown } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 
 interface CompaniesModuleProps {
@@ -27,7 +27,9 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
     onOpenHelp
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  
+  const [sortField, setSortField] = useState<'name' | 'status' | 'segment'>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
   // View Mode State (LIST or CARDS)
   const [viewMode, setViewMode] = useState<'LIST' | 'CARDS'>('LIST');
   
@@ -92,7 +94,18 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
     return () => { document.removeEventListener("mousedown", handleClickOutside); };
   }, [importMenuRef]);
 
-  const filteredCompanies = companies.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.cnpj.includes(searchTerm));
+  const filteredCompanies = useMemo(() => {
+    const list = companies.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.cnpj.includes(searchTerm));
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const key = (c: Company) => {
+      switch (sortField) {
+        case 'status': return (c.status || '').toLowerCase();
+        case 'segment': return (c.segment || '').toLowerCase();
+        default: return (c.name || '').toLowerCase();
+      }
+    };
+    return [...list].sort((a, b) => { const ka = key(a), kb = key(b); return ka < kb ? -dir : ka > kb ? dir : 0; });
+  }, [companies, searchTerm, sortField, sortDir]);
 
   // --- Derived Data ---
   const companyData = useMemo(() => {
@@ -513,6 +526,24 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                         <LayoutGrid size={18} />
                     </button>
                 </div>
+                {/* Ordenação */}
+                <select
+                    value={sortField}
+                    onChange={(e) => setSortField(e.target.value as 'name' | 'status' | 'segment')}
+                    className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-mcsystem-500"
+                    title="Ordenar por"
+                >
+                    <option value="name">Nome</option>
+                    <option value="status">Status</option>
+                    <option value="segment">Segmento</option>
+                </select>
+                <button
+                    onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))}
+                    className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white text-gray-600 hover:bg-gray-50 flex items-center gap-1.5"
+                    title={sortDir === 'asc' ? 'Crescente' : 'Decrescente'}
+                >
+                    <ArrowUpDown size={16} /> {sortDir === 'asc' ? 'A-Z' : 'Z-A'}
+                </button>
             </div>
             {/* Bulk Actions */}
             {selectedIds.size > 0 && (

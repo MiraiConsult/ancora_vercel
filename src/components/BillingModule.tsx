@@ -3,7 +3,7 @@ import { Company, Product, FinancialRecord, Subscription, RevenueType, User } fr
 import { asaasCreateCharge, asaasCreateSubscription, asaasSyncAll } from '../services/asaasService';
 import {
   FileText, Repeat, Plus, X, Save, Search, ExternalLink, Loader2,
-  CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw,
+  CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw, ArrowUpDown,
 } from 'lucide-react';
 
 interface BillingModuleProps {
@@ -45,6 +45,14 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   const [modal, setModal] = useState<null | 'charge' | 'subscription'>(null);
   const [submitting, setSubmitting] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [sortField, setSortField] = useState('dueDate');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'Pendente' | 'Pago' | 'Atrasado'>('all');
+
+  const changeTab = (t: 'CHARGES' | 'SUBSCRIPTIONS') => {
+    setTab(t);
+    setSortField(t === 'CHARGES' ? 'dueDate' : 'next_due_date');
+  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -93,19 +101,43 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
 
   const filteredCharges = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return charges;
-    return charges.filter(r =>
-      (r.description || '').toLowerCase().includes(q) ||
-      clientName(r.companyId).toLowerCase().includes(q));
-  }, [charges, search]);
+    const list = charges.filter(r => {
+      if (statusFilter !== 'all' && (r.status as string) !== statusFilter) return false;
+      if (!q) return true;
+      return (r.description || '').toLowerCase().includes(q)
+        || clientName(r.companyId).toLowerCase().includes(q)
+        || (productName(r.product_id) || '').toLowerCase().includes(q);
+    });
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const key = (r: FinancialRecord): string | number => {
+      switch (sortField) {
+        case 'amount': return r.amount || 0;
+        case 'client': return clientName(r.companyId).toLowerCase();
+        case 'product': return (productName(r.product_id) || '').toLowerCase();
+        case 'status': return (r.status as string) || '';
+        default: return r.dueDate || '';
+      }
+    };
+    return [...list].sort((a, b) => { const ka = key(a), kb = key(b); return ka < kb ? -dir : ka > kb ? dir : 0; });
+  }, [charges, search, statusFilter, sortField, sortDir]);
 
   const filteredSubs = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return subscriptions;
-    return subscriptions.filter(s =>
-      (s.description || '').toLowerCase().includes(q) ||
-      clientName(s.client_id).toLowerCase().includes(q));
-  }, [subscriptions, search]);
+    const list = subscriptions.filter(s => !q
+      || (s.description || '').toLowerCase().includes(q)
+      || clientName(s.client_id).toLowerCase().includes(q)
+      || (productName(s.product_id) || '').toLowerCase().includes(q));
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const key = (s: Subscription): string | number => {
+      switch (sortField) {
+        case 'value': case 'amount': return s.value || 0;
+        case 'client': return clientName(s.client_id).toLowerCase();
+        case 'product': return (productName(s.product_id) || '').toLowerCase();
+        default: return s.next_due_date || '';
+      }
+    };
+    return [...list].sort((a, b) => { const ka = key(a), kb = key(b); return ka < kb ? -dir : ka > kb ? dir : 0; });
+  }, [subscriptions, search, sortField, sortDir]);
 
   const statusBadge = (status?: string) => {
     const map: Record<string, { cls: string; icon: React.ReactNode; label: string }> = {
@@ -155,29 +187,74 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
       {/* Tabs */}
       <div className="flex gap-2">
         <button
-          onClick={() => setTab('CHARGES')}
+          onClick={() => changeTab('CHARGES')}
           className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${tab === 'CHARGES' ? 'bg-mcsystem-900 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
         >
           <FileText size={16} /> Cobranças avulsas
         </button>
         <button
-          onClick={() => setTab('SUBSCRIPTIONS')}
+          onClick={() => changeTab('SUBSCRIPTIONS')}
           className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${tab === 'SUBSCRIPTIONS' ? 'bg-mcsystem-900 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
         >
           <Repeat size={16} /> Assinaturas
         </button>
       </div>
 
-      {/* Search */}
-      <div className="relative">
-        <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar por cliente ou descrição..."
-          className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-200 focus:border-mcsystem-500 focus:ring-2 focus:ring-mcsystem-100 outline-none"
-        />
+      {/* Busca + ordenação */}
+      <div className="flex flex-col md:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por cliente, produto ou descrição..."
+            className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-200 focus:border-mcsystem-500 focus:ring-2 focus:ring-mcsystem-100 outline-none"
+          />
+        </div>
+        {tab === 'CHARGES' && (
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value as any)}
+            className="px-3 py-3 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 focus:border-mcsystem-500 outline-none"
+            title="Filtrar por status"
+          >
+            <option value="all">Todos os status</option>
+            <option value="Pendente">Pendente</option>
+            <option value="Pago">Pago</option>
+            <option value="Atrasado">Atrasado</option>
+          </select>
+        )}
+        <select
+          value={sortField}
+          onChange={e => setSortField(e.target.value)}
+          className="px-3 py-3 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 focus:border-mcsystem-500 outline-none"
+          title="Ordenar por"
+        >
+          {tab === 'CHARGES' ? (
+            <>
+              <option value="dueDate">Vencimento</option>
+              <option value="amount">Valor</option>
+              <option value="client">Cliente</option>
+              <option value="product">Produto</option>
+              <option value="status">Status</option>
+            </>
+          ) : (
+            <>
+              <option value="next_due_date">Vencimento</option>
+              <option value="value">Valor</option>
+              <option value="client">Cliente</option>
+              <option value="product">Produto</option>
+            </>
+          )}
+        </select>
+        <button
+          onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))}
+          className="px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 flex items-center gap-2 text-sm"
+          title={sortDir === 'asc' ? 'Crescente' : 'Decrescente'}
+        >
+          <ArrowUpDown size={16} /> {sortDir === 'asc' ? 'Asc' : 'Desc'}
+        </button>
       </div>
 
       {/* Content */}

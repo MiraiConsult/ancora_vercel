@@ -1,7 +1,7 @@
 
 
 import React from 'react';
-import { Users, DollarSign, UserCog, LogOut, List, Bell, Database, ChevronsLeft, Package, Zap } from 'lucide-react';
+import { Users, DollarSign, UserCog, LogOut, List, Bell, Database, ChevronsLeft, Package, Zap, LayoutDashboard } from 'lucide-react';
 import { User } from '../types';
 import { isAsaasEnabled } from '../config';
 
@@ -19,6 +19,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
   const isAdmin = currentUser.role === 'admin';
 
   const menuItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, restricted: true },
     { id: 'finance', label: 'Gestão Financeira', icon: DollarSign, restricted: true },
     // Cobranças (Asaas) é exclusivo do tenant habilitado
     ...(isAsaasEnabled(currentUser.tenant_id) ? [{ id: 'billing', label: 'Cobranças', icon: Zap, restricted: true }] : []),

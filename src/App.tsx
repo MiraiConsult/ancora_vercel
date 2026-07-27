@@ -4,6 +4,7 @@ import { FinanceDashboard } from './components/FinanceDashboard';
 import { CompaniesModule } from './components/CompaniesModule';
 import { ProductsModule } from './components/ProductsModule';
 import { BillingModule } from './components/BillingModule';
+import { OverviewDashboard } from './components/OverviewDashboard';
 import { LoginScreen } from './components/LoginScreen';
 import { LandingPage } from './components/LandingPage';
 import { SettingsModule } from './components/SettingsModule';
@@ -507,6 +508,17 @@ const handleAddUser = async (newUser: User) => {
     };
 
     switch (currentPage) {
+      case 'dashboard':
+        return hasPermission('dashboard') ? (
+          <OverviewDashboard
+            records={financeRecords}
+            products={products}
+            companies={companies}
+            subscriptions={subscriptions}
+            currentUser={user}
+          />
+        ) : <AccessDenied />;
+
       case 'finance':
         return hasPermission('finance') ? (
           <FinanceDashboard
@@ -677,7 +689,7 @@ const handleAddUser = async (newUser: User) => {
         />
         <main className={`flex-1 p-8 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'ml-20' : 'ml-64'} ${isSuperAdmin && impersonatedTenantName ? 'mt-14' : ''} min-w-0`}>
            <header className="flex-shrink-0 flex justify-between items-center mb-8">
-              <h1 className="text-xl font-semibold text-gray-800 capitalize">{currentPage === 'finance' ? 'Gestão Financeira' : currentPage === 'settings' ? 'Configurações & Banco de Dados' : currentPage === 'companies' ? 'Clientes' : currentPage === 'products' ? 'Produtos' : currentPage === 'billing' ? 'Cobranças' : currentPage === 'lists' ? 'Cadastros' : currentPage === 'database' ? 'Banco de Dados' : currentPage}</h1>
+              <h1 className="text-xl font-semibold text-gray-800 capitalize">{currentPage === 'dashboard' ? 'Dashboard' : currentPage === 'finance' ? 'Gestão Financeira' : currentPage === 'settings' ? 'Configurações & Banco de Dados' : currentPage === 'companies' ? 'Clientes' : currentPage === 'products' ? 'Produtos' : currentPage === 'billing' ? 'Cobranças' : currentPage === 'lists' ? 'Cadastros' : currentPage === 'database' ? 'Banco de Dados' : currentPage}</h1>
               <div className="flex items-center space-x-4">
                   <div onClick={() => setCurrentPage('alerts')} className="relative cursor-pointer hover:bg-gray-100 p-2 rounded-full transition-colors">
                        {unreadNotifications > 0 && <span className="absolute top-1 right-1 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white animate-ping"></span>}

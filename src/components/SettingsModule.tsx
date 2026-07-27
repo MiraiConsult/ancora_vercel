@@ -15,6 +15,7 @@ interface SettingsModuleProps {
 }
 
 const permissionableModules = [
+  { id: 'dashboard', label: 'Dashboard' },
   { id: 'finance', label: 'Gestão Financeira' },
   { id: 'billing', label: 'Cobranças' },
   { id: 'companies', label: 'Clientes' },

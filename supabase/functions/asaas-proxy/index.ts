@@ -149,6 +149,79 @@ Deno.serve(async (req: Request) => {
         break;
       }
 
+      case 'update_charge': {
+        // params: paymentId, recordId, value?, dueDate?, description?, billingType?, productId?
+        const asaasPayload: Record<string, unknown> = {};
+        if (params.value != null) asaasPayload.value = Number(params.value);
+        if (params.dueDate) asaasPayload.dueDate = params.dueDate;
+        if (params.description != null) asaasPayload.description = params.description;
+        if (params.billingType) asaasPayload.billingType = params.billingType;
+
+        let payment: any = null;
+        if (Object.keys(asaasPayload).length && params.paymentId) {
+          payment = await asaas(`/payments/${params.paymentId}`, 'PUT', asaasPayload);
+        }
+
+        const localUpdate: Record<string, unknown> = {};
+        if (params.value != null) localUpdate.amount = Number(params.value);
+        if (params.dueDate) { localUpdate.dueDate = params.dueDate; localUpdate.competenceDate = params.dueDate; }
+        if (params.description != null) localUpdate.description = params.description;
+        if (params.productId !== undefined) localUpdate.product_id = params.productId || null;
+
+        if (Object.keys(localUpdate).length) {
+          const { error } = await supabase.from('financial_records').update(localUpdate).eq('id', params.recordId);
+          if (error) throw new Error('Falha ao atualizar o lançamento: ' + error.message);
+        }
+        result = { payment };
+        break;
+      }
+
+      case 'delete_charge': {
+        if (params.paymentId) await asaas(`/payments/${params.paymentId}`, 'DELETE');
+        const { error } = await supabase.from('financial_records').delete().eq('id', params.recordId);
+        if (error) throw new Error('Cobrança removida no Asaas, mas falhou ao remover o lançamento: ' + error.message);
+        result = { deleted: true };
+        break;
+      }
+
+      case 'update_subscription': {
+        // params: subscriptionId, rowId, value?, nextDueDate?, cycle?, description?, billingType?, productId?
+        const asaasPayload: Record<string, unknown> = {};
+        if (params.value != null) asaasPayload.value = Number(params.value);
+        if (params.nextDueDate) asaasPayload.nextDueDate = params.nextDueDate;
+        if (params.cycle) asaasPayload.cycle = params.cycle;
+        if (params.description != null) asaasPayload.description = params.description;
+        if (params.billingType) asaasPayload.billingType = params.billingType;
+
+        let subscription: any = null;
+        if (Object.keys(asaasPayload).length && params.subscriptionId) {
+          subscription = await asaas(`/subscriptions/${params.subscriptionId}`, 'PUT', asaasPayload);
+        }
+
+        const localUpdate: Record<string, unknown> = {};
+        if (params.value != null) localUpdate.value = Number(params.value);
+        if (params.nextDueDate) localUpdate.next_due_date = params.nextDueDate;
+        if (params.cycle) localUpdate.cycle = params.cycle;
+        if (params.description != null) localUpdate.description = params.description;
+        if (params.billingType) localUpdate.billing_type = params.billingType;
+        if (params.productId !== undefined) localUpdate.product_id = params.productId || null;
+
+        if (Object.keys(localUpdate).length) {
+          const { error } = await supabase.from('subscriptions').update(localUpdate).eq('id', params.rowId);
+          if (error) throw new Error('Falha ao atualizar a assinatura: ' + error.message);
+        }
+        result = { subscription };
+        break;
+      }
+
+      case 'delete_subscription': {
+        if (params.subscriptionId) await asaas(`/subscriptions/${params.subscriptionId}`, 'DELETE');
+        const { error } = await supabase.from('subscriptions').delete().eq('id', params.rowId);
+        if (error) throw new Error('Assinatura removida no Asaas, mas falhou ao remover: ' + error.message);
+        result = { deleted: true };
+        break;
+      }
+
       default:
         throw new Error('Ação inválida: ' + action);
     }

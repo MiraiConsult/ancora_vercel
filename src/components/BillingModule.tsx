@@ -1,9 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { Company, Product, FinancialRecord, Subscription, RevenueType, User } from '../types';
-import { asaasCreateCharge, asaasCreateSubscription, asaasSyncAll } from '../services/asaasService';
+import {
+  asaasCreateCharge, asaasCreateSubscription, asaasSyncAll,
+  asaasUpdateCharge, asaasDeleteCharge, asaasUpdateSubscription, asaasDeleteSubscription,
+} from '../services/asaasService';
 import {
   FileText, Repeat, Plus, X, Save, Search, ExternalLink, Loader2,
   CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown,
+  Pencil, Trash2,
 } from 'lucide-react';
 
 interface BillingModuleProps {
@@ -64,6 +68,9 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   };
   const sortProps = { sortField, sortDir, onSort: requestSort };
 
+  const [editCharge, setEditCharge] = useState<FinancialRecord | null>(null);
+  const [editSub, setEditSub] = useState<Subscription | null>(null);
+
   const handleSync = async () => {
     setSyncing(true);
     try {
@@ -80,6 +87,26 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
       alert(`Erro ao sincronizar com o Asaas: ${e.message}`);
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleDeleteCharge = async (r: FinancialRecord) => {
+    if (!window.confirm(`Excluir a cobrança de ${clientName(r.companyId)} (${formatBRL(r.amount)})?\nIsso também remove no Asaas (só funciona se não estiver paga).`)) return;
+    try {
+      await asaasDeleteCharge({ recordId: r.id, paymentId: r.asaas_payment_id });
+      setFinanceRecords(prev => prev.filter(x => x.id !== r.id));
+    } catch (e: any) {
+      alert(`Erro ao excluir cobrança: ${e.message}`);
+    }
+  };
+
+  const handleDeleteSub = async (s: Subscription) => {
+    if (!window.confirm(`Excluir a assinatura de ${clientName(s.client_id)} (${formatBRL(s.value)})?\nIsso também remove no Asaas.`)) return;
+    try {
+      await asaasDeleteSubscription({ rowId: s.id, subscriptionId: s.asaas_id });
+      setSubscriptions(prev => prev.filter(x => x.id !== s.id));
+    } catch (e: any) {
+      alert(`Erro ao excluir assinatura: ${e.message}`);
     }
   };
 
@@ -241,10 +268,34 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
       {tab === 'CHARGES' ? (
         <>
           {revenueByProduct.length > 0 && <RevenueByProduct rows={revenueByProduct} />}
-          <ChargeList charges={filteredCharges} clientName={clientName} productName={productName} statusBadge={statusBadge} {...sortProps} />
+          <ChargeList charges={filteredCharges} clientName={clientName} productName={productName} statusBadge={statusBadge} onEdit={setEditCharge} onDelete={handleDeleteCharge} {...sortProps} />
         </>
       ) : (
-        <SubscriptionList subs={filteredSubs} clientName={clientName} productName={productName} {...sortProps} />
+        <SubscriptionList subs={filteredSubs} clientName={clientName} productName={productName} onEdit={setEditSub} onDelete={handleDeleteSub} {...sortProps} />
+      )}
+
+      {editCharge && (
+        <ChargeEditModal
+          charge={editCharge}
+          products={products}
+          onClose={() => setEditCharge(null)}
+          onSaved={(updated) => {
+            setFinanceRecords(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated } : x));
+            setEditCharge(null);
+          }}
+        />
+      )}
+
+      {editSub && (
+        <SubscriptionEditModal
+          sub={editSub}
+          products={products}
+          onClose={() => setEditSub(null)}
+          onSaved={(updated) => {
+            setSubscriptions(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated } : x));
+            setEditSub(null);
+          }}
+        />
       )}
 
       {modal === 'charge' && (
@@ -359,7 +410,7 @@ const RevenueByProduct: React.FC<{ rows: { name: string; count: number; total: n
   );
 };
 
-const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: string) => string; productName: (id?: string) => string | null; statusBadge: (s?: string) => React.ReactNode } & SortProps> = ({ charges, clientName, productName, statusBadge, sortField, sortDir, onSort }) => {
+const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: string) => string; productName: (id?: string) => string | null; statusBadge: (s?: string) => React.ReactNode; onEdit: (r: FinancialRecord) => void; onDelete: (r: FinancialRecord) => void } & SortProps> = ({ charges, clientName, productName, statusBadge, onEdit, onDelete, sortField, sortDir, onSort }) => {
   if (charges.length === 0) return <EmptyState icon={<FileText size={48} />} text="Nenhuma cobrança Asaas ainda." />;
   const sp = { sortField, sortDir, onSort };
   return (
@@ -374,6 +425,7 @@ const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: strin
               <SortTh label="Vencimento" field="dueDate" {...sp} />
               <SortTh label="Status" field="status" align="center" {...sp} />
               <th className="px-6 py-4 font-semibold text-right">Fatura</th>
+              <th className="px-6 py-4 font-semibold text-center">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -399,6 +451,12 @@ const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: strin
                     </a>
                   ) : <span className="text-gray-300 text-xs">—</span>}
                 </td>
+                <td className="px-6 py-4">
+                  <div className="flex items-center justify-center gap-1">
+                    <button onClick={() => onEdit(r)} className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded-lg transition-colors" title="Editar"><Pencil size={16} /></button>
+                    <button onClick={() => onDelete(r)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir"><Trash2 size={16} /></button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -408,7 +466,7 @@ const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: strin
   );
 };
 
-const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: string) => string; productName: (id?: string) => string | null } & SortProps> = ({ subs, clientName, productName, sortField, sortDir, onSort }) => {
+const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: string) => string; productName: (id?: string) => string | null; onEdit: (s: Subscription) => void; onDelete: (s: Subscription) => void } & SortProps> = ({ subs, clientName, productName, onEdit, onDelete, sortField, sortDir, onSort }) => {
   if (subs.length === 0) return <EmptyState icon={<Repeat size={48} />} text="Nenhuma assinatura ainda." />;
   const cycleLabel = (c?: string) => CYCLES.find(x => x.value === c)?.label || c || '—';
   const sp = { sortField, sortDir, onSort };
@@ -424,6 +482,7 @@ const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: strin
               <th className="px-6 py-4 font-semibold">Ciclo</th>
               <SortTh label="Próx. vencimento" field="next_due_date" {...sp} />
               <th className="px-6 py-4 font-semibold text-center">Status</th>
+              <th className="px-6 py-4 font-semibold text-center">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -445,6 +504,12 @@ const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: strin
                   <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full text-green-700 bg-green-50">
                     {s.status || 'ACTIVE'}
                   </span>
+                </td>
+                <td className="px-6 py-4">
+                  <div className="flex items-center justify-center gap-1">
+                    <button onClick={() => onEdit(s)} className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded-lg transition-colors" title="Editar"><Pencil size={16} /></button>
+                    <button onClick={() => onDelete(s)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir"><Trash2 size={16} /></button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -652,6 +717,126 @@ const SubscriptionModal: React.FC<{
         </div>
       </div>
       <ModalFooter submitting={submitting} onClose={onClose} onSubmit={submit} label="Criar assinatura" />
+    </ModalShell>
+  );
+};
+
+const ChargeEditModal: React.FC<{ charge: FinancialRecord; products: Product[]; onClose: () => void; onSaved: (u: Partial<FinancialRecord> & { id: string }) => void }> = ({ charge, products, onClose, onSaved }) => {
+  const isPaid = (charge.status as string) === 'Pago';
+  const [productId, setProductId] = useState(charge.product_id || '');
+  const [value, setValue] = useState(charge.amount || 0);
+  const [dueDate, setDueDate] = useState(charge.dueDate || '');
+  const [description, setDescription] = useState(charge.description || '');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const params: any = { recordId: charge.id, paymentId: charge.asaas_payment_id, productId: productId || null };
+      if (!isPaid) { params.value = value; params.dueDate = dueDate; params.description = description; }
+      await asaasUpdateCharge(params);
+      const updated: Partial<FinancialRecord> & { id: string } = { id: charge.id, product_id: (productId || null) as any };
+      if (!isPaid) { updated.amount = Number(value); updated.dueDate = dueDate; updated.competenceDate = dueDate; updated.description = description; }
+      onSaved(updated);
+    } catch (e: any) {
+      alert(`Erro ao salvar cobrança: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="Editar Cobrança" icon={<FileText size={20} className="text-mcsystem-500" />} onClose={onClose}>
+      <div className="p-6 space-y-4">
+        {isPaid && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs rounded-lg px-3 py-2">
+            Cobrança já paga — no Asaas só dá pra alterar o <b>produto</b> (valor/vencimento ficam travados).
+          </div>
+        )}
+        <div>
+          <label className={labelCls}>Produto</label>
+          <select value={productId} onChange={e => setProductId(e.target.value)} className={inputCls}>
+            <option value="">Sem produto</option>
+            {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls}>Valor (R$)</label>
+            <input type="number" step="0.01" min="0" value={value} disabled={isPaid} onChange={e => setValue(parseFloat(e.target.value))} className={`${inputCls} disabled:bg-gray-100 disabled:text-gray-400`} />
+          </div>
+          <div>
+            <label className={labelCls}>Vencimento</label>
+            <input type="date" value={dueDate} disabled={isPaid} onChange={e => setDueDate(e.target.value)} className={`${inputCls} disabled:bg-gray-100 disabled:text-gray-400`} />
+          </div>
+        </div>
+        <div>
+          <label className={labelCls}>Descrição</label>
+          <input type="text" value={description} disabled={isPaid} onChange={e => setDescription(e.target.value)} className={`${inputCls} disabled:bg-gray-100 disabled:text-gray-400`} />
+        </div>
+      </div>
+      <ModalFooter submitting={saving} onClose={onClose} onSubmit={save} label="Salvar" />
+    </ModalShell>
+  );
+};
+
+const SubscriptionEditModal: React.FC<{ sub: Subscription; products: Product[]; onClose: () => void; onSaved: (u: Partial<Subscription> & { id: string }) => void }> = ({ sub, products, onClose, onSaved }) => {
+  const [productId, setProductId] = useState(sub.product_id || '');
+  const [value, setValue] = useState(sub.value || 0);
+  const [nextDueDate, setNextDueDate] = useState(sub.next_due_date || '');
+  const [cycle, setCycle] = useState(sub.cycle || 'MONTHLY');
+  const [description, setDescription] = useState(sub.description || '');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await asaasUpdateSubscription({
+        rowId: sub.id, subscriptionId: sub.asaas_id,
+        value, nextDueDate, cycle, description, productId: productId || null,
+      });
+      onSaved({ id: sub.id, product_id: (productId || null) as any, value: Number(value), next_due_date: nextDueDate, cycle, description });
+    } catch (e: any) {
+      alert(`Erro ao salvar assinatura: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="Editar Assinatura" icon={<Repeat size={20} className="text-mcsystem-500" />} onClose={onClose}>
+      <div className="p-6 space-y-4">
+        <div>
+          <label className={labelCls}>Produto</label>
+          <select value={productId} onChange={e => setProductId(e.target.value)} className={inputCls}>
+            <option value="">Sem produto</option>
+            {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls}>Valor (R$)</label>
+            <input type="number" step="0.01" min="0" value={value} onChange={e => setValue(parseFloat(e.target.value))} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Ciclo</label>
+            <select value={cycle} onChange={e => setCycle(e.target.value)} className={inputCls}>
+              {CYCLES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls}>Próx. vencimento</label>
+            <input type="date" value={nextDueDate} onChange={e => setNextDueDate(e.target.value)} className={inputCls} />
+          </div>
+        </div>
+        <div>
+          <label className={labelCls}>Descrição</label>
+          <input type="text" value={description} onChange={e => setDescription(e.target.value)} className={inputCls} />
+        </div>
+      </div>
+      <ModalFooter submitting={saving} onClose={onClose} onSubmit={save} label="Salvar" />
     </ModalShell>
   );
 };

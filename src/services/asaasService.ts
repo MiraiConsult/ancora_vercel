@@ -83,3 +83,19 @@ export const asaasCreateCharge = (params: CreateChargeParams) =>
 
 export const asaasCreateSubscription = (params: CreateSubscriptionParams) =>
   invoke('create_subscription', params);
+
+export const asaasUpdateCharge = (params: {
+  recordId: string; paymentId?: string; value?: number; dueDate?: string;
+  description?: string; billingType?: string; productId?: string | null;
+}) => invoke('update_charge', params);
+
+export const asaasDeleteCharge = (params: { recordId: string; paymentId?: string }) =>
+  invoke('delete_charge', params);
+
+export const asaasUpdateSubscription = (params: {
+  rowId: string; subscriptionId?: string; value?: number; nextDueDate?: string;
+  cycle?: string; description?: string; billingType?: string; productId?: string | null;
+}) => invoke('update_subscription', params);
+
+export const asaasDeleteSubscription = (params: { rowId: string; subscriptionId?: string }) =>
+  invoke('delete_subscription', params);

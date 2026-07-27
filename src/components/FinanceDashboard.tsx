@@ -1640,8 +1640,14 @@ const newRecords: FinancialRecord[] = [];
               const rubric = chartOfAccounts.find(c => c.id === r.rubricId);
               return rubric && rubric.centerCode === node.code;
           } else if (node.type === 'RUBRIC') {
-              if (mode === 'DRE' && r.amount >= 0) {
-                  return r.revenueTypeId === node.code;
+              // Linhas de receita são por Produto (DRE, ou Fluxo no modo Produto)
+              const isProductRow = r.amount >= 0 && (mode === 'DRE' || cashflowViewMode === 'REVENUE_TYPE');
+              if (isProductRow) {
+                  const targetProductId = node.code === 'SEM_PRODUTO' ? null : node.code;
+                  if (r.split_revenue && r.split_revenue.length > 0) {
+                      return r.split_revenue.some(sp => (sp.product_id ?? null) === targetProductId);
+                  }
+                  return (r.product_id ?? null) === targetProductId;
               }
               const rubric = chartOfAccounts.find(c => c.id === r.rubricId);
               return rubric && rubric.rubricCode === node.code;

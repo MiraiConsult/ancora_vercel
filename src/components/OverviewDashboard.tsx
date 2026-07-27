@@ -2,11 +2,11 @@ import React, { useMemo, useState } from 'react';
 import { FinancialRecord, Product, Company, Subscription, User } from '../types';
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  PieChart, Pie, Cell, BarChart,
+  PieChart, Pie, Cell, BarChart, LineChart,
 } from 'recharts';
 import {
-  TrendingUp, TrendingDown, Wallet, CheckCircle2, Clock, AlertCircle, Repeat,
-  Users, UserPlus, Percent, Target, Activity,
+  TrendingUp, TrendingDown, Wallet, AlertCircle, Repeat,
+  Users, Percent, Target, Activity,
 } from 'lucide-react';
 
 interface OverviewDashboardProps {
@@ -308,20 +308,20 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
 
       {/* Faturamento por produto/mês + Aging */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card title="Faturamento por produto / mês" subtitle="Empilhado por produto" className="lg:col-span-2">
+        <Card title="Faturamento por produto / mês" subtitle="Comparativo por produto" className="lg:col-span-2">
           <div className="h-72">
             {data.topProductNames.length === 0 ? <Empty /> : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.prodMonthlyData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <LineChart data={data.prodMonthlyData} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                   <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={brlShort} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={55} />
                   <Tooltip formatter={(v: any) => brl(v)} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12 }} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   {data.topProductNames.map((pn, i) => (
-                    <Bar key={pn} dataKey={pn} stackId="a" fill={PALETTE[i % PALETTE.length]} maxBarSize={28} />
+                    <Line key={pn} type="monotone" dataKey={pn} stroke={PALETTE[i % PALETTE.length]} strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
                   ))}
-                </BarChart>
+                </LineChart>
               </ResponsiveContainer>
             )}
           </div>

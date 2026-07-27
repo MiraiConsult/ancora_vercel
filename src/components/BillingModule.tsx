@@ -3,7 +3,7 @@ import { Company, Product, FinancialRecord, Subscription, RevenueType, User } fr
 import { asaasCreateCharge, asaasCreateSubscription, asaasSyncAll } from '../services/asaasService';
 import {
   FileText, Repeat, Plus, X, Save, Search, ExternalLink, Loader2,
-  CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw, ArrowUpDown,
+  CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown,
 } from 'lucide-react';
 
 interface BillingModuleProps {
@@ -53,6 +53,16 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
     setTab(t);
     setSortField(t === 'CHARGES' ? 'dueDate' : 'next_due_date');
   };
+
+  const requestSort = (field: string) => {
+    if (sortField === field) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+  const sortProps = { sortField, sortDir, onSort: requestSort };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -225,46 +235,16 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
             <option value="Atrasado">Atrasado</option>
           </select>
         )}
-        <select
-          value={sortField}
-          onChange={e => setSortField(e.target.value)}
-          className="px-3 py-3 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 focus:border-mcsystem-500 outline-none"
-          title="Ordenar por"
-        >
-          {tab === 'CHARGES' ? (
-            <>
-              <option value="dueDate">Vencimento</option>
-              <option value="amount">Valor</option>
-              <option value="client">Cliente</option>
-              <option value="product">Produto</option>
-              <option value="status">Status</option>
-            </>
-          ) : (
-            <>
-              <option value="next_due_date">Vencimento</option>
-              <option value="value">Valor</option>
-              <option value="client">Cliente</option>
-              <option value="product">Produto</option>
-            </>
-          )}
-        </select>
-        <button
-          onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))}
-          className="px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 flex items-center gap-2 text-sm"
-          title={sortDir === 'asc' ? 'Crescente' : 'Decrescente'}
-        >
-          <ArrowUpDown size={16} /> {sortDir === 'asc' ? 'Asc' : 'Desc'}
-        </button>
       </div>
 
       {/* Content */}
       {tab === 'CHARGES' ? (
         <>
           {revenueByProduct.length > 0 && <RevenueByProduct rows={revenueByProduct} />}
-          <ChargeList charges={filteredCharges} clientName={clientName} productName={productName} statusBadge={statusBadge} />
+          <ChargeList charges={filteredCharges} clientName={clientName} productName={productName} statusBadge={statusBadge} {...sortProps} />
         </>
       ) : (
-        <SubscriptionList subs={filteredSubs} clientName={clientName} productName={productName} />
+        <SubscriptionList subs={filteredSubs} clientName={clientName} productName={productName} {...sortProps} />
       )}
 
       {modal === 'charge' && (
@@ -325,6 +305,22 @@ const EmptyState: React.FC<{ icon: React.ReactNode; text: string }> = ({ icon, t
   </div>
 );
 
+interface SortProps { sortField: string; sortDir: 'asc' | 'desc'; onSort: (f: string) => void }
+
+const SortTh: React.FC<{ label: string; field: string; align?: 'left' | 'right' | 'center' } & SortProps> = ({ label, field, align = 'left', sortField, sortDir, onSort }) => {
+  const justify = align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : '';
+  return (
+    <th className={`px-6 py-4 font-semibold cursor-pointer group hover:bg-gray-100 select-none ${align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : ''}`} onClick={() => onSort(field)}>
+      <div className={`flex items-center gap-1.5 ${justify}`}>
+        {label}
+        {sortField === field
+          ? (sortDir === 'asc' ? <ArrowUp size={12} className="text-mcsystem-500" /> : <ArrowDown size={12} className="text-mcsystem-500" />)
+          : <ArrowUpDown size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
+      </div>
+    </th>
+  );
+};
+
 const RevenueByProduct: React.FC<{ rows: { name: string; count: number; total: number; recebido: number }[] }> = ({ rows }) => {
   const totalGeral = rows.reduce((s, r) => s + r.total, 0);
   const recebidoGeral = rows.reduce((s, r) => s + r.recebido, 0);
@@ -363,19 +359,20 @@ const RevenueByProduct: React.FC<{ rows: { name: string; count: number; total: n
   );
 };
 
-const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: string) => string; productName: (id?: string) => string | null; statusBadge: (s?: string) => React.ReactNode }> = ({ charges, clientName, productName, statusBadge }) => {
+const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: string) => string; productName: (id?: string) => string | null; statusBadge: (s?: string) => React.ReactNode } & SortProps> = ({ charges, clientName, productName, statusBadge, sortField, sortDir, onSort }) => {
   if (charges.length === 0) return <EmptyState icon={<FileText size={48} />} text="Nenhuma cobrança Asaas ainda." />;
+  const sp = { sortField, sortDir, onSort };
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 text-gray-500 text-left uppercase text-xs tracking-wider">
-              <th className="px-6 py-4 font-semibold">Cliente / Descrição</th>
-              <th className="px-6 py-4 font-semibold">Produto</th>
-              <th className="px-6 py-4 font-semibold">Valor</th>
-              <th className="px-6 py-4 font-semibold">Vencimento</th>
-              <th className="px-6 py-4 font-semibold text-center">Status</th>
+              <SortTh label="Cliente / Descrição" field="client" {...sp} />
+              <SortTh label="Produto" field="product" {...sp} />
+              <SortTh label="Valor" field="amount" {...sp} />
+              <SortTh label="Vencimento" field="dueDate" {...sp} />
+              <SortTh label="Status" field="status" align="center" {...sp} />
               <th className="px-6 py-4 font-semibold text-right">Fatura</th>
             </tr>
           </thead>
@@ -411,20 +408,21 @@ const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: strin
   );
 };
 
-const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: string) => string; productName: (id?: string) => string | null }> = ({ subs, clientName, productName }) => {
+const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: string) => string; productName: (id?: string) => string | null } & SortProps> = ({ subs, clientName, productName, sortField, sortDir, onSort }) => {
   if (subs.length === 0) return <EmptyState icon={<Repeat size={48} />} text="Nenhuma assinatura ainda." />;
   const cycleLabel = (c?: string) => CYCLES.find(x => x.value === c)?.label || c || '—';
+  const sp = { sortField, sortDir, onSort };
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 text-gray-500 text-left uppercase text-xs tracking-wider">
-              <th className="px-6 py-4 font-semibold">Cliente / Descrição</th>
-              <th className="px-6 py-4 font-semibold">Produto</th>
-              <th className="px-6 py-4 font-semibold">Valor</th>
+              <SortTh label="Cliente / Descrição" field="client" {...sp} />
+              <SortTh label="Produto" field="product" {...sp} />
+              <SortTh label="Valor" field="value" {...sp} />
               <th className="px-6 py-4 font-semibold">Ciclo</th>
-              <th className="px-6 py-4 font-semibold">Próx. vencimento</th>
+              <SortTh label="Próx. vencimento" field="next_due_date" {...sp} />
               <th className="px-6 py-4 font-semibold text-center">Status</th>
             </tr>
           </thead>

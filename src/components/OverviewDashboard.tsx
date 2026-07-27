@@ -339,6 +339,47 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
 
   const openDrill = (title: string, rows: DrillRow[], goTo?: string) => setDrill({ title, rows, goTo });
 
+  // Receita por cliente por mês — base para o drill de churn
+  const clientRevByMonth = useMemo(() => {
+    const map = new Map<string, Map<string, number>>();
+    validRecords.forEach(r => {
+      if (r.amount < 0 || !r.companyId) return;
+      const val = incomeUnderFilter(r);
+      if (val === 0) return;
+      const mk = (r.dueDate || '').slice(0, 7);
+      if (!mk) return;
+      if (!map.has(mk)) map.set(mk, new Map());
+      const inner = map.get(mk)!;
+      inner.set(r.companyId, (inner.get(r.companyId) || 0) + val);
+    });
+    return map;
+  }, [validRecords, productSet, products]);
+
+  // Clientes perdidos no período + quanto de receita saiu com eles
+  const churnedRows = useMemo((): DrillRow[] => {
+    const now = new Date();
+    const nowKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const out: DrillRow[] = [];
+    monthsSorted.forEach(mi => {
+      const mk = `${year}-${String(mi).padStart(2, '0')}`;
+      if (mk > nowKey) return;
+      const prevDate = new Date(year, mi - 2, 1);
+      const prevKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+      const prev = clientsByMonth.get(prevKey) || new Set<string>();
+      const curr = clientsByMonth.get(mk) || new Set<string>();
+      Array.from(prev).filter(c => !curr.has(c)).forEach(cid => {
+        out.push({
+          id: `${mk}-${cid}`,
+          label: companyName(cid),
+          sub: `Última cobrança em ${MONTHS[parseInt(prevKey.slice(5, 7)) - 1]}`,
+          date: `${mk}-01`,
+          value: clientRevByMonth.get(prevKey)?.get(cid) || 0,
+        });
+      });
+    });
+    return out.sort((a, b) => b.value - a.value);
+  }, [monthsSorted, year, clientsByMonth, clientRevByMonth, companies]);
+
   const monthsLabel = monthsSorted.length === 12 ? 'Ano cheio'
     : monthsSorted.length === 1 ? MONTHS[monthsSorted[0] - 1]
     : isContiguous(monthsSorted) ? `${MONTHS[monthsSorted[0] - 1]}–${MONTHS[monthsSorted[monthsSorted.length - 1] - 1]}`
@@ -463,8 +504,10 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
               onClick={() => openDrill('Cobranças em atraso', incomeRows(r => (r.status as string) === 'Atrasado'), 'entries')} />
             <Kpi label="A receber" value={brl(primary.pendingIncome)}
               onClick={() => openDrill('A receber', incomeRows(r => (r.status as string) === 'Pendente'), 'entries')} />
-            <Kpi label="ARPU" value={brl(arpu)} hint={ltv !== null ? `LTV ${brl(ltv)}` : undefined} />
-            <Kpi label="Churn médio" value={pct(derived.avgChurn)} hint={`Retenção ${pct(100 - derived.avgChurn)}`} />
+            <Kpi label="ARPU" value={brl(arpu)} hint={ltv !== null ? `LTV ${brl(ltv)}` : undefined}
+              onClick={() => openDrill('Receita recorrente por cliente', recurring.activeClientList, 'companies')} />
+            <Kpi label="Churn médio" value={pct(derived.avgChurn)} hint={`Retenção ${pct(100 - derived.avgChurn)}`}
+              onClick={() => openDrill('Clientes perdidos e receita que saiu', churnedRows, 'companies')} />
           </div>
           {isProductFiltered && (
             <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
@@ -694,23 +737,72 @@ const statusChip = (s?: string) => {
 };
 
 const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => void; onGoTo?: () => void }> = ({ title, rows, onClose, onGoTo }) => {
+  const [tab, setTab] = useState<'CHART' | 'LIST'>('CHART');
   const total = rows.reduce((s, r) => s + r.value, 0);
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', h);
     return () => document.removeEventListener('keydown', h);
   }, [onClose]);
 
+  // Evolução mensal a partir das próprias linhas
+  const byMonth = useMemo(() => {
+    const m = new Map<string, number>();
+    rows.forEach(r => {
+      if (!r.date) return;
+      const k = r.date.slice(0, 7);
+      m.set(k, (m.get(k) || 0) + r.value);
+    });
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([k, v]) => ({ month: MONTHS[parseInt(k.slice(5, 7)) - 1] || k, value: v }));
+  }, [rows]);
+
+  // Quebra por produto
+  const byTag = useMemo(() => {
+    const m = new Map<string, number>();
+    rows.forEach(r => {
+      const k = r.tag || 'Sem produto';
+      m.set(k, (m.get(k) || 0) + r.value);
+    });
+    return Array.from(m.entries()).map(([name, value]) => ({ name, value }))
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  }, [rows]);
+
+  // Quebra por status (quando houver)
+  const byStatus = useMemo(() => {
+    const m = new Map<string, number>();
+    rows.forEach(r => { if (r.status) m.set(r.status, (m.get(r.status) || 0) + r.value); });
+    return Array.from(m.entries()).map(([name, value]) => ({ name, value }));
+  }, [rows]);
+
+  const hasMonth = byMonth.length > 1;
+  const hasTag = byTag.length > 1;
+  const hasCharts = hasMonth || hasTag;
+
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-150"
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] flex flex-col animate-in fade-in zoom-in-95 duration-150"
         onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-          <div>
-            <h3 className="font-bold text-gray-900">{title}</h3>
-            <p className="text-xs text-gray-400 mt-0.5">{rows.length} registro(s) · {brlExact(total)}</p>
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="font-bold text-gray-900 truncate">{title}</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{rows.length} registro(s) · <span className="font-semibold text-gray-600">{brlExact(total)}</span></p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {hasCharts && (
+              <div className="flex bg-gray-100 rounded-lg p-0.5">
+                <button onClick={() => setTab('CHART')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${tab === 'CHART' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  Gráficos
+                </button>
+                <button onClick={() => setTab('LIST')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${tab === 'LIST' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  Lançamentos
+                </button>
+              </div>
+            )}
             {onGoTo && (
               <button onClick={onGoTo}
                 className="text-xs font-semibold text-gray-700 hover:text-gray-900 border border-gray-200 hover:border-gray-300 rounded-lg px-3 py-1.5 flex items-center gap-1.5">
@@ -725,7 +817,76 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
 
         <div className="overflow-y-auto">
           {rows.length === 0 ? (
-            <div className="py-16 text-center text-gray-300 text-sm">Nenhum registro no período</div>
+            <div className="py-20 text-center text-gray-300 text-sm">Nenhum registro no período</div>
+          ) : (tab === 'CHART' && hasCharts) ? (
+            <div className="p-6 space-y-6">
+              {hasMonth && (
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-800 mb-1">Evolução mensal</h4>
+                  <p className="text-xs text-gray-400 mb-3">Distribuição do valor ao longo dos meses</p>
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={byMonth} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid stroke={INK.grid} vertical={false} />
+                        <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
+                        <YAxis tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} width={54} />
+                        <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
+                        <Bar dataKey="value" name="Valor" radius={[4, 4, 0, 0]} maxBarSize={34}
+                          label={{ position: 'top', formatter: (v: any) => brlShort(v), fontSize: 10, fill: INK.muted }}>
+                          {byMonth.map((d, i) => <Cell key={i} fill={d.value < 0 ? STATUS.critical : SERIES[0]} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {hasTag && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-800 mb-1">Por produto</h4>
+                    <p className="text-xs text-gray-400 mb-3">Composição do total</p>
+                    <div className="h-56">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart layout="vertical" data={byTag} margin={{ top: 4, right: 64, left: 8, bottom: 4 }}>
+                          <CartesianGrid stroke={INK.grid} horizontal={false} />
+                          <XAxis type="number" tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} />
+                          <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11, fill: INK.secondary }} axisLine={false} tickLine={false} />
+                          <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
+                          <Bar dataKey="value" name="Valor" radius={[0, 4, 4, 0]} maxBarSize={18}
+                            label={{ position: 'right', formatter: (v: any) => brlShort(v), fontSize: 10, fill: INK.muted }}>
+                            {byTag.map((_, i) => <Cell key={i} fill={SERIES[i % SERIES.length]} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+
+                {byStatus.length > 1 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-800 mb-1">Por situação</h4>
+                    <p className="text-xs text-gray-400 mb-3">Distribuição por status</p>
+                    <div className="h-56">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart layout="vertical" data={byStatus} margin={{ top: 4, right: 64, left: 8, bottom: 4 }}>
+                          <CartesianGrid stroke={INK.grid} horizontal={false} />
+                          <XAxis type="number" tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} />
+                          <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11, fill: INK.secondary }} axisLine={false} tickLine={false} />
+                          <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
+                          <Bar dataKey="value" name="Valor" radius={[0, 4, 4, 0]} maxBarSize={18}
+                            label={{ position: 'right', formatter: (v: any) => brlShort(v), fontSize: 10, fill: INK.muted }}>
+                            {byStatus.map((d, i) => (
+                              <Cell key={i} fill={d.name === 'Pago' ? STATUS.good : d.name === 'Atrasado' ? STATUS.critical : STATUS.warning} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
             <table className="w-full text-sm">
               <tbody className="divide-y divide-gray-100">

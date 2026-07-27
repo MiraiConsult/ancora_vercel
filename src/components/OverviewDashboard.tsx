@@ -2,12 +2,9 @@ import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { FinancialRecord, Product, Company, Subscription, User } from '../types';
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  PieChart, Pie, Cell, BarChart, LineChart,
+  BarChart, LineChart, Cell,
 } from 'recharts';
-import {
-  TrendingUp, TrendingDown, Wallet, AlertCircle, Repeat, Users, Percent, Target, Activity,
-  ChevronDown, Check, ArrowUpRight, ArrowDownRight, Minus, Package,
-} from 'lucide-react';
+import { ChevronDown, Check, ArrowUp, ArrowDown } from 'lucide-react';
 
 interface OverviewDashboardProps {
   records: FinancialRecord[];
@@ -17,21 +14,27 @@ interface OverviewDashboardProps {
   currentUser: User;
 }
 
-const MONTHS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-const PALETTE = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#06b6d4', '#ec4899', '#ef4444', '#14b8a6', '#a855f7', '#f97316'];
 const NO_PRODUCT = 'Sem produto';
 
-const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+// Paleta categórica validada (CVD-safe, ordem fixa — nunca ciclar)
+const SERIES = ['#2a9d8f', '#e76f51', '#7c5ce0', '#eda100', '#2a78d6', '#e87ba4'];
+// Paleta de status (reservada — nunca usada como série)
+const STATUS = { good: '#0ca30c', warning: '#fab219', critical: '#d03b3b' };
+
+const INK = { primary: '#111827', secondary: '#6b7280', muted: '#9ca3af', grid: '#eef0f3' };
+
+const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(v || 0);
+const brlExact = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 const brlShort = (v: number) => {
   const a = Math.abs(v);
-  if (a >= 1_000_000) return `R$ ${(v / 1_000_000).toFixed(1)}M`;
-  if (a >= 1_000) return `R$ ${(v / 1_000).toFixed(0)}k`;
-  return `R$ ${v.toFixed(0)}`;
+  if (a >= 1_000_000) return `${(v / 1_000_000).toFixed(1)} mi`;
+  if (a >= 1_000) return `${(v / 1_000).toFixed(0)} mil`;
+  return String(Math.round(v));
 };
 const pct = (v: number) => `${v.toFixed(1)}%`;
 
-// Sigla curta para rotular a ponta das linhas (ex.: "Hello Growth" -> "HG")
 const makeSigla = (name: string) => {
   const stop = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'o', 'a', 'em', 'para']);
   const words = name.trim().split(/\s+/).filter(w => !stop.has(w.toLowerCase()));
@@ -43,19 +46,21 @@ const buildSiglas = (names: string[]) => {
   const used = new Set<string>();
   names.forEach(n => {
     let s = makeSigla(n);
-    const base = s;
-    let k = 2;
+    const base = s; let k = 2;
     while (used.has(s)) s = `${base}${k++}`;
-    used.add(s);
-    map[n] = s;
+    used.add(s); map[n] = s;
   });
   return map;
 };
-// Rótulo desenhado apenas no último ponto da linha
 const endLabel = (text: string, color: string, lastIndex: number) => (props: any) => {
   const { x, y, index } = props;
   if (index !== lastIndex || x == null || y == null) return null;
-  return <text x={x + 8} y={y} dy={4} fill={color} fontSize={11} fontWeight={700}>{text}</text>;
+  return (
+    <g>
+      <circle cx={x} cy={y} r={3.5} fill={color} stroke="#fff" strokeWidth={2} />
+      <text x={x + 9} y={y} dy={4} fill={INK.secondary} fontSize={11} fontWeight={600}>{text}</text>
+    </g>
+  );
 };
 
 const monthlyFactor = (cycle?: string) => {
@@ -88,29 +93,22 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [products]);
 
-  // ---- Filtros ----
   const [year, setYear] = useState<number>(availableYears[0]);
   const [selectedMonths, setSelectedMonths] = useState<number[]>(ALL_MONTHS);
-  const [selectedProducts, setSelectedProducts] = useState<string[] | null>(null); // null = todos
-  const [compareEnabled, setCompareEnabled] = useState(false);
+  const [selectedProducts, setSelectedProducts] = useState<string[] | null>(null);
+  const [compareEnabled, setCompareEnabled] = useState(true);
   const [compareYear, setCompareYear] = useState<number>(availableYears[0] - 1);
 
   const activeProducts = selectedProducts ?? productOptions;
   const productSet = useMemo(() => new Set(activeProducts), [activeProducts]);
   const isProductFiltered = selectedProducts !== null && selectedProducts.length !== productOptions.length;
-
-  const toggleMonth = (m: number) =>
-    setSelectedMonths(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m].sort((a, b) => a - b));
-
   const monthsSorted = useMemo(() => [...selectedMonths].sort((a, b) => a - b), [selectedMonths]);
 
-  // ---- Helpers de classificação por produto ----
   const recordProductNames = (r: FinancialRecord): string[] =>
     (r.split_revenue && r.split_revenue.length > 0)
       ? r.split_revenue.map(sp => productName(sp.product_id) || NO_PRODUCT)
       : [productName(r.product_id) || NO_PRODUCT];
 
-  // Valor de receita considerando o filtro de produtos (respeita splits)
   const incomeUnderFilter = (r: FinancialRecord): number => {
     if (r.split_revenue && r.split_revenue.length > 0) {
       return r.split_revenue
@@ -120,7 +118,6 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     return productSet.has(productName(r.product_id) || NO_PRODUCT) ? r.amount : 0;
   };
 
-  // ---- Agregação de um período (ano + meses selecionados) ----
   const aggregate = (targetYear: number) => {
     const yearStr = String(targetYear);
     const monthIndex = new Map(monthsSorted.map((mi, idx) => [mi, idx]));
@@ -151,34 +148,26 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
         else if (st === 'Atrasado') { overdueIncome += val; statusMap.Atrasado += val; }
         else { pendingIncome += val; statusMap.Pendente += val; }
 
-        if (r.split_revenue && r.split_revenue.length > 0) {
-          r.split_revenue.forEach(sp => {
-            const pn = productName(sp.product_id) || NO_PRODUCT;
-            if (!productSet.has(pn)) return;
-            const amt = Math.abs(sp.amount);
-            byProduct.set(pn, (byProduct.get(pn) || 0) + amt);
-            if (!prodMonthly[pn]) prodMonthly[pn] = {};
-            prodMonthly[pn][mi] = (prodMonthly[pn][mi] || 0) + amt;
-            if (r.companyId) {
-              if (!clientsProdMonth[pn]) clientsProdMonth[pn] = {};
-              if (!clientsProdMonth[pn][mi]) clientsProdMonth[pn][mi] = new Set();
-              clientsProdMonth[pn][mi].add(r.companyId);
-            }
-          });
-        } else {
-          const pn = productName(r.product_id) || NO_PRODUCT;
-          byProduct.set(pn, (byProduct.get(pn) || 0) + val);
+        const bump = (pn: string, amt: number) => {
+          byProduct.set(pn, (byProduct.get(pn) || 0) + amt);
           if (!prodMonthly[pn]) prodMonthly[pn] = {};
-          prodMonthly[pn][mi] = (prodMonthly[pn][mi] || 0) + val;
+          prodMonthly[pn][mi] = (prodMonthly[pn][mi] || 0) + amt;
           if (r.companyId) {
             if (!clientsProdMonth[pn]) clientsProdMonth[pn] = {};
             if (!clientsProdMonth[pn][mi]) clientsProdMonth[pn][mi] = new Set();
             clientsProdMonth[pn][mi].add(r.companyId);
           }
+        };
+        if (r.split_revenue && r.split_revenue.length > 0) {
+          r.split_revenue.forEach(sp => {
+            const pn = productName(sp.product_id) || NO_PRODUCT;
+            if (productSet.has(pn)) bump(pn, Math.abs(sp.amount));
+          });
+        } else {
+          bump(productName(r.product_id) || NO_PRODUCT, val);
         }
         byClient.set(companyName(r.companyId), (byClient.get(companyName(r.companyId)) || 0) + val);
       } else {
-        // Despesas não são classificadas por produto
         const abs = Math.abs(r.amount);
         totalExpense += abs;
         monthly[idx].despesa += abs;
@@ -196,7 +185,6 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     };
   };
 
-  // ---- Clientes por mês (para churn), respeitando filtro de produtos ----
   const clientsByMonth = useMemo(() => {
     const map = new Map<string, Set<string>>();
     validRecords.forEach(r => {
@@ -227,8 +215,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
       return entry;
     });
 
-    // Churn / novos clientes
-    const churnSeries: { month: string; churnPct: number; novos: number; churned: number }[] = [];
+    const churnSeries: { month: string; churnPct: number; novos: number; perdidos: number }[] = [];
     let churnSum = 0, churnCount = 0;
     monthsSorted.forEach(mi => {
       const mk = `${year}-${String(mi).padStart(2, '0')}`;
@@ -237,16 +224,15 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
       const prevKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
       const prev = clientsByMonth.get(prevKey) || new Set<string>();
       const curr = clientsByMonth.get(mk) || new Set<string>();
-      const churned = Array.from(prev).filter(c => !curr.has(c)).length;
+      const perdidos = Array.from(prev).filter(c => !curr.has(c)).length;
       const novos = Array.from(curr).filter(c => !prev.has(c)).length;
-      const churnPct = prev.size ? (churned / prev.size) * 100 : 0;
+      const churnPct = prev.size ? (perdidos / prev.size) * 100 : 0;
       if (prev.size) { churnSum += churnPct; churnCount++; }
-      churnSeries.push({ month: MONTHS[mi - 1], churnPct, novos, churned });
+      churnSeries.push({ month: MONTHS[mi - 1], churnPct, novos, perdidos });
     });
     const avgChurn = churnCount ? churnSum / churnCount : 0;
     const newLastMonth = churnSeries.length ? churnSeries[churnSeries.length - 1].novos : 0;
 
-    // Evolução de clientes ativos por produto
     const clientProdNames = Object.entries(primary.clientsProdMonth)
       .map(([name, months]) => ({ name, total: new Set(Object.values(months).flatMap(s => Array.from(s))).size }))
       .sort((a, b) => b.total - a.total).slice(0, 6).map(p => p.name);
@@ -259,7 +245,6 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
       activeClientsSeries.push(entry);
     });
 
-    // Aging de recebíveis (não depende do ano/meses)
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const aging: Record<string, number> = { 'Vencido': 0, '0-30d': 0, '31-60d': 0, '60d+': 0 };
     validRecords.forEach(r => {
@@ -275,16 +260,16 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     });
     const agingData = Object.entries(aging).map(([name, value]) => ({ name, value }));
 
-    const statusData = [
-      { name: 'Pago', value: primary.statusMap.Pago, color: '#10b981' },
-      { name: 'Pendente', value: primary.statusMap.Pendente, color: '#f59e0b' },
-      { name: 'Atrasado', value: primary.statusMap.Atrasado, color: '#ef4444' },
-    ].filter(s => s.value > 0);
+    const statusTotal = primary.statusMap.Pago + primary.statusMap.Pendente + primary.statusMap.Atrasado;
+    const statusRows = [
+      { name: 'Pago', value: primary.statusMap.Pago, color: STATUS.good },
+      { name: 'Pendente', value: primary.statusMap.Pendente, color: STATUS.warning },
+      { name: 'Atrasado', value: primary.statusMap.Atrasado, color: STATUS.critical },
+    ].map(s => ({ ...s, share: statusTotal ? (s.value / statusTotal) * 100 : 0 }));
 
     const topClients = Array.from(primary.byClient.entries())
       .map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 7);
 
-    // Evolução mensal com série comparativa
     const evolution = primary.monthly.map((m, i) => ({
       ...m,
       receitaCmp: compare ? (compare.monthly[i]?.receita ?? 0) : undefined,
@@ -293,11 +278,10 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
 
     return {
       productData, topProductNames, prodMonthlyData, churnSeries, avgChurn, newLastMonth,
-      clientProdNames, activeClientsSeries, agingData, statusData, topClients, evolution,
+      clientProdNames, activeClientsSeries, agingData, statusRows, topClients, evolution,
     };
   }, [primary, compare, monthsSorted, year, clientsByMonth, validRecords, productSet]);
 
-  // ---- Recorrência (assinaturas ativas), respeitando filtro de produtos ----
   const recurring = useMemo(() => {
     const active = subscriptions.filter(s =>
       (s.status || 'ACTIVE') === 'ACTIVE' && productSet.has(productName(s.product_id) || NO_PRODUCT));
@@ -320,391 +304,409 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
   const siglaFat = useMemo(() => buildSiglas(derived.topProductNames), [derived.topProductNames]);
   const siglaCli = useMemo(() => buildSiglas(derived.clientProdNames), [derived.clientProdNames]);
 
-  const periodLabel = monthsSorted.length === 12
-    ? String(year)
-    : `${monthsSorted.map(m => MONTHS[m - 1]).join(', ')} ${year}`;
+  const monthsLabel = monthsSorted.length === 12 ? 'Ano cheio'
+    : monthsSorted.length === 1 ? MONTHS[monthsSorted[0] - 1]
+    : isContiguous(monthsSorted) ? `${MONTHS[monthsSorted[0] - 1]}–${MONTHS[monthsSorted[monthsSorted.length - 1] - 1]}`
+    : `${monthsSorted.length} meses`;
+  const productsLabel = isProductFiltered ? `${activeProducts.length} de ${productOptions.length}` : 'Todos';
+  const scopeLabel = `${isProductFiltered ? `${activeProducts.length} produtos` : 'todos os produtos'} · ${year}`;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-mcsystem-900">Dashboard Financeiro</h2>
-          <p className="text-gray-500 text-sm">Receita, recorrência, clientes e saúde do negócio.</p>
-        </div>
-      </div>
-
+    <div className="-m-8">
       {/* Barra de filtros */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 space-y-3">
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Ano */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Ano</span>
-            <select value={year} onChange={e => setYear(Number(e.target.value))}
-              className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium focus:border-mcsystem-500 outline-none">
-              {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
+      <div className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-gray-200/70 px-8 py-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Faturamento</h1>
+            <p className="text-sm text-gray-500">Receita, produtos, clientes e retenção</p>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill label="Ano" value={String(year)}>
+              {close => (
+                <div className="p-1">
+                  {availableYears.map(y => (
+                    <Option key={y} active={y === year} onClick={() => { setYear(y); close(); }}>{y}</Option>
+                  ))}
+                </div>
+              )}
+            </Pill>
 
-          <div className="h-6 w-px bg-gray-200 hidden md:block" />
+            <Pill label="Meses" value={monthsLabel}>
+              {() => (
+                <div className="p-3 w-64">
+                  <div className="grid grid-cols-4 gap-1.5 mb-3">
+                    {MONTHS.map((m, i) => {
+                      const on = selectedMonths.includes(i + 1);
+                      return (
+                        <button key={m} onClick={() => setSelectedMonths(prev =>
+                          prev.includes(i + 1) ? prev.filter(x => x !== i + 1) : [...prev, i + 1].sort((a, b) => a - b))}
+                          className={`py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${on ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                          {m}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex justify-between text-xs border-t border-gray-100 pt-2">
+                    <button onClick={() => setSelectedMonths(ALL_MONTHS)} className="text-gray-700 font-medium hover:underline">Ano cheio</button>
+                    <button onClick={() => setSelectedMonths([new Date().getMonth() + 1])} className="text-gray-700 font-medium hover:underline">Mês atual</button>
+                    <button onClick={() => setSelectedMonths(ALL_MONTHS.slice(0, new Date().getMonth() + 1))} className="text-gray-700 font-medium hover:underline">Até hoje</button>
+                  </div>
+                </div>
+              )}
+            </Pill>
 
-          {/* Produtos */}
-          <MultiSelect
-            label="Produtos"
-            options={productOptions}
-            selected={activeProducts}
-            onChange={sel => setSelectedProducts(sel.length === productOptions.length ? null : sel)}
-            icon={<Package size={14} />}
-          />
+            <Pill label="Produtos" value={productsLabel}>
+              {() => (
+                <div className="p-2 w-64 max-h-72 overflow-y-auto">
+                  <div className="flex justify-between px-2 pb-2 mb-1 border-b border-gray-100 text-xs">
+                    <button onClick={() => setSelectedProducts(null)} className="text-gray-700 font-medium hover:underline">Todos</button>
+                    <button onClick={() => setSelectedProducts([])} className="text-red-500 font-medium hover:underline">Limpar</button>
+                  </div>
+                  {productOptions.map(opt => {
+                    const on = activeProducts.includes(opt);
+                    return (
+                      <button key={opt} onClick={() => {
+                        const next = on ? activeProducts.filter(o => o !== opt) : [...activeProducts, opt];
+                        setSelectedProducts(next.length === productOptions.length ? null : next);
+                      }} className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-gray-50 text-left">
+                        <span className={`h-4 w-4 rounded border flex items-center justify-center flex-shrink-0 ${on ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+                          {on && <Check size={11} className="text-white" strokeWidth={3} />}
+                        </span>
+                        <span className="text-sm text-gray-700 truncate">{opt}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </Pill>
 
-          <div className="h-6 w-px bg-gray-200 hidden md:block" />
-
-          {/* Comparação */}
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" checked={compareEnabled} onChange={e => setCompareEnabled(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-mcsystem-600 focus:ring-mcsystem-500" />
-            <span className="text-sm text-gray-700">Comparar com</span>
-          </label>
-          <select value={compareYear} disabled={!compareEnabled} onChange={e => setCompareYear(Number(e.target.value))}
-            className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium focus:border-mcsystem-500 outline-none disabled:bg-gray-100 disabled:text-gray-400">
-            {[...new Set([...availableYears, year - 1, year - 2])].sort((a, b) => b - a).filter(y => y !== year)
-              .map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-          {compareEnabled && <span className="text-xs text-gray-400">mesmos meses</span>}
+            <Pill label="Comparar com" value={compareEnabled ? String(compareYear) : 'Desligado'}>
+              {close => (
+                <div className="p-1 w-48">
+                  <Option active={!compareEnabled} onClick={() => { setCompareEnabled(false); close(); }}>Desligado</Option>
+                  {[...new Set([...availableYears, year - 1, year - 2])].sort((a, b) => b - a).filter(y => y !== year).map(y => (
+                    <Option key={y} active={compareEnabled && y === compareYear}
+                      onClick={() => { setCompareYear(y); setCompareEnabled(true); close(); }}>{y} · mesmos meses</Option>
+                  ))}
+                </div>
+              )}
+            </Pill>
+          </div>
         </div>
-
-        {/* Meses */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 mr-1">Meses</span>
-          {MONTHS.map((m, i) => {
-            const on = selectedMonths.includes(i + 1);
-            return (
-              <button key={m} onClick={() => toggleMonth(i + 1)}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${on ? 'bg-mcsystem-500 text-white shadow-sm' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>
-                {m}
-              </button>
-            );
-          })}
-          <button onClick={() => setSelectedMonths(ALL_MONTHS)} className="ml-2 text-xs text-mcsystem-600 hover:underline">Todos</button>
-          <button onClick={() => setSelectedMonths([new Date().getMonth() + 1])} className="text-xs text-mcsystem-600 hover:underline">Mês atual</button>
-        </div>
-
-        {isProductFiltered && (
-          <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-            Filtro de produto ativo — despesas não são classificadas por produto, então Despesa/Saldo consideram o total do período.
-          </p>
-        )}
       </div>
 
-      {/* KPIs financeiros */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard label="Receita" value={brl(primary.totalIncome)} icon={<TrendingUp size={20} />} tone="green"
-          delta={compare ? deltaOf(primary.totalIncome, compare.totalIncome) : null} />
-        <KpiCard label="Despesa" value={brl(primary.totalExpense)} icon={<TrendingDown size={20} />} tone="red"
-          delta={compare ? deltaOf(primary.totalExpense, compare.totalExpense, true) : null} />
-        <KpiCard label="Saldo" value={brl(primary.balance)} icon={<Wallet size={20} />} tone={primary.balance >= 0 ? 'blue' : 'red'}
-          delta={compare ? deltaOf(primary.balance, compare.balance) : null}
-          sub={<span className={primary.margin >= 0 ? 'text-green-600' : 'text-red-600'}>Margem {pct(primary.margin)}</span>} />
-        <KpiCard label="Em atraso" value={brl(primary.overdueIncome)} icon={<AlertCircle size={20} />} tone="red"
-          sub={<span className="text-gray-400">{pct(primary.overdueRate)} da receita</span>} />
-      </div>
-
-      {/* KPIs de recorrência */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard label="MRR" value={brl(recurring.mrr)} icon={<Repeat size={20} />} tone="purple"
-          sub={<span className="text-gray-400">ARR {brl(recurring.arr)}</span>} />
-        <KpiCard label="Clientes ativos" value={String(recurring.activeSubscribers)} icon={<Users size={20} />} tone="blue"
-          sub={<span className="text-green-600">+{derived.newLastMonth} no último mês</span>} />
-        <KpiCard label="ARPU" value={brl(arpu)} icon={<Target size={20} />} tone="amber"
-          sub={<span className="text-gray-400">{ltv !== null ? `LTV ${brl(ltv)}` : 'LTV —'}</span>} />
-        <KpiCard label="Churn médio / mês" value={pct(derived.avgChurn)} icon={<Percent size={20} />} tone={derived.avgChurn > 8 ? 'red' : 'green'}
-          sub={<span className="text-gray-400">Retenção {pct(100 - derived.avgChurn)}</span>} />
-      </div>
-
-      {/* Evolução mensal + Receita por produto */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card title="Evolução mensal" subtitle={compare ? `${periodLabel} vs ${compareYear}` : periodLabel} className="lg:col-span-2">
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={derived.evolution} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={brlShort} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={55} />
-                <Tooltip formatter={(v: any) => brl(v)} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12 }} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="receita" name="Receita" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                <Bar dataKey="despesa" name="Despesa" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                <Line dataKey="saldo" name="Saldo" stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 3 }} />
-                {compare && <Line dataKey="receitaCmp" name={`Receita ${compareYear}`} stroke="#10b981" strokeWidth={2} strokeDasharray="5 4" dot={false} />}
-                {compare && <Line dataKey="despesaCmp" name={`Despesa ${compareYear}`} stroke="#ef4444" strokeWidth={2} strokeDasharray="5 4" dot={false} />}
-              </ComposedChart>
-            </ResponsiveContainer>
+      <div className="px-8 py-8 space-y-10">
+        {/* Resumo */}
+        <section className="space-y-4">
+          <SectionTitle title="Resumo" context={`${scopeLabel}${compare ? ` contra ${compareYear}` : ''}`} />
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <Kpi label="Receita total" value={brl(primary.totalIncome)}
+              delta={compare ? deltaOf(primary.totalIncome, compare.totalIncome) : null} compareYear={compareYear} />
+            <Kpi label="Recebido" value={brl(primary.receivedIncome)}
+              delta={compare ? deltaOf(primary.receivedIncome, compare.receivedIncome) : null} compareYear={compareYear} />
+            <Kpi label="Saldo" value={brl(primary.balance)} hint={`Margem ${pct(primary.margin)}`}
+              delta={compare ? deltaOf(primary.balance, compare.balance) : null} compareYear={compareYear} />
+            <Kpi label="MRR" value={brl(recurring.mrr)} hint={`ARR ${brl(recurring.arr)}`} />
+            <Kpi label="Clientes ativos" value={String(recurring.activeSubscribers)} hint={`+${derived.newLastMonth} no último mês`} />
           </div>
-        </Card>
-
-        <Card title="Receita por produto" subtitle={periodLabel}>
-          <div className="h-72">
-            {derived.productData.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={derived.productData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">
-                    {derived.productData.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
-                  </Pie>
-                  <Tooltip formatter={(v: any) => brl(v)} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12 }} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <Kpi label="Em atraso" value={brl(primary.overdueIncome)} hint={`${pct(primary.overdueRate)} da receita`} />
+            <Kpi label="A receber" value={brl(primary.pendingIncome)} />
+            <Kpi label="ARPU" value={brl(arpu)} hint={ltv !== null ? `LTV ${brl(ltv)}` : undefined} />
+            <Kpi label="Churn médio" value={pct(derived.avgChurn)} hint={`Retenção ${pct(100 - derived.avgChurn)}`} />
           </div>
-        </Card>
-      </div>
-
-      {/* Faturamento por produto / mês (linhas comparativas) */}
-      <Card title="Faturamento por produto / mês" subtitle={`Comparativo por produto — ${periodLabel}`}>
-        <div className="h-80">
-          {derived.topProductNames.length === 0 ? <Empty /> : (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={derived.prodMonthlyData} margin={{ top: 10, right: 56, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={brlShort} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={55} />
-                <Tooltip formatter={(v: any) => brl(v)} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12 }} />
-                <Legend wrapperStyle={{ fontSize: 11 }} formatter={(v: any) => `${siglaFat[v] || ''} · ${v}`} />
-                {derived.topProductNames.map((pn, i) => (
-                  <Line key={pn} type="monotone" dataKey={pn} stroke={PALETTE[i % PALETTE.length]} strokeWidth={2.5}
-                    dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls
-                    label={endLabel(siglaFat[pn] || pn, PALETTE[i % PALETTE.length], derived.prodMonthlyData.length - 1)} />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
+          {isProductFiltered && (
+            <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+              Filtro de produto ativo — despesas não são classificadas por produto, então Saldo considera a despesa total do período.
+            </p>
           )}
-        </div>
-      </Card>
+        </section>
 
-      {/* Evolução de clientes ativos por produto */}
-      <Card title="Evolução de clientes ativos por produto" subtitle={`Clientes com cobrança no mês — ${periodLabel}`}>
-        <div className="h-80">
-          {derived.clientProdNames.length === 0 ? <Empty /> : (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={derived.activeClientsSeries} margin={{ top: 10, right: 56, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={40} />
-                <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12 }} />
-                <Legend wrapperStyle={{ fontSize: 11 }} formatter={(v: any) => `${siglaCli[v] || ''} · ${v}`} />
-                {derived.clientProdNames.map((pn, i) => (
-                  <Line key={pn} type="monotone" dataKey={pn} stroke={PALETTE[i % PALETTE.length]} strokeWidth={2.5}
-                    dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls
-                    label={endLabel(siglaCli[pn] || pn, PALETTE[i % PALETTE.length], derived.activeClientsSeries.length - 1)} />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </Card>
-
-      {/* Churn + clientes ativos por produto (snapshot) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card title="Churn e novos clientes" subtitle="Por mês (base cobranças)" className="lg:col-span-2">
-          <div className="h-72">
-            {derived.churnSeries.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={derived.churnSeries} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="left" allowDecimals={false} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={30} />
-                  <YAxis yAxisId="right" orientation="right" tickFormatter={(v: any) => `${v}%`} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={40} />
-                  <Tooltip formatter={(v: any, n: any) => n === 'Churn %' ? `${(v as number).toFixed(1)}%` : v} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12 }} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar yAxisId="left" dataKey="novos" name="Novos clientes" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                  <Bar yAxisId="left" dataKey="churned" name="Perdidos" fill="#fca5a5" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                  <Line yAxisId="right" dataKey="churnPct" name="Churn %" stroke="#ef4444" strokeWidth={2.5} dot={{ r: 3 }} />
+        {/* Receita */}
+        <section className="space-y-4">
+          <SectionTitle title="Receita" context="evolução, produtos e mix" />
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <Panel title="Receita mensal" subtitle={compare ? `${year} contra ${compareYear}` : 'Receita, despesa e saldo'}>
+              <ChartBox>
+                <ComposedChart data={derived.evolution} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={INK.grid} vertical={false} />
+                  <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
+                  <YAxis tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} width={54} />
+                  <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
+                  <Legend {...legendProps} />
+                  <Bar dataKey="receita" name="Receita" fill={SERIES[0]} radius={[4, 4, 0, 0]} maxBarSize={18} />
+                  <Bar dataKey="despesa" name="Despesa" fill={SERIES[1]} radius={[4, 4, 0, 0]} maxBarSize={18} />
+                  <Line dataKey="saldo" name="Saldo" stroke={SERIES[2]} strokeWidth={2} dot={false} />
+                  {compare && <Line dataKey="receitaCmp" name={`Receita ${compareYear}`} stroke={SERIES[0]} strokeWidth={2} strokeDasharray="4 4" dot={false} />}
                 </ComposedChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </Card>
+              </ChartBox>
+            </Panel>
 
-        <Card title="Clientes ativos por produto" subtitle="Assinaturas ativas hoje">
-          <div className="h-72">
-            {recurring.activeClientsByProduct.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart layout="vertical" data={recurring.activeClientsByProduct} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
-                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12 }} />
-                  <Bar dataKey="value" name="Clientes" fill="#8b5cf6" radius={[0, 4, 4, 0]} maxBarSize={22} />
+            <Panel title="Faturamento por produto" subtitle={`Mensal · ${siglaLegend(siglaFat, derived.topProductNames)}`}>
+              <ChartBox empty={derived.topProductNames.length === 0}>
+                <LineChart data={derived.prodMonthlyData} margin={{ top: 8, right: 52, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={INK.grid} vertical={false} />
+                  <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
+                  <YAxis tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} width={54} />
+                  <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
+                  <Legend {...legendProps} />
+                  {derived.topProductNames.map((pn, i) => (
+                    <Line key={pn} type="monotone" dataKey={pn} stroke={SERIES[i]} strokeWidth={2}
+                      dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }} connectNulls
+                      label={endLabel(siglaFat[pn], SERIES[i], derived.prodMonthlyData.length - 1)} />
+                  ))}
+                </LineChart>
+              </ChartBox>
+            </Panel>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <Panel title="Receita por produto" subtitle={`Total do período · ${year}`}>
+              <ChartBox empty={derived.productData.length === 0}>
+                <BarChart layout="vertical" data={derived.productData} margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
+                  <CartesianGrid stroke={INK.grid} horizontal={false} />
+                  <XAxis type="number" tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12, fill: INK.secondary }} axisLine={false} tickLine={false} />
+                  <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
+                  <Bar dataKey="value" name="Receita" radius={[0, 4, 4, 0]} maxBarSize={20}
+                    label={{ position: 'right', formatter: (v: any) => brl(v), fontSize: 11, fill: INK.secondary }}>
+                    {derived.productData.map((_, i) => <Cell key={i} fill={SERIES[i % SERIES.length]} />)}
+                  </Bar>
                 </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </Card>
-      </div>
+              </ChartBox>
+            </Panel>
 
-      {/* Aging + Status + Top clientes */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card title="Recebíveis (aging)" subtitle="A receber por vencimento">
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={derived.agingData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} interval={0} />
-                <YAxis tickFormatter={brlShort} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={55} />
-                <Tooltip formatter={(v: any) => brl(v)} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12 }} />
-                <Bar dataKey="value" name="A receber" radius={[4, 4, 0, 0]} maxBarSize={40}>
-                  {derived.agingData.map((_, i) => <Cell key={i} fill={['#ef4444', '#f59e0b', '#3b82f6', '#9ca3af'][i]} />)}
+            <Panel title="Top clientes" subtitle={`Receita no período · ${year}`}>
+              <ChartBox empty={derived.topClients.length === 0}>
+                <BarChart layout="vertical" data={derived.topClients} margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
+                  <CartesianGrid stroke={INK.grid} horizontal={false} />
+                  <XAxis type="number" tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11, fill: INK.secondary }} axisLine={false} tickLine={false} />
+                  <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
+                  <Bar dataKey="value" name="Receita" fill={SERIES[4]} radius={[0, 4, 4, 0]} maxBarSize={18}
+                    label={{ position: 'right', formatter: (v: any) => brl(v), fontSize: 11, fill: INK.secondary }} />
+                </BarChart>
+              </ChartBox>
+            </Panel>
+          </div>
+        </section>
+
+        {/* Clientes & retenção */}
+        <section className="space-y-4">
+          <SectionTitle title="Clientes & retenção" context="base ativa, entradas e saídas" />
+          <Panel title="Clientes ativos por produto" subtitle={`Evolução mensal · ${siglaLegend(siglaCli, derived.clientProdNames)}`}>
+            <ChartBox height="h-80" empty={derived.clientProdNames.length === 0}>
+              <LineChart data={derived.activeClientsSeries} margin={{ top: 8, right: 52, left: 0, bottom: 0 }}>
+                <CartesianGrid stroke={INK.grid} vertical={false} />
+                <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
+                <YAxis allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} width={40} />
+                <Tooltip {...tooltipProps} />
+                <Legend {...legendProps} />
+                {derived.clientProdNames.map((pn, i) => (
+                  <Line key={pn} type="monotone" dataKey={pn} stroke={SERIES[i]} strokeWidth={2}
+                    dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }} connectNulls
+                    label={endLabel(siglaCli[pn], SERIES[i], derived.activeClientsSeries.length - 1)} />
+                ))}
+              </LineChart>
+            </ChartBox>
+          </Panel>
+
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <Panel title="Novos e perdidos" subtitle="Clientes por mês" className="xl:col-span-2">
+              <ChartBox empty={derived.churnSeries.length === 0}>
+                <BarChart data={derived.churnSeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={INK.grid} vertical={false} />
+                  <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
+                  <YAxis allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} width={40} />
+                  <Tooltip {...tooltipProps} />
+                  <Legend {...legendProps} />
+                  <Bar dataKey="novos" name="Novos" fill={SERIES[0]} radius={[4, 4, 0, 0]} maxBarSize={18} />
+                  <Bar dataKey="perdidos" name="Perdidos" fill={SERIES[1]} radius={[4, 4, 0, 0]} maxBarSize={18} />
+                </BarChart>
+              </ChartBox>
+            </Panel>
+
+            <Panel title="Churn mensal" subtitle={`Média ${pct(derived.avgChurn)}`}>
+              <ChartBox empty={derived.churnSeries.length === 0}>
+                <LineChart data={derived.churnSeries} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={INK.grid} vertical={false} />
+                  <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
+                  <YAxis tickFormatter={(v: any) => `${v}%`} tick={axisTick} axisLine={false} tickLine={false} width={42} />
+                  <Tooltip {...tooltipProps} formatter={(v: any) => pct(v)} />
+                  <Line dataKey="churnPct" name="Churn" stroke={SERIES[1]} strokeWidth={2}
+                    dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }} />
+                </LineChart>
+              </ChartBox>
+            </Panel>
+          </div>
+
+          <Panel title="Base ativa por produto" subtitle="Assinaturas ativas hoje">
+            <ChartBox height="h-64" empty={recurring.activeClientsByProduct.length === 0}>
+              <BarChart layout="vertical" data={recurring.activeClientsByProduct} margin={{ top: 4, right: 48, left: 8, bottom: 4 }}>
+                <CartesianGrid stroke={INK.grid} horizontal={false} />
+                <XAxis type="number" allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12, fill: INK.secondary }} axisLine={false} tickLine={false} />
+                <Tooltip {...tooltipProps} />
+                <Bar dataKey="value" name="Clientes" radius={[0, 4, 4, 0]} maxBarSize={20}
+                  label={{ position: 'right', fontSize: 11, fill: INK.secondary }}>
+                  {recurring.activeClientsByProduct.map((_, i) => <Cell key={i} fill={SERIES[i % SERIES.length]} />)}
                 </Bar>
               </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
+            </ChartBox>
+          </Panel>
+        </section>
 
-        <Card title="Status das cobranças" subtitle={periodLabel}>
-          <div className="h-72">
-            {derived.statusData.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={derived.statusData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">
-                    {derived.statusData.map((s, i) => <Cell key={i} fill={s.color} />)}
-                  </Pie>
-                  <Tooltip formatter={(v: any) => brl(v)} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12 }} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </Card>
-
-        <Card title="Top clientes" subtitle={`Receita — ${periodLabel}`}>
-          <div className="h-72">
-            {derived.topClients.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart layout="vertical" data={derived.topClients} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
-                  <XAxis type="number" tickFormatter={brlShort} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                  <Tooltip formatter={(v: any) => brl(v)} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12 }} />
-                  <Bar dataKey="value" name="Receita" fill="#3b82f6" radius={[0, 4, 4, 0]} maxBarSize={20} />
+        {/* Recebíveis */}
+        <section className="space-y-4">
+          <SectionTitle title="Recebíveis" context="aging e situação das cobranças" />
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <Panel title="Aging de recebíveis" subtitle="A receber por vencimento">
+              <ChartBox>
+                <BarChart data={derived.agingData} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={INK.grid} vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: INK.secondary }} axisLine={false} tickLine={false} dy={6} interval={0} />
+                  <YAxis tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} width={54} />
+                  <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
+                  <Bar dataKey="value" name="A receber" radius={[4, 4, 0, 0]} maxBarSize={56}
+                    label={{ position: 'top', formatter: (v: any) => brl(v), fontSize: 11, fill: INK.secondary }}>
+                    {derived.agingData.map((_, i) => (
+                      <Cell key={i} fill={i === 0 ? STATUS.critical : SERIES[4]} />
+                    ))}
+                  </Bar>
                 </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </Card>
-      </div>
+              </ChartBox>
+            </Panel>
 
-      <p className="text-[11px] text-gray-400 flex items-center gap-1">
-        <Activity size={12} /> Churn e novos clientes calculados a partir do histórico de cobranças. MRR/ARPU baseados nas assinaturas ativas.
-      </p>
+            <Panel title="Situação das cobranças" subtitle={`Receita do período · ${year}`}>
+              <div className="h-72 flex flex-col justify-center gap-5">
+                <div className="flex h-3 rounded-full overflow-hidden bg-gray-100 gap-0.5">
+                  {derived.statusRows.filter(s => s.value > 0).map(s => (
+                    <div key={s.name} style={{ width: `${s.share}%`, background: s.color }} />
+                  ))}
+                </div>
+                <div className="space-y-3">
+                  {derived.statusRows.map(s => (
+                    <div key={s.name} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: s.color }} />
+                        <span className="text-sm font-medium text-gray-700">{s.name}</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className="text-sm font-semibold text-gray-900 tabular-nums">{brlExact(s.value)}</span>
+                        <span className="text-xs text-gray-400 tabular-nums w-12 text-right">{pct(s.share)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Panel>
+          </div>
+        </section>
+
+        <p className="text-xs text-gray-400 pb-2">
+          Churn e novos clientes calculados a partir do histórico de cobranças. MRR, ARPU e base ativa consideram as assinaturas ativas.
+        </p>
+      </div>
     </div>
   );
 };
 
-// ---------- Filtro multi-seleção ----------
+// ---------- helpers ----------
 
-const MultiSelect: React.FC<{
-  label: string; options: string[]; selected: string[];
-  onChange: (sel: string[]) => void; icon?: React.ReactNode;
-}> = ({ label, options, selected, onChange, icon }) => {
+const isContiguous = (arr: number[]) => arr.every((v, i) => i === 0 || v === arr[i - 1] + 1);
+const siglaLegend = (map: Record<string, string>, names: string[]) =>
+  names.map(n => map[n]).filter(Boolean).join(' × ') || '—';
+
+const axisTick = { fontSize: 11, fill: INK.muted };
+const tooltipProps = {
+  contentStyle: { borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 12, boxShadow: '0 4px 16px rgba(0,0,0,.06)' },
+  cursor: { fill: 'rgba(0,0,0,.03)' },
+};
+const legendProps = {
+  wrapperStyle: { fontSize: 12, paddingTop: 8 },
+  iconType: 'circle' as const,
+  iconSize: 8,
+};
+
+const deltaOf = (curr: number, prev: number) => {
+  if (!prev) return null;
+  return ((curr - prev) / Math.abs(prev)) * 100;
+};
+
+const SectionTitle: React.FC<{ title: string; context?: string }> = ({ title, context }) => (
+  <div className="flex items-baseline gap-2">
+    <h2 className="text-lg font-bold text-gray-900">{title}</h2>
+    {context && <span className="text-sm text-gray-400">· {context}</span>}
+  </div>
+);
+
+const Kpi: React.FC<{ label: string; value: string; hint?: string; delta?: number | null; compareYear?: number }> = ({ label, value, hint, delta, compareYear }) => {
+  const up = (delta ?? 0) >= 0;
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200/80 p-5">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{label}</div>
+      <div className="mt-2 text-2xl font-bold text-gray-900 tracking-tight tabular-nums">{value}</div>
+      <div className="mt-2 flex items-center gap-2 min-h-[22px]">
+        {delta !== null && delta !== undefined && (
+          <span className={`inline-flex items-center gap-0.5 text-xs font-semibold px-1.5 py-0.5 rounded-md ${up ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50'}`}>
+            {up ? <ArrowUp size={11} strokeWidth={3} /> : <ArrowDown size={11} strokeWidth={3} />}
+            {Math.abs(delta).toFixed(1)}%
+          </span>
+        )}
+        {delta !== null && delta !== undefined && compareYear && <span className="text-xs text-gray-400">vs. {compareYear}</span>}
+        {hint && <span className="text-xs text-gray-500">{hint}</span>}
+      </div>
+    </div>
+  );
+};
+
+const Panel: React.FC<{ title: string; subtitle?: string; className?: string; children: React.ReactNode }> = ({ title, subtitle, className = '', children }) => (
+  <div className={`bg-white rounded-2xl border border-gray-200/80 p-6 ${className}`}>
+    <div className="mb-5">
+      <h3 className="font-semibold text-gray-900">{title}</h3>
+      {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
+    </div>
+    {children}
+  </div>
+);
+
+const ChartBox: React.FC<{ children: React.ReactElement; height?: string; empty?: boolean }> = ({ children, height = 'h-72', empty }) => (
+  <div className={height}>
+    {empty
+      ? <div className="h-full flex items-center justify-center text-gray-300 text-sm">Sem dados no período</div>
+      : <ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer>}
+  </div>
+);
+
+const Pill: React.FC<{ label: string; value: string; children: (close: () => void) => React.ReactNode }> = ({ label, value, children }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
   }, []);
-
-  const all = selected.length === options.length;
-  const toggle = (opt: string) =>
-    onChange(selected.includes(opt) ? selected.filter(o => o !== opt) : [...selected, opt]);
-
   return (
     <div className="relative" ref={ref}>
       <button onClick={() => setOpen(o => !o)}
-        className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-        {icon}
-        <span>{label}:</span>
-        <span className="text-mcsystem-600">{all ? 'Todos' : `${selected.length} de ${options.length}`}</span>
+        className="pl-4 pr-3 py-2 rounded-full border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{label}</span>
+        <span className="text-sm font-semibold text-gray-900">{value}</span>
         <ChevronDown size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl z-40 p-2 animate-in fade-in zoom-in-95 max-h-72 overflow-y-auto">
-          <div className="flex justify-between px-2 py-1 mb-1 border-b border-gray-100">
-            <button onClick={() => onChange(options)} className="text-xs text-mcsystem-600 hover:underline">Selecionar todos</button>
-            <button onClick={() => onChange([])} className="text-xs text-red-500 hover:underline">Limpar</button>
-          </div>
-          {options.map(opt => {
-            const on = selected.includes(opt);
-            return (
-              <button key={opt} onClick={() => toggle(opt)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 text-left">
-                <span className={`h-4 w-4 rounded border flex items-center justify-center flex-shrink-0 ${on ? 'bg-mcsystem-500 border-mcsystem-500' : 'border-gray-300'}`}>
-                  {on && <Check size={11} className="text-white" />}
-                </span>
-                <span className="text-sm text-gray-700 truncate">{opt}</span>
-              </button>
-            );
-          })}
+        <div className="absolute top-full right-0 mt-2 bg-white border border-gray-200 rounded-2xl shadow-xl z-50 animate-in fade-in zoom-in-95 duration-150 overflow-hidden">
+          {children(() => setOpen(false))}
         </div>
       )}
     </div>
   );
 };
 
-// ---------- UI helpers ----------
-
-const deltaOf = (curr: number, prev: number, inverse = false) => {
-  if (!prev) return null;
-  const p = ((curr - prev) / Math.abs(prev)) * 100;
-  return { pct: p, good: inverse ? p <= 0 : p >= 0 };
-};
-
-const toneMap: Record<string, { bg: string; text: string }> = {
-  green: { bg: 'bg-green-50', text: 'text-green-600' },
-  red: { bg: 'bg-red-50', text: 'text-red-600' },
-  blue: { bg: 'bg-blue-50', text: 'text-blue-600' },
-  amber: { bg: 'bg-amber-50', text: 'text-amber-600' },
-  purple: { bg: 'bg-purple-50', text: 'text-purple-600' },
-};
-
-const KpiCard: React.FC<{
-  label: string; value: string; icon: React.ReactNode; tone: string;
-  sub?: React.ReactNode; delta?: { pct: number; good: boolean } | null;
-}> = ({ label, value, icon, tone, sub, delta }) => {
-  const t = toneMap[tone] || toneMap.blue;
-  const DeltaIcon = !delta ? Minus : delta.pct >= 0 ? ArrowUpRight : ArrowDownRight;
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</span>
-        <span className={`p-2 rounded-lg ${t.bg} ${t.text}`}>{icon}</span>
-      </div>
-      <div className="text-2xl font-bold text-gray-800">{value}</div>
-      <div className="mt-1 flex items-center gap-2 text-xs font-medium">
-        {delta && (
-          <span className={`inline-flex items-center gap-0.5 ${delta.good ? 'text-green-600' : 'text-red-600'}`}>
-            <DeltaIcon size={13} />{Math.abs(delta.pct).toFixed(1)}%
-          </span>
-        )}
-        {sub}
-      </div>
-    </div>
-  );
-};
-
-const Card: React.FC<{ title: string; subtitle?: string; className?: string; children: React.ReactNode }> = ({ title, subtitle, className = '', children }) => (
-  <div className={`bg-white rounded-2xl shadow-sm border border-gray-100 p-6 ${className}`}>
-    <div className="mb-4">
-      <h3 className="font-bold text-gray-900 text-base">{title}</h3>
-      {subtitle && <p className="text-xs text-gray-400 uppercase tracking-wide mt-0.5">{subtitle}</p>}
-    </div>
+const Option: React.FC<{ active?: boolean; onClick: () => void; children: React.ReactNode }> = ({ active, onClick, children }) => (
+  <button onClick={onClick}
+    className={`w-full text-left px-3 py-2 rounded-lg text-sm whitespace-nowrap flex items-center justify-between gap-4 ${active ? 'bg-gray-900 text-white font-semibold' : 'text-gray-700 hover:bg-gray-50'}`}>
     {children}
-  </div>
-);
-
-const Empty: React.FC = () => (
-  <div className="h-full flex items-center justify-center text-gray-300 text-sm">Sem dados no período</div>
+    {active && <Check size={13} strokeWidth={3} />}
+  </button>
 );

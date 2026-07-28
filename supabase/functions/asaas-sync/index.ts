@@ -108,6 +108,22 @@ Deno.serve(async (req: Request) => {
     // Casa pelo nome (normalizado) mais longo primeiro (mais específico).
     const normalize = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const { data: products } = await admin.from('products').select('id, name').eq('tenant_id', tenantId);
+
+    // Rubricas de receita: casa produto -> rubrica pelo nome normalizado.
+    // Sem correspondência cai em OUTRAS RECEITAS, para o lançamento nunca ficar
+    // fora do DRE.
+    const { data: coa } = await admin.from('chart_of_accounts')
+      .select('id, rubricName, classificationCode').eq('tenant_id', tenantId).eq('classificationCode', '1');
+    const rubricByName = new Map<string, { id: string; name: string }>();
+    let fallbackRubric: { id: string; name: string } | null = null;
+    (coa || []).forEach((c: any) => {
+      rubricByName.set(normalize(c.rubricName), { id: c.id, name: c.rubricName });
+      if (normalize(c.rubricName) === normalize('OUTRAS RECEITAS')) fallbackRubric = { id: c.id, name: c.rubricName };
+    });
+    const rubricForProduct = (productId: string | null) => {
+      const pname = (products || []).find((p: any) => p.id === productId)?.name;
+      return (pname ? rubricByName.get(normalize(pname)) : null) || fallbackRubric;
+    };
     const productList = (products || [])
       .map((p: any) => ({ id: p.id, key: normalize(p.name) }))
       .filter((p: any) => p.key.length >= 3)
@@ -164,7 +180,10 @@ Deno.serve(async (req: Request) => {
 
     // ---- 2) Payments (cobranças) ----
     const payments = await asaasList('/payments');
-    const paymentRows = payments.map((p: any) => ({
+    const paymentRows = payments.map((p: any) => {
+      const prodId = matchProduct(p.description);
+      const rubric = rubricForProduct(prodId);
+      return {
       id: `fa${p.id}`,
       tenant_id: tenantId,
       description: p.description || 'Cobrança Asaas',
@@ -174,13 +193,15 @@ Deno.serve(async (req: Request) => {
       dueDate: p.dueDate,
       competenceDate: p.dueDate,
       paymentDate: p.paymentDate || null,
-      category: 'Cobrança Asaas',
+      category: rubric?.name || 'Cobrança Asaas',
+      rubricId: rubric?.id || null,
       companyId: custToClient.get(p.customer) || byAsaas.get(p.customer)?.id || null,
-      product_id: matchProduct(p.description),
+      product_id: prodId,
       asaas_payment_id: p.id,
       asaas_invoice_url: p.invoiceUrl || null,
       asaas_subscription_id: p.subscription || null,
-    }));
+      };
+    });
     if (paymentRows.length) {
       const { error } = await admin.from('financial_records').upsert(paymentRows, { onConflict: 'asaas_payment_id' });
       if (error) throw new Error('Erro ao gravar cobranças: ' + error.message);

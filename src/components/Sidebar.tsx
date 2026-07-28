@@ -3,7 +3,7 @@
 import React from 'react';
 import {
   Users, UserCog, LogOut, List, Bell, Database, ChevronsLeft, Package, Zap,
-  LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Landmark, Tags, FileCheck, FileSignature,
+  LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Landmark, Tags, FileCheck, FileSignature, Wallet,
 } from 'lucide-react';
 import { User } from '../types';
 import { isAsaasEnabled } from '../config';
@@ -15,11 +15,12 @@ interface SidebarProps {
   onLogout: () => void;
   unreadCount: number;
   pendingValidationCount?: number;
+  overduePayablesCount?: number;
   isCollapsed: boolean;
   onToggle: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, currentUser, onLogout, unreadCount, pendingValidationCount = 0, isCollapsed, onToggle }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, currentUser, onLogout, unreadCount, pendingValidationCount = 0, overduePayablesCount = 0, isCollapsed, onToggle }) => {
   const isAdmin = currentUser.role === 'admin';
 
   // Menu agrupado — o sistema inteiro é financeiro, então a navegação é por
@@ -35,6 +36,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
       items: [
         { id: 'entries', label: 'Lançamentos & Caixa', icon: ArrowRightLeft, perm: 'finance' },
         ...(isAsaasEnabled(currentUser.tenant_id) ? [{ id: 'billing', label: 'Cobranças', icon: Zap, perm: 'billing' }] : []),
+        { id: 'payables', label: 'Contas a Pagar', icon: Wallet, perm: 'finance', badge: overduePayablesCount },
         { id: 'contracts', label: 'Contratos', icon: FileSignature, perm: 'contracts' },
         { id: 'validation', label: 'Validação', icon: FileCheck, perm: 'finance', badge: pendingValidationCount },
       ],

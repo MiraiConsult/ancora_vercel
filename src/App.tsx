@@ -6,6 +6,7 @@ import { ProductsModule } from './components/ProductsModule';
 import { BillingModule } from './components/BillingModule';
 import { OverviewDashboard } from './components/OverviewDashboard';
 import { ContractsModule } from './components/ContractsModule';
+import { PayablesAgenda } from './components/PayablesAgenda';
 import type { MainTab } from './components/FinanceDashboard';
 
 // Páginas do menu que abrem o módulo financeiro numa aba específica
@@ -24,6 +25,7 @@ const PAGE_TITLES: Record<string, string> = {
   entries: 'Lançamentos & Caixa',
   finance: 'Lançamentos & Caixa',
   billing: 'Cobranças',
+  payables: 'Contas a Pagar',
   contracts: 'Contratos',
   validation: 'Validação',
   dre: 'DRE Gerencial',
@@ -605,6 +607,17 @@ const handleAddUser = async (newUser: User) => {
           />
         ) : <AccessDenied />;
 
+      case 'payables':
+        return hasPermission('finance') ? (
+          <PayablesAgenda
+            records={financeRecords}
+            setRecords={setFinanceRecords}
+            companies={companies}
+            chartOfAccounts={chartOfAccounts}
+            banks={banks}
+          />
+        ) : <AccessDenied />;
+
       case 'contracts':
         return hasPermission('contracts') ? (
           <ContractsModule
@@ -739,6 +752,7 @@ const handleAddUser = async (newUser: User) => {
           onLogout={signOut}
           unreadCount={unreadNotifications}
           pendingValidationCount={financeRecords.filter(r => r.needsValidation).length}
+          overduePayablesCount={financeRecords.filter(r => r.amount < 0 && (r.status as string) !== 'Pago' && r.dueDate && r.dueDate < new Date().toISOString().slice(0, 10)).length}
           isCollapsed={isSidebarCollapsed}
           onToggle={toggleSidebar}
         />

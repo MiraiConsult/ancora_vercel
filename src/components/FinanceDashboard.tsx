@@ -114,7 +114,11 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
     hideTabs = false
 }) => {
   const productName = (id?: string | null) => products.find(p => p.id === id)?.name || null;
-  const [activeTab, setActiveTab] = useState<MainTab>(initialTab || 'RECONCILIATION');
+  // 'CASH_EVOLUTION' foi incorporado à tela de Lançamentos (painel recolhível)
+  const [activeTab, setActiveTab] = useState<MainTab>(
+    initialTab === 'CASH_EVOLUTION' ? 'RECONCILIATION' : (initialTab || 'RECONCILIATION')
+  );
+  const [showCashEvolution, setShowCashEvolution] = useState(initialTab === 'CASH_EVOLUTION');
   const [reportViewMode, setReportViewMode] = useState<ReportViewMode>('SUMMARY');
   
   // --- View Options & Advanced Filtering ---
@@ -2150,6 +2154,26 @@ const newRecords: FinancialRecord[] = [];
       const allSelected = filtered.length > 0 && selectedRecordIds.size === filtered.length;
       return (
           <div className="space-y-4 animate-in fade-in">
+              {/* Evolução do caixa — contexto de saldo acima dos lançamentos */}
+              <div className="bg-white rounded-lg border border-gray-100 shadow-sm overflow-hidden">
+                  <button
+                    onClick={() => setShowCashEvolution(v => !v)}
+                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                  >
+                      <div className="flex items-center gap-2">
+                          <Landmark size={17} className="text-mcsystem-500" />
+                          <span className="font-bold text-gray-800 text-sm">Evolução do caixa</span>
+                          <span className="text-xs text-gray-400">saldo por conta ao longo do tempo</span>
+                      </div>
+                      <ChevronDown size={16} className={`text-gray-400 transition-transform ${showCashEvolution ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showCashEvolution && (
+                      <div className="px-4 pb-4 pt-1 border-t border-gray-100 animate-in fade-in">
+                          <CashEvolutionByBank records={records} banks={banks} />
+                      </div>
+                  )}
+              </div>
+
               <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-lg border border-gray-100 shadow-sm transition-all">{selectedRecordIds.size > 0 ? (<div className="flex items-center justify-between w-full animate-in slide-in-from-top-2"><div className="flex items-center space-x-4"><div className="bg-mcsystem-500 text-white px-3 py-1.5 rounded-md text-sm font-bold flex items-center shadow-sm"><CheckSquare size={16} className="mr-2"/> {selectedRecordIds.size} Selecionados</div><button onClick={() => setSelectedRecordIds(new Set())} className="text-gray-500 hover:text-gray-700 text-sm flex items-center"><X size={14} className="mr-1"/> Cancelar</button></div><div className="flex items-center space-x-2"><button onClick={() => handleBulkStatusChange(TransactionStatus.PAID)} className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><CheckCircle2 size={14} className="mr-1"/> Marcar Pago</button><button onClick={() => handleBulkStatusChange(TransactionStatus.PENDING)} className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Clock size={14} className="mr-1"/> Marcar Pendente</button><div className="h-4 w-px bg-gray-300 mx-2"></div><button onClick={handleBulkDuplicate} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Copy size={14} className="mr-1"/> Duplicar</button><button onClick={handleBulkDelete} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Trash2 size={14} className="mr-1"/> Excluir</button></div></div>) : (<><div className="flex gap-4 items-center flex-1"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input type="text" placeholder="Buscar lançamentos..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={reconSearch} onChange={e => setReconSearch(e.target.value)} /></div><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterType} onChange={e => setReconFilterType(e.target.value as any)}><option value="ALL">Todas Movimentações</option><option value={TransactionType.INCOME}>Receitas</option><option value={TransactionType.EXPENSE}>Despesas</option></select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterBank} onChange={e => setReconFilterBank(e.target.value as any)}><option value="ALL">Todos os Bancos</option>{banks.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}</select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterStatus} onChange={e => setReconFilterStatus(e.target.value as any)}><option value="ALL">Todos Status</option><option value={TransactionStatus.PAID}>Realizado / Pago</option><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select></div><button onClick={() => { resetTransactionForm(); setIsModalOpen(true); }} className="bg-mcsystem-500 hover:bg-mcsystem-400 text-white px-4 py-2 rounded-lg font-bold flex items-center shadow-sm whitespace-nowrap"><Plus size={18} className="mr-2" /> Novo Lançamento</button></>)}</div>
               <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
                   <table className="w-full text-left text-sm text-gray-600">
@@ -2444,7 +2468,7 @@ const newRecords: FinancialRecord[] = [];
   return (
     <div className="space-y-6">
         <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4">
-            <div className={`${hideTabs ? 'hidden' : 'flex'} bg-gray-100 p-1 rounded-lg overflow-x-auto max-w-full no-scrollbar shadow-inner`}>{[{ id: 'RECONCILIATION', label: 'Conciliação', icon: ArrowRightLeft }, { id: 'DRE', label: 'DRE Gerencial', icon: FileText }, { id: 'CASHFLOW', label: 'Fluxo de Caixa', icon: TrendingUp }, { id: 'CASH_EVOLUTION', label: 'Evolução do Caixa', icon: Landmark }, { id: 'COA', label: 'Plano de Contas', icon: Tags }, { id: 'VALIDATION', label: 'Validação', icon: FileCheck, badge: pendingValidationRecords.length }].map(tab => (<button key={tab.id} onClick={() => { setActiveTab(tab.id as any); setReportViewMode('SUMMARY'); }} className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-white text-mcsystem-600 shadow-sm font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}><tab.icon size={16} className={`mr-2 ${activeTab === tab.id ? 'text-mcsystem-500' : ''}`} />{tab.label}{tab.badge ? <span className="ml-2 bg-red-500 text-white text-[10px] px-1.5 rounded-full shadow-sm">{tab.badge}</span> : null}</button>))}</div>
+            <div className={`${hideTabs ? 'hidden' : 'flex'} bg-gray-100 p-1 rounded-lg overflow-x-auto max-w-full no-scrollbar shadow-inner`}>{[{ id: 'RECONCILIATION', label: 'Conciliação', icon: ArrowRightLeft }, { id: 'DRE', label: 'DRE Gerencial', icon: FileText }, { id: 'CASHFLOW', label: 'Fluxo de Caixa', icon: TrendingUp }, { id: 'COA', label: 'Plano de Contas', icon: Tags }, { id: 'VALIDATION', label: 'Validação', icon: FileCheck, badge: pendingValidationRecords.length }].map(tab => (<button key={tab.id} onClick={() => { setActiveTab(tab.id as any); setReportViewMode('SUMMARY'); }} className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-white text-mcsystem-600 shadow-sm font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}><tab.icon size={16} className={`mr-2 ${activeTab === tab.id ? 'text-mcsystem-500' : ''}`} />{tab.label}{tab.badge ? <span className="ml-2 bg-red-500 text-white text-[10px] px-1.5 rounded-full shadow-sm">{tab.badge}</span> : null}</button>))}</div>
             <div className="flex items-center gap-2"><input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv,.txt" className="hidden" /><div className="relative" ref={importMenuRef}><button onClick={() => setIsImportMenuOpen(!isImportMenuOpen)} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-md text-sm font-medium flex items-center shadow-sm transition-colors"><Upload size={16} className="mr-2" /> Importar <ChevronDown size={14} className="ml-2 text-gray-400" /></button>{isImportMenuOpen && (<div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-100 z-10 py-1 animate-in fade-in zoom-in-95 duration-200"><button onClick={handleDownloadTemplate} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center"><Download size={14} className="mr-2 text-gray-400"/> Baixar Modelo</button><button onClick={handleImportClick} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center"><FileText size={14} className="mr-2 text-gray-400"/> Selecionar Arquivo</button></div>)}</div></div>
         </div>
         
@@ -2454,7 +2478,6 @@ const newRecords: FinancialRecord[] = [];
         {activeTab === 'CASHFLOW' && renderHierarchicalReport('CASHFLOW')}
         {activeTab === 'COA' && renderCOA()}
         {activeTab === 'VALIDATION' && renderTransactionTable(undefined, true)}
-        {activeTab === 'CASH_EVOLUTION' && <CashEvolutionByBank records={records} banks={banks} />}
 
         {isDrillDownOpen && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[80] p-4 backdrop-blur-sm"><div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col animate-in zoom-in-95 duration-200"><div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center rounded-t-xl"><h3 className="font-bold text-gray-800 flex items-center"><List size={18} className="mr-2 text-mcsystem-500" /> Detalhes: {drillDownTitle}</h3><button onClick={() => setIsDrillDownOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button></div><div className="flex-1 overflow-y-auto p-4 bg-gray-50/50">{renderTransactionTable(drillDownRecords)}</div></div></div>)}
         

@@ -21,8 +21,8 @@ const FINANCE_TABS: Record<string, MainTab> = {
 
 const PAGE_TITLES: Record<string, string> = {
   dashboard: 'Dashboard',
-  entries: 'Lançamentos',
-  finance: 'Lançamentos',
+  entries: 'Lançamentos & Caixa',
+  finance: 'Lançamentos & Caixa',
   billing: 'Cobranças',
   contracts: 'Contratos',
   validation: 'Validação',

@@ -33,7 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
     {
       section: 'Operação',
       items: [
-        { id: 'entries', label: 'Lançamentos', icon: ArrowRightLeft, perm: 'finance' },
+        { id: 'entries', label: 'Lançamentos & Caixa', icon: ArrowRightLeft, perm: 'finance' },
         ...(isAsaasEnabled(currentUser.tenant_id) ? [{ id: 'billing', label: 'Cobranças', icon: Zap, perm: 'billing' }] : []),
         { id: 'contracts', label: 'Contratos', icon: FileSignature, perm: 'contracts' },
         { id: 'validation', label: 'Validação', icon: FileCheck, perm: 'finance', badge: pendingValidationCount },
@@ -44,7 +44,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
       items: [
         { id: 'dre', label: 'DRE Gerencial', icon: FileText, perm: 'finance' },
         { id: 'cashflow', label: 'Fluxo de Caixa', icon: TrendingUp, perm: 'finance' },
-        { id: 'cash-evolution', label: 'Evolução do Caixa', icon: Landmark, perm: 'finance' },
       ],
     },
     {

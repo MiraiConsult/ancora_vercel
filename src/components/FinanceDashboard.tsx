@@ -1254,9 +1254,26 @@ const newRecords: FinancialRecord[] = [];
 
   const handleSaveTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRecord.rubricId) { alert("Selecione uma Rubrica."); return; }
-    
-    const displayCategory = chartOfAccounts.find(c => c.id === newRecord.rubricId)?.rubricName || 'Geral';
+    const isIncome = newRecord.type === TransactionType.INCOME;
+    if (isIncome) {
+      if (!newRecord.product_id) { alert("Selecione o Produto."); return; }
+    } else if (!newRecord.rubricId) {
+      alert("Selecione uma Rubrica."); return;
+    }
+
+    // Receita: classificada pelo Produto (a rubrica é derivada pelo nome, igual ao
+    // sync do Asaas, para o lançamento aparecer certo no DRE e no Fluxo de Caixa).
+    const norm = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (isIncome) {
+      const prodName = products.find(p => p.id === newRecord.product_id)?.name;
+      const match = chartOfAccounts.find(c => c.classificationCode === '1' && norm(c.rubricName) === norm(prodName))
+        || chartOfAccounts.find(c => c.classificationCode === '1' && norm(c.rubricName) === norm('OUTRAS RECEITAS'));
+      newRecord.rubricId = match?.id;
+    }
+
+    const displayCategory = isIncome
+      ? (products.find(p => p.id === newRecord.product_id)?.name || 'Receita')
+      : (chartOfAccounts.find(c => c.id === newRecord.rubricId)?.rubricName || 'Geral');
     const baseDescription = newRecord.description || 'Nova Transação';
     const todayStr = new Date().toISOString().split('T')[0];
 
@@ -2541,15 +2558,17 @@ const newRecords: FinancialRecord[] = [];
                                 <div className="p-4 bg-gray-50/70 rounded-xl border border-gray-100">
                                     <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2.5">Categorização</label>
                                     <div className="space-y-3">
-                                        <div className="flex items-center gap-2">
-                                            <div className="p-1.5 rounded-md bg-white border"><Tag size={16} className="text-gray-400"/></div>
-                                            <div className="flex-1"><SearchableSelect required options={chartOfAccounts.map(c => ({ value: c.id, label: `${c.rubricCode} - ${c.rubricName}`}))} value={newRecord.rubricId} onChange={val => setNewRecord({...newRecord, rubricId: val})} placeholder="Selecione a Rubrica (Plano de Contas)" /></div>
-                                            <button type="button" onClick={() => setIsNewRubricModalOpen(true)} className="p-3 bg-white hover:bg-gray-100 rounded-lg border border-gray-200" title="Nova Rubrica"><Plus size={16}/></button>
-                                        </div>
-                                        {newRecord.type === TransactionType.INCOME && (
+                                        {/* Receita é classificada por Produto; despesa pelo Plano de Contas */}
+                                        {newRecord.type === TransactionType.INCOME ? (
                                         <div className="flex items-center gap-2">
                                             <div className="p-1.5 rounded-md bg-white border"><Package size={16} className="text-gray-400"/></div>
-                                            <div className="flex-1"><SearchableSelect options={products.filter(p => p.active).map(p => ({ value: p.id, label: p.name }))} value={newRecord.product_id} onChange={val => setNewRecord({...newRecord, product_id: val})} placeholder="Selecione o Produto" /></div>
+                                            <div className="flex-1"><SearchableSelect required options={products.filter(p => p.active).map(p => ({ value: p.id, label: p.name }))} value={newRecord.product_id} onChange={val => setNewRecord({...newRecord, product_id: val})} placeholder="Selecione o Produto" /></div>
+                                        </div>
+                                        ) : (
+                                        <div className="flex items-center gap-2">
+                                            <div className="p-1.5 rounded-md bg-white border"><Tag size={16} className="text-gray-400"/></div>
+                                            <div className="flex-1"><SearchableSelect required options={chartOfAccounts.filter(c => c.classificationCode !== '1').map(c => ({ value: c.id, label: `${c.rubricCode} - ${c.rubricName}`}))} value={newRecord.rubricId} onChange={val => setNewRecord({...newRecord, rubricId: val})} placeholder="Selecione a Rubrica (Plano de Contas)" /></div>
+                                            <button type="button" onClick={() => setIsNewRubricModalOpen(true)} className="p-3 bg-white hover:bg-gray-100 rounded-lg border border-gray-200" title="Nova Rubrica"><Plus size={16}/></button>
                                         </div>
                                         )}
                                     </div>

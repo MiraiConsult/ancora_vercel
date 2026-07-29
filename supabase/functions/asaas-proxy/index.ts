@@ -32,6 +32,28 @@ async function asaas(path: string, method: string, body?: unknown) {
   return data;
 }
 
+// Aplica um rateio percentual sobre o valor da cobrança. O resto do
+// arredondamento vai para a maior fatia, para o rateio fechar exatamente com o
+// valor cobrado. Mesma regra do asaas-sync.
+function applySplit(
+  splits: { product_id: string; pct: number }[],
+  amount: number,
+): { product_id: string; amount: number }[] {
+  const valid = (splits || []).filter((s) => s?.product_id && Number(s.pct) > 0);
+  if (!valid.length) return [];
+  const parts = valid.map((s) => ({
+    product_id: s.product_id,
+    amount: Math.round(amount * Number(s.pct)) / 100,
+  }));
+  const diff = Math.round((amount - parts.reduce((t, p) => t + p.amount, 0)) * 100) / 100;
+  if (diff !== 0) {
+    let big = 0;
+    parts.forEach((p, i) => { if (p.amount > parts[big].amount) big = i; });
+    parts[big].amount = Math.round((parts[big].amount + diff) * 100) / 100;
+  }
+  return parts;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -134,6 +156,9 @@ Deno.serve(async (req: Request) => {
           tenant_id: client.tenant_id,
           client_id: params.clientId,
           product_id: params.productId || null,
+          // Assinatura que vende mais de um produto: rateio em % (soma 100).
+          split_products: (params.splitProducts as any[])?.length ? params.splitProducts : null,
+          product_manual: !!params.productId || !!(params.splitProducts as any[])?.length,
           asaas_id: sub.id,
           description: params.description || '',
           value: Number(params.value),
@@ -189,6 +214,11 @@ Deno.serve(async (req: Request) => {
         if (params.dueDate) { localUpdate.dueDate = params.dueDate; localUpdate.competenceDate = params.dueDate; }
         if (params.description != null) localUpdate.description = params.description;
         if (params.productId !== undefined) localUpdate.product_id = params.productId || null;
+        // Rateio entre produtos + trava para o sync não desfazer a classificação.
+        if (params.splitRevenue !== undefined) {
+          localUpdate.split_revenue = (params.splitRevenue as any[])?.length ? params.splitRevenue : null;
+        }
+        if (params.productManual !== undefined) localUpdate.product_manual = !!params.productManual;
 
         if (Object.keys(localUpdate).length) {
           const { error } = await supabase.from('financial_records').update(localUpdate).eq('id', params.recordId);
@@ -227,12 +257,38 @@ Deno.serve(async (req: Request) => {
         if (params.description != null) localUpdate.description = params.description;
         if (params.billingType) localUpdate.billing_type = params.billingType;
         if (params.productId !== undefined) localUpdate.product_id = params.productId || null;
+        const splitProducts = (params.splitProducts as { product_id: string; pct: number }[] | null | undefined);
+        if (splitProducts !== undefined) {
+          localUpdate.split_products = splitProducts?.length ? splitProducts : null;
+        }
+        if (params.productManual !== undefined) localUpdate.product_manual = !!params.productManual;
 
         if (Object.keys(localUpdate).length) {
           const { error } = await supabase.from('subscriptions').update(localUpdate).eq('id', params.rowId);
           if (error) throw new Error('Falha ao atualizar a assinatura: ' + error.message);
         }
-        result = { subscription };
+
+        // Propaga o rateio para as cobranças desta assinatura já na hora, em vez
+        // de esperar o sync da próxima hora. Cobranças com produto definido na
+        // mão ficam de fora — lá o usuário já decidiu.
+        let chargesUpdated = 0;
+        if (splitProducts !== undefined && params.subscriptionId) {
+          const { data: charges } = await supabase.from('financial_records')
+            .select('id, amount')
+            .eq('asaas_subscription_id', params.subscriptionId)
+            .eq('product_manual', false);
+          for (const c of charges || []) {
+            const parts = applySplit(splitProducts || [], Number(c.amount) || 0);
+            const dominant = parts.length
+              ? parts.reduce((a, b) => (b.amount > a.amount ? b : a), parts[0]).product_id
+              : (params.productId || null);
+            const { error } = await supabase.from('financial_records')
+              .update({ split_revenue: parts.length ? parts : null, product_id: dominant })
+              .eq('id', c.id);
+            if (!error) chargesUpdated++;
+          }
+        }
+        result = { subscription, chargesUpdated };
         break;
       }
 

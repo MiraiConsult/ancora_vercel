@@ -41,6 +41,28 @@ async function asaasList(path: string): Promise<any[]> {
   return all;
 }
 
+// Aplica um rateio percentual sobre o valor da cobrança.
+// O resto do arredondamento vai para a maior fatia, para o rateio fechar
+// exatamente com o valor cobrado (senão o DRE não bate por centavos).
+function applySplit(
+  splits: { product_id: string; pct: number }[],
+  amount: number,
+): { product_id: string; amount: number }[] {
+  const valid = (splits || []).filter((s) => s?.product_id && Number(s.pct) > 0);
+  if (!valid.length) return [];
+  const parts = valid.map((s) => ({
+    product_id: s.product_id,
+    amount: Math.round(amount * Number(s.pct)) / 100,
+  }));
+  const diff = Math.round((amount - parts.reduce((t, p) => t + p.amount, 0)) * 100) / 100;
+  if (diff !== 0) {
+    let big = 0;
+    parts.forEach((p, i) => { if (p.amount > parts[big].amount) big = i; });
+    parts[big].amount = Math.round((parts[big].amount + diff) * 100) / 100;
+  }
+  return parts;
+}
+
 // Mapeia status do Asaas para o status do lançamento
 function mapStatus(s: string): string {
   if (['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH', 'DUNNING_RECEIVED'].includes(s)) return 'Pago';
@@ -179,27 +201,75 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---- 2) Payments (cobranças) ----
+
+    // Assinaturas que vendem mais de um produto: a cobrança herda o rateio (%).
+    // Lido do banco (e não do Asaas), porque o rateio é uma definição nossa.
+    const { data: subSplits } = await admin.from('subscriptions')
+      .select('asaas_id, product_id, split_products, product_manual').eq('tenant_id', tenantId);
+    const splitBySub = new Map<string, { product_id: string; pct: number }[]>();
+    const manualSub = new Map<string, string | null>();
+    (subSplits || []).forEach((s: any) => {
+      if (!s.asaas_id) return;
+      if (Array.isArray(s.split_products) && s.split_products.length) {
+        splitBySub.set(s.asaas_id, s.split_products);
+      }
+      if (s.product_manual) manualSub.set(s.asaas_id, s.product_id || null);
+    });
+
+    // Cobranças cujo produto/rateio foi definido na mão. O sync repete o valor
+    // que já está gravado, para não desfazer a classificação do usuário a cada
+    // rodada (o upsert reescreve toda coluna presente no payload).
+    const { data: manualRows } = await admin.from('financial_records')
+      .select('asaas_payment_id, product_id, split_revenue, rubricId, category')
+      .eq('tenant_id', tenantId).eq('product_manual', true).not('asaas_payment_id', 'is', null);
+    const manualByPayment = new Map<string, any>();
+    (manualRows || []).forEach((r: any) => manualByPayment.set(r.asaas_payment_id, r));
+
     const payments = await asaasList('/payments');
     const paymentRows = payments.map((p: any) => {
-      const prodId = matchProduct(p.description);
-      const rubric = rubricForProduct(prodId);
+      const amount = Number(p.value) || 0;
+
+      // Classificação: manual > rateio da assinatura > casamento pela descrição
+      let productId: string | null;
+      let split: { product_id: string; amount: number }[] | null;
+      const manual = manualByPayment.get(p.id);
+      const subSplit = p.subscription ? splitBySub.get(p.subscription) : null;
+
+      if (manual) {
+        productId = manual.product_id || null;
+        split = manual.split_revenue || null;
+      } else if (subSplit) {
+        split = applySplit(subSplit, amount);
+        // product_id fica com a maior fatia: os relatórios usam o rateio, mas
+        // as listagens caem no product_id quando não olham o split.
+        productId = split.reduce((a, b) => (b.amount > a.amount ? b : a), split[0])?.product_id || null;
+      } else {
+        productId = matchProduct(p.description);
+        split = null;
+      }
+
+      const rubric = manual
+        ? { id: manual.rubricId, name: manual.category }
+        : rubricForProduct(productId);
+
       return {
-      id: `fa${p.id}`,
-      tenant_id: tenantId,
-      description: p.description || 'Cobrança Asaas',
-      amount: Number(p.value) || 0,
-      type: 'Receita',
-      status: mapStatus(p.status),
-      dueDate: p.dueDate,
-      competenceDate: p.dueDate,
-      paymentDate: p.paymentDate || null,
-      category: rubric?.name || 'Cobrança Asaas',
-      rubricId: rubric?.id || null,
-      companyId: custToClient.get(p.customer) || byAsaas.get(p.customer)?.id || null,
-      product_id: prodId,
-      asaas_payment_id: p.id,
-      asaas_invoice_url: p.invoiceUrl || null,
-      asaas_subscription_id: p.subscription || null,
+        id: `fa${p.id}`,
+        tenant_id: tenantId,
+        description: p.description || 'Cobrança Asaas',
+        amount,
+        type: 'Receita',
+        status: mapStatus(p.status),
+        dueDate: p.dueDate,
+        competenceDate: p.dueDate,
+        paymentDate: p.paymentDate || null,
+        category: rubric?.name || 'Cobrança Asaas',
+        rubricId: rubric?.id || null,
+        companyId: custToClient.get(p.customer) || byAsaas.get(p.customer)?.id || null,
+        product_id: productId,
+        split_revenue: split && split.length ? split : null,
+        asaas_payment_id: p.id,
+        asaas_invoice_url: p.invoiceUrl || null,
+        asaas_subscription_id: p.subscription || null,
       };
     });
     if (paymentRows.length) {
@@ -210,11 +280,20 @@ Deno.serve(async (req: Request) => {
 
     // ---- 3) Subscriptions (assinaturas) ----
     const subs = await asaasList('/subscriptions');
-    const subRows = subs.map((s: any) => ({
+    const subRows = subs.map((s: any) => {
+      // Mesma regra das cobranças: manual manda, depois o rateio, depois a descrição.
+      const split = splitBySub.get(s.id);
+      const productId = manualSub.has(s.id)
+        ? manualSub.get(s.id)!
+        : split
+          ? applySplit(split, Number(s.value) || 0)
+              .reduce((a, b) => (b.amount > a.amount ? b : a), { product_id: null as any, amount: -1 }).product_id
+          : matchProduct(s.description);
+      return {
       id: `sa${s.id}`,
       tenant_id: tenantId,
       client_id: custToClient.get(s.customer) || byAsaas.get(s.customer)?.id || null,
-      product_id: matchProduct(s.description),
+      product_id: productId,
       asaas_id: s.id,
       description: s.description || '',
       value: Number(s.value) || 0,
@@ -222,7 +301,8 @@ Deno.serve(async (req: Request) => {
       billing_type: s.billingType || 'UNDEFINED',
       next_due_date: s.nextDueDate || null,
       status: s.status || 'ACTIVE',
-    }));
+      };
+    });
     if (subRows.length) {
       const { error } = await admin.from('subscriptions').upsert(subRows, { onConflict: 'asaas_id' });
       if (error) throw new Error('Erro ao gravar assinaturas: ' + error.message);

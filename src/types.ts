@@ -72,10 +72,18 @@ export interface FinancialRecord {
   dealId?: string; // Legado — mantido para compatibilidade com registros existentes
   seriesId?: string;
   split_revenue?: { revenue_type_id?: string; product_id?: string; amount: number; }[];
+  /** Produto/rateio definido na mão — o sync do Asaas não sobrescreve. */
+  product_manual?: boolean;
   // Integração Asaas
   asaas_payment_id?: string;
   asaas_invoice_url?: string;
   asaas_subscription_id?: string;
+}
+
+/** Rateio de um valor entre produtos, em percentual (pct soma 100). */
+export interface ProductSplit {
+  product_id: string;
+  pct: number;
 }
 
 export interface Subscription {
@@ -83,6 +91,12 @@ export interface Subscription {
   tenant_id: string;
   client_id?: string;
   product_id?: string;
+  /**
+   * Assinatura que vende mais de um produto no mesmo valor.
+   * Guardado em % (e não em R$) para continuar certo quando houver
+   * desconto, reajuste ou cobrança pro-rata.
+   */
+  split_products?: ProductSplit[];
   asaas_id?: string;
   description?: string;
   value: number;

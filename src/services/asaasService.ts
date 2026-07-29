@@ -50,6 +50,8 @@ export interface CreateSubscriptionParams {
   description?: string;
   billingType?: string;
   productId?: string;
+  /** Rateio em % quando a assinatura vende mais de um produto. */
+  splitProducts?: { product_id: string; pct: number }[];
 }
 
 export const asaasSyncCustomer = (clientId: string) =>
@@ -87,6 +89,8 @@ export const asaasCreateSubscription = (params: CreateSubscriptionParams) =>
 export const asaasUpdateCharge = (params: {
   recordId: string; paymentId?: string; value?: number; dueDate?: string;
   description?: string; billingType?: string; productId?: string | null;
+  splitRevenue?: { product_id: string; amount: number }[] | null;
+  productManual?: boolean;
 }) => invoke('update_charge', params);
 
 export const asaasDeleteCharge = (params: { recordId: string; paymentId?: string }) =>
@@ -95,6 +99,8 @@ export const asaasDeleteCharge = (params: { recordId: string; paymentId?: string
 export const asaasUpdateSubscription = (params: {
   rowId: string; subscriptionId?: string; value?: number; nextDueDate?: string;
   cycle?: string; description?: string; billingType?: string; productId?: string | null;
+  splitProducts?: { product_id: string; pct: number }[] | null;
+  productManual?: boolean;
 }) => invoke('update_subscription', params);
 
 export const asaasDeleteSubscription = (params: { rowId: string; subscriptionId?: string }) =>

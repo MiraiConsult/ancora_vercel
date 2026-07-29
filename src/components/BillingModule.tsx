@@ -102,12 +102,15 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
     if (!window.confirm(`Aplicar o produto "${pname}" às outras ${targets.length} cobrança(s) deste cliente?`)) return;
 
     const ids = new Set(targets.map(t => t.id));
-    setFinanceRecords(prev => prev.map(r => ids.has(r.id) ? { ...r, product_id: (productId || undefined) as any } : r));
+    setFinanceRecords(prev => prev.map(r => ids.has(r.id)
+      ? { ...r, product_id: (productId || undefined) as any, split_revenue: undefined, product_manual: true }
+      : r));
+    // product_manual trava o sync horário, senão a classificação volta ao
+    // casamento pela descrição na próxima rodada.
     const { error } = await supabase
       .from('financial_records')
-      .update({ product_id: productId })
-      .eq('companyId', companyId)
-      .not('asaas_payment_id', 'is', null);
+      .update({ product_id: productId, split_revenue: null, product_manual: true })
+      .in('id', [...ids]);
     if (error) alert('Erro ao aplicar aos demais lançamentos: ' + error.message);
   };
 
@@ -315,7 +318,9 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
             setFinanceRecords(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated } : x));
             setEditCharge(null);
             const newProduct = (updated.product_id ?? null) as string | null;
-            if (original && (original.product_id || null) !== newProduct) {
+            // Rateio é específico da cobrança (depende do valor) — não replica.
+            const hasSplit = (updated.split_revenue?.length || 0) > 0;
+            if (original && !hasSplit && (original.product_id || null) !== newProduct) {
               await applyProductToClient(original.companyId, newProduct);
             }
           }}
@@ -472,9 +477,11 @@ const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: strin
                   <div className="text-gray-400 text-xs mt-0.5 max-w-md truncate">{r.description}</div>
                 </td>
                 <td className="px-6 py-4">
-                  {productName(r.product_id)
-                    ? <span className="inline-block text-xs bg-mcsystem-50 text-mcsystem-700 px-2 py-1 rounded-md">{productName(r.product_id)}</span>
-                    : <span className="text-gray-300 text-xs">—</span>}
+                  {r.split_revenue?.length
+                    ? <ProductChips items={r.split_revenue.map(s => ({ name: productName(s.product_id), value: s.amount }))} />
+                    : productName(r.product_id)
+                      ? <span className="inline-block text-xs bg-mcsystem-50 text-mcsystem-700 px-2 py-1 rounded-md">{productName(r.product_id)}</span>
+                      : <span className="text-gray-300 text-xs">—</span>}
                 </td>
                 <td className="px-6 py-4 font-medium text-gray-700">{formatBRL(r.amount)}</td>
                 <td className="px-6 py-4 text-gray-600">{r.dueDate}</td>
@@ -529,9 +536,11 @@ const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: strin
                   <div className="text-gray-400 text-xs mt-0.5 max-w-md truncate">{s.description}</div>
                 </td>
                 <td className="px-6 py-4">
-                  {productName(s.product_id)
-                    ? <span className="inline-block text-xs bg-mcsystem-50 text-mcsystem-700 px-2 py-1 rounded-md">{productName(s.product_id)}</span>
-                    : <span className="text-gray-300 text-xs">—</span>}
+                  {s.split_products?.length
+                    ? <ProductChips items={s.split_products.map(sp => ({ name: productName(sp.product_id), value: (s.value || 0) * sp.pct / 100 }))} />
+                    : productName(s.product_id)
+                      ? <span className="inline-block text-xs bg-mcsystem-50 text-mcsystem-700 px-2 py-1 rounded-md">{productName(s.product_id)}</span>
+                      : <span className="text-gray-300 text-xs">—</span>}
                 </td>
                 <td className="px-6 py-4 font-medium text-gray-700">{formatBRL(s.value)}</td>
                 <td className="px-6 py-4 text-gray-600">{cycleLabel(s.cycle)}</td>
@@ -682,6 +691,8 @@ const SubscriptionModal: React.FC<{
   const [nextDueDate, setNextDueDate] = useState(todayPlus(5));
   const [description, setDescription] = useState('');
   const [billingType, setBillingType] = useState('UNDEFINED');
+  const [multi, setMulti] = useState(false);
+  const [splitRows, setSplitRows] = useState<SplitRow[]>([]);
 
   const onProduct = (id: string) => {
     setProductId(id);
@@ -692,11 +703,21 @@ const SubscriptionModal: React.FC<{
     }
   };
 
+  const splitSum = Math.round(splitRows.reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100) / 100;
+
   const submit = () => {
     if (!clientId) return alert('Selecione o cliente.');
     if (!value || value <= 0) return alert('Informe um valor válido.');
     if (!nextDueDate) return alert('Informe o primeiro vencimento.');
-    onSubmit({ clientId, productId: productId || undefined, value, cycle, nextDueDate, description, billingType });
+    if (multi && (splitSum !== Math.round(value * 100) / 100 || !splitRows.every(r => r.product_id) || !splitRows.length)) {
+      return alert('O rateio precisa fechar com o valor da assinatura e todos os produtos precisam estar preenchidos.');
+    }
+    onSubmit({
+      clientId,
+      productId: (multi ? dominantProduct(splitRows) : productId) || undefined,
+      splitProducts: multi ? rowsToPct(splitRows) : undefined,
+      value, cycle, nextDueDate, description, billingType,
+    });
   };
 
   return (
@@ -711,11 +732,30 @@ const SubscriptionModal: React.FC<{
         </div>
 
         <div>
-          <label className={labelCls}>Produto (opcional — preenche valor/descrição)</label>
-          <select value={productId} onChange={e => onProduct(e.target.value)} className={inputCls}>
-            <option value="">Nenhum</option>
-            {products.map(p => <option key={p.id} value={p.id}>{p.name} — {formatBRL(p.price)}</option>)}
-          </select>
+          <div className="flex items-center justify-between mb-1">
+            <label className={`${labelCls} mb-0`}>Produto (opcional — preenche valor/descrição)</label>
+            <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+              <input
+                type="checkbox" checked={multi}
+                onChange={e => {
+                  setMulti(e.target.checked);
+                  if (e.target.checked && splitRows.length === 0) {
+                    setSplitRows(productId ? [{ product_id: productId, amount: Number(value) || 0 }] : [{ product_id: '', amount: 0 }]);
+                  }
+                }}
+                className="rounded border-gray-300 text-mcsystem-600 focus:ring-mcsystem-500"
+              />
+              Mais de um produto (rateio)
+            </label>
+          </div>
+          {multi ? (
+            <SplitEditor products={products} total={Number(value) || 0} rows={splitRows} onChange={setSplitRows} />
+          ) : (
+            <select value={productId} onChange={e => onProduct(e.target.value)} className={inputCls}>
+              <option value="">Nenhum</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name} — {formatBRL(p.price)}</option>)}
+            </select>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -757,6 +797,98 @@ const SubscriptionModal: React.FC<{
   );
 };
 
+type SplitRow = { product_id: string; amount: number };
+
+/** Mostra o rateio da linha sem precisar abrir o modal. */
+const ProductChips: React.FC<{ items: { name: string | undefined; value: number }[] }> = ({ items }) => (
+  <div className="flex flex-wrap gap-1">
+    {items.map((it, i) => (
+      <span key={i} className="inline-block text-xs bg-mcsystem-50 text-mcsystem-700 px-2 py-1 rounded-md whitespace-nowrap">
+        {it.name || 'Sem produto'} <span className="text-mcsystem-400">{formatBRL(it.value)}</span>
+      </span>
+    ))}
+  </div>
+);
+
+/**
+ * Rateio de um valor entre vários produtos (ex: "Kaivaa + Hello Rating" numa
+ * cobrança só). O usuário digita em R$ porque é como ele pensa o preço; quem
+ * consome converte para % quando precisa.
+ */
+const SplitEditor: React.FC<{
+  products: Product[];
+  total: number;
+  rows: SplitRow[];
+  onChange: (rows: SplitRow[]) => void;
+  disabled?: boolean;
+}> = ({ products, total, rows, onChange, disabled }) => {
+  const sum = Math.round(rows.reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100) / 100;
+  const left = Math.round(((total || 0) - sum) * 100) / 100;
+  const ok = left === 0 && rows.length > 0;
+  const patch = (i: number, p: Partial<SplitRow>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
+
+  return (
+    <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
+      {rows.map((r, i) => (
+        <div key={i} className="flex gap-2 items-center">
+          <select
+            value={r.product_id}
+            disabled={disabled}
+            onChange={e => patch(i, { product_id: e.target.value })}
+            className={`${inputCls} flex-1 bg-white disabled:bg-gray-100`}
+          >
+            <option value="">Selecione o produto</option>
+            {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <input
+            type="number" step="0.01" min="0" value={r.amount || ''}
+            disabled={disabled}
+            onChange={e => patch(i, { amount: parseFloat(e.target.value) || 0 })}
+            placeholder="R$"
+            className={`${inputCls} w-28 bg-white disabled:bg-gray-100`}
+          />
+          <button
+            type="button" disabled={disabled}
+            onClick={() => onChange(rows.filter((_, j) => j !== i))}
+            className="p-2 text-gray-400 hover:text-red-600 disabled:opacity-40"
+            title="Remover"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+      ))}
+
+      <button
+        type="button" disabled={disabled}
+        onClick={() => onChange([...rows, { product_id: '', amount: left > 0 ? left : 0 }])}
+        className="text-sm font-medium text-mcsystem-700 hover:text-mcsystem-900 flex items-center gap-1 disabled:opacity-40"
+      >
+        <Plus size={14} /> Adicionar produto
+      </button>
+
+      <div className={`flex justify-between text-sm px-2 py-1.5 rounded-md ${ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+        <span className="font-semibold">{ok ? 'Rateio fechado' : 'Restante a dividir'}</span>
+        <span className="font-bold">{formatBRL(ok ? total : left)}</span>
+      </div>
+    </div>
+  );
+};
+
+/** Converte o rateio em R$ para %, normalizando pela soma (fecha sempre 100). */
+const rowsToPct = (rows: SplitRow[]) => {
+  const valid = rows.filter(r => r.product_id && Number(r.amount) > 0);
+  const sum = valid.reduce((s, r) => s + Number(r.amount), 0);
+  if (!sum) return [];
+  return valid.map(r => ({ product_id: r.product_id, pct: (Number(r.amount) / sum) * 100 }));
+};
+
+/** Produto que fica com a maior fatia — usado nas listagens e como fallback. */
+const dominantProduct = (rows: SplitRow[]): string | null => {
+  const valid = rows.filter(r => r.product_id && Number(r.amount) > 0);
+  if (!valid.length) return null;
+  return valid.reduce((a, b) => (Number(b.amount) > Number(a.amount) ? b : a)).product_id;
+};
+
 const ChargeEditModal: React.FC<{ charge: FinancialRecord; products: Product[]; onClose: () => void; onSaved: (u: Partial<FinancialRecord> & { id: string }) => void }> = ({ charge, products, onClose, onSaved }) => {
   const isPaid = (charge.status as string) === 'Pago';
   const [productId, setProductId] = useState(charge.product_id || '');
@@ -764,14 +896,39 @@ const ChargeEditModal: React.FC<{ charge: FinancialRecord; products: Product[]; 
   const [dueDate, setDueDate] = useState(charge.dueDate || '');
   const [description, setDescription] = useState(charge.description || '');
   const [saving, setSaving] = useState(false);
+  const [multi, setMulti] = useState((charge.split_revenue?.length || 0) > 0);
+  const [splitRows, setSplitRows] = useState<SplitRow[]>(
+    (charge.split_revenue || []).map(s => ({ product_id: s.product_id || '', amount: s.amount })),
+  );
+
+  const splitSum = Math.round(splitRows.reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100) / 100;
+  const splitOk = !multi || (splitRows.length > 0 && splitSum === Math.round((Number(value) || 0) * 100) / 100
+    && splitRows.every(r => r.product_id));
 
   const save = async () => {
+    if (!splitOk) {
+      alert('O rateio precisa fechar com o valor da cobrança e todos os produtos precisam estar preenchidos.');
+      return;
+    }
     setSaving(true);
     try {
-      const params: any = { recordId: charge.id, paymentId: charge.asaas_payment_id, productId: productId || null };
+      const split = multi ? splitRows.filter(r => r.product_id && Number(r.amount) > 0) : null;
+      const finalProduct = multi ? dominantProduct(splitRows) : (productId || null);
+      const params: any = {
+        recordId: charge.id, paymentId: charge.asaas_payment_id,
+        productId: finalProduct,
+        splitRevenue: split,
+        // Marca como definido na mão: o sync horário para de sobrescrever.
+        productManual: true,
+      };
       if (!isPaid) { params.value = value; params.dueDate = dueDate; params.description = description; }
       await asaasUpdateCharge(params);
-      const updated: Partial<FinancialRecord> & { id: string } = { id: charge.id, product_id: (productId || null) as any };
+      const updated: Partial<FinancialRecord> & { id: string } = {
+        id: charge.id,
+        product_id: (finalProduct || undefined) as any,
+        split_revenue: (split || undefined) as any,
+        product_manual: true,
+      };
       if (!isPaid) { updated.amount = Number(value); updated.dueDate = dueDate; updated.competenceDate = dueDate; updated.description = description; }
       onSaved(updated);
     } catch (e: any) {
@@ -790,11 +947,30 @@ const ChargeEditModal: React.FC<{ charge: FinancialRecord; products: Product[]; 
           </div>
         )}
         <div>
-          <label className={labelCls}>Produto</label>
-          <select value={productId} onChange={e => setProductId(e.target.value)} className={inputCls}>
-            <option value="">Sem produto</option>
-            {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <div className="flex items-center justify-between mb-1">
+            <label className={`${labelCls} mb-0`}>Produto</label>
+            <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+              <input
+                type="checkbox" checked={multi}
+                onChange={e => {
+                  setMulti(e.target.checked);
+                  if (e.target.checked && splitRows.length === 0) {
+                    setSplitRows(productId ? [{ product_id: productId, amount: Number(value) || 0 }] : [{ product_id: '', amount: 0 }]);
+                  }
+                }}
+                className="rounded border-gray-300 text-mcsystem-600 focus:ring-mcsystem-500"
+              />
+              Mais de um produto (rateio)
+            </label>
+          </div>
+          {multi ? (
+            <SplitEditor products={products} total={Number(value) || 0} rows={splitRows} onChange={setSplitRows} />
+          ) : (
+            <select value={productId} onChange={e => setProductId(e.target.value)} className={inputCls}>
+              <option value="">Sem produto</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -823,15 +999,43 @@ const SubscriptionEditModal: React.FC<{ sub: Subscription; products: Product[]; 
   const [cycle, setCycle] = useState(sub.cycle || 'MONTHLY');
   const [description, setDescription] = useState(sub.description || '');
   const [saving, setSaving] = useState(false);
+  const [multi, setMulti] = useState((sub.split_products?.length || 0) > 0);
+  // O rateio é guardado em %, mas editado em R$ sobre o valor atual da assinatura.
+  const [splitRows, setSplitRows] = useState<SplitRow[]>(
+    (sub.split_products || []).map(s => ({
+      product_id: s.product_id,
+      amount: Math.round((sub.value || 0) * s.pct) / 100,
+    })),
+  );
+
+  const splitSum = Math.round(splitRows.reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100) / 100;
+  const splitOk = !multi || (splitRows.length > 0 && splitSum === Math.round((Number(value) || 0) * 100) / 100
+    && splitRows.every(r => r.product_id));
 
   const save = async () => {
+    if (!splitOk) {
+      alert('O rateio precisa fechar com o valor da assinatura e todos os produtos precisam estar preenchidos.');
+      return;
+    }
     setSaving(true);
     try {
-      await asaasUpdateSubscription({
+      const splitProducts = multi ? rowsToPct(splitRows) : null;
+      const finalProduct = multi ? dominantProduct(splitRows) : (productId || null);
+      const res: any = await asaasUpdateSubscription({
         rowId: sub.id, subscriptionId: sub.asaas_id,
-        value, nextDueDate, cycle, description, productId: productId || null,
+        value, nextDueDate, cycle, description,
+        productId: finalProduct,
+        splitProducts,
+        // Trava contra o sync horário, que reclassifica pela descrição.
+        productManual: true,
       });
-      onSaved({ id: sub.id, product_id: (productId || null) as any, value: Number(value), next_due_date: nextDueDate, cycle, description });
+      onSaved({
+        id: sub.id, product_id: (finalProduct || null) as any,
+        split_products: (splitProducts || null) as any,
+        value: Number(value), next_due_date: nextDueDate, cycle, description,
+      });
+      const n = res?.chargesUpdated || 0;
+      if (multi && n > 0) alert(`Rateio aplicado a ${n} cobrança(s) desta assinatura.`);
     } catch (e: any) {
       alert(`Erro ao salvar assinatura: ${e.message}`);
     } finally {
@@ -843,11 +1047,36 @@ const SubscriptionEditModal: React.FC<{ sub: Subscription; products: Product[]; 
     <ModalShell title="Editar Assinatura" icon={<Repeat size={20} className="text-mcsystem-500" />} onClose={onClose}>
       <div className="p-6 space-y-4">
         <div>
-          <label className={labelCls}>Produto</label>
-          <select value={productId} onChange={e => setProductId(e.target.value)} className={inputCls}>
-            <option value="">Sem produto</option>
-            {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <div className="flex items-center justify-between mb-1">
+            <label className={`${labelCls} mb-0`}>Produto</label>
+            <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+              <input
+                type="checkbox" checked={multi}
+                onChange={e => {
+                  setMulti(e.target.checked);
+                  if (e.target.checked && splitRows.length === 0) {
+                    setSplitRows(productId ? [{ product_id: productId, amount: Number(value) || 0 }] : [{ product_id: '', amount: 0 }]);
+                  }
+                }}
+                className="rounded border-gray-300 text-mcsystem-600 focus:ring-mcsystem-500"
+              />
+              Mais de um produto (rateio)
+            </label>
+          </div>
+          {multi ? (
+            <>
+              <SplitEditor products={products} total={Number(value) || 0} rows={splitRows} onChange={setSplitRows} />
+              <p className="text-xs text-gray-500 mt-1.5">
+                O rateio é guardado em % e aplicado a toda cobrança gerada por esta assinatura —
+                continua certo mesmo com desconto ou reajuste.
+              </p>
+            </>
+          ) : (
+            <select value={productId} onChange={e => setProductId(e.target.value)} className={inputCls}>
+              <option value="">Sem produto</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>

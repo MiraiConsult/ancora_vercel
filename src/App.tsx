@@ -417,7 +417,9 @@ const App: React.FC = () => {
   const handleUpdateTenant = async (tenantData: Partial<Tenant>) => {
       const updatedTenant = { ...currentTenant, ...tenantData, id: currentTenant?.id || 'default' } as Tenant;
       setCurrentTenant(updatedTenant);
-      await supabase.from('organization_settings').upsert(updatedTenant);
+      const { error } = await supabase.from('organization_settings').upsert(updatedTenant);
+      // Sem isso uma falha (ex: logo grande demais) passava despercebida.
+      if (error) alert('Erro ao salvar as informações da empresa: ' + error.message);
   };
 
 const handleAddUser = async (newUser: User) => {

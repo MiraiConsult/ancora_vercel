@@ -1,7 +1,38 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, Tenant } from '../types';
-import { Building, Save, HelpCircle, Users, Plus, X, Shield, Lock, Trash2, Edit } from 'lucide-react';
+import { Building, Save, HelpCircle, Users, Plus, X, Shield, Lock, Trash2, Edit, Upload, Image as ImageIcon } from 'lucide-react';
+
+/**
+ * Converte a logo para data URI. Guardar embutido (e não uma URL remota) faz o
+ * timbre do contrato imprimir na hora, sem depender de rede nem esbarrar em
+ * CORS na janela de impressão. Bitmap é reduzido para no máx. 600px de largura
+ * — dá ~380 DPI num logo de 4cm e mantém a linha do banco pequena.
+ */
+const MAX_LOGO_WIDTH = 600;
+const readLogo = (file: File): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
+  reader.onload = () => {
+    const dataUrl = String(reader.result);
+    // SVG já é leve e escala sozinho — não rasteriza.
+    if (file.type === 'image/svg+xml') return resolve(dataUrl);
+    const img = new Image();
+    img.onerror = () => reject(new Error('Arquivo de imagem inválido.'));
+    img.onload = () => {
+      const scale = Math.min(1, MAX_LOGO_WIDTH / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return resolve(dataUrl);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/png')); // PNG preserva fundo transparente
+    };
+    img.src = dataUrl;
+  };
+  reader.readAsDataURL(file);
+});
 
 interface SettingsModuleProps {
   tenant: Tenant | null;
@@ -68,6 +99,22 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({ tenant, users, o
   const handleTenantChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setTenantData({ ...tenantData, [e.target.name]: e.target.value });
   };
+
+  const [logoError, setLogoError] = useState('');
+  const handleLogoPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite reenviar o mesmo arquivo
+    if (!file) return;
+    setLogoError('');
+    if (!file.type.startsWith('image/')) { setLogoError('Envie um arquivo de imagem (PNG, JPG ou SVG).'); return; }
+    if (file.size > 5 * 1024 * 1024) { setLogoError('Imagem muito grande (máx. 5 MB).'); return; }
+    try {
+      const dataUrl = await readLogo(file);
+      setTenantData(prev => ({ ...prev, logo_url: dataUrl }));
+    } catch (err: any) {
+      setLogoError(err?.message || 'Falha ao processar a imagem.');
+    }
+  };
   
   const openUserModal = (user: User | null) => {
       if (user) {
@@ -132,10 +179,43 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({ tenant, users, o
             </h3>
         </div>
         <form onSubmit={handleTenantSave} className="p-6 space-y-4">
+            {/* Logo — usada no timbre dos contratos em PDF */}
+            <div className="flex items-start gap-5 pb-5 border-b border-gray-100">
+                <div className="h-24 w-40 rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {tenantData.logo_url
+                      ? <img src={tenantData.logo_url} alt="Logo da empresa" className="max-h-full max-w-full object-contain" />
+                      : <ImageIcon size={28} className="text-gray-300" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Logo da empresa</label>
+                    <p className="text-xs text-gray-500 mb-3">
+                        Aparece no cabeçalho dos contratos gerados em PDF. PNG com fundo transparente fica melhor.
+                    </p>
+                    <div className="flex items-center gap-2">
+                        <label className="px-3 py-2 bg-white border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50 cursor-pointer flex items-center gap-2 transition-colors">
+                            <Upload size={15} /> {tenantData.logo_url ? 'Trocar logo' : 'Enviar logo'}
+                            <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" onChange={handleLogoPick} className="hidden" />
+                        </label>
+                        {tenantData.logo_url && (
+                            <button type="button" onClick={() => setTenantData(prev => ({ ...prev, logo_url: '' }))}
+                                className="px-3 py-2 text-sm text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
+                                Remover
+                            </button>
+                        )}
+                    </div>
+                    {logoError && <p className="text-xs text-red-600 mt-2">{logoError}</p>}
+                    <p className="text-[11px] text-gray-400 mt-2">Lembre de clicar em "Salvar Alterações" abaixo.</p>
+                </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Nome da Empresa</label>
                     <input name="name" value={tenantData.name || ''} onChange={handleTenantChange} type="text" className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-1 focus:ring-mcsystem-500 outline-none" />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">CNPJ</label>
+                    <input name="cnpj" value={tenantData.cnpj || ''} onChange={handleTenantChange} type="text" className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-1 focus:ring-mcsystem-500 outline-none" placeholder="00.000.000/0001-00" />
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
@@ -145,7 +225,18 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({ tenant, users, o
                     <label className="block text-sm font-medium text-gray-700 mb-1">E-mail de Contato</label>
                     <input name="email" value={tenantData.email || ''} onChange={handleTenantChange} type="email" className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-1 focus:ring-mcsystem-500 outline-none" />
                 </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
+                    <input name="phone" value={tenantData.phone || ''} onChange={handleTenantChange} type="text" className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-1 focus:ring-mcsystem-500 outline-none" placeholder="(51) 99999-9999" />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Endereço</label>
+                    <input name="address" value={tenantData.address || ''} onChange={handleTenantChange} type="text" className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-1 focus:ring-mcsystem-500 outline-none" placeholder="Rua, nº — Cidade/UF" />
+                </div>
             </div>
+            <p className="text-xs text-gray-500 -mt-1">
+                CNPJ, endereço e telefone entram no timbre e nos campos <code className="text-[11px]">{'{{empresa_cnpj}}'}</code> dos modelos de contrato.
+            </p>
              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
                 <textarea name="description" value={tenantData.description || ''} onChange={handleTenantChange} rows={3} className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-1 focus:ring-mcsystem-500 outline-none"></textarea>

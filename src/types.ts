@@ -6,7 +6,11 @@ export interface Tenant {
   website?: string;
   email?: string;
   whatsapp?: string;
+  /** Logo da empresa como data URI — usada no timbre dos contratos. */
   logo_url?: string;
+  cnpj?: string;
+  address?: string;
+  phone?: string;
 }
 
 export type NoteColor = 'yellow' | 'blue' | 'green' | 'red' | 'purple' | 'gray';

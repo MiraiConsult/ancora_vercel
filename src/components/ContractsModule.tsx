@@ -82,6 +82,7 @@ const VARIABLES: { key: string; label: string }[] = [
   { key: 'hoje', label: 'Data de hoje (por extenso)' },
   { key: 'empresa', label: 'Sua empresa (contratada)' },
   { key: 'empresa_cnpj', label: 'CNPJ da sua empresa' },
+  { key: 'empresa_endereco', label: 'Endereço da sua empresa' },
 ];
 
 const DEFAULT_TEMPLATE = `CONTRATO DE PRESTAÇÃO DE SERVIÇOS Nº {{numero}}
@@ -339,7 +340,7 @@ export const ContractsModule: React.FC<ContractsModuleProps> = ({ companies, pro
         />
       )}
 
-      {viewing && <ContractViewer contract={viewing} clientName={clientName(viewing.client_id)} onClose={() => setViewing(null)} />}
+      {viewing && <ContractViewer contract={viewing} clientName={clientName(viewing.client_id)} tenant={tenant} onClose={() => setViewing(null)} />}
     </div>
   );
 };
@@ -457,7 +458,8 @@ const GenerateContractModal: React.FC<{
     numero: number,
     hoje: longDate(todayISO()),
     empresa: tenant?.name || '',
-    empresa_cnpj: (tenant as any)?.cnpj || '',
+    empresa_cnpj: tenant?.cnpj || '',
+    empresa_endereco: tenant?.address || '',
   };
 
   const rendered = useMemo(
@@ -595,20 +597,82 @@ const clientName = (c?: Company) => c?.name || 'Sem cliente';
 
 // ---------- Visualizador / impressão ----------
 
-const ContractViewer: React.FC<{ contract: Contract; clientName: string; onClose: () => void }> = ({ contract, clientName, onClose }) => {
+const esc = (s: string) => s.replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c] as string));
+
+/**
+ * Transforma o texto puro do contrato em blocos. Cada parágrafo vira um bloco
+ * próprio para o navegador não quebrar página no meio de uma cláusula nem
+ * separar a linha de assinatura do nome de quem assina.
+ */
+const contractBlocks = (content: string): string => {
+  const blocks = content.split(/\n{2,}/);
+  return blocks.map((raw, i) => {
+    const block = esc(raw.trim());
+    if (!block) return '';
+    if (i === 0 && !raw.includes('\n')) return `<h1 class="doc-title">${block}</h1>`;
+    const isSignature = block.includes('___');
+    // Negrito só na linha de título da cláusula, não no corpo dela.
+    const html = block.replace(
+      /^(CL[ÁA]USULA[^\n]*|PAR[ÁA]GRAFO[^\n]*)$/gm,
+      '<strong>$1</strong>',
+    );
+    return `<p class="${isSignature ? 'sig' : 'blk'}">${html}</p>`;
+  }).join('');
+};
+
+/** Timbre: logo + dados da empresa, repetido em toda página impressa. */
+const letterheadCSS = `
+  @page { size: A4; margin: 34mm 20mm 26mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Georgia, 'Times New Roman', serif; font-size: 11.5pt; line-height: 1.65; color: #16181d; margin: 0; }
+  .letterhead, .footer { position: fixed; left: 0; right: 0; }
+  .letterhead { top: -27mm; height: 23mm; display: flex; align-items: flex-end; justify-content: space-between;
+                gap: 12mm; border-bottom: 0.6pt solid #c9ccd4; padding-bottom: 3mm; }
+  .letterhead img { max-height: 17mm; max-width: 62mm; object-fit: contain; }
+  .letterhead .brand { font-family: Helvetica, Arial, sans-serif; font-size: 12pt; font-weight: 700; letter-spacing: .3px; color: #16181d; }
+  .letterhead .meta { font-family: Helvetica, Arial, sans-serif; font-size: 7.5pt; line-height: 1.5; color: #6b7280; text-align: right; }
+  .footer { bottom: -19mm; height: 15mm; border-top: 0.6pt solid #c9ccd4; padding-top: 2.5mm;
+            font-family: Helvetica, Arial, sans-serif; font-size: 7.5pt; color: #6b7280; text-align: center; }
+  .doc-title { font-family: Helvetica, Arial, sans-serif; font-size: 13pt; font-weight: 700; text-align: center;
+               letter-spacing: .2px; margin: 0 0 9mm; line-height: 1.4; }
+  .blk, .sig { white-space: pre-wrap; margin: 0 0 4.2mm; text-align: justify; orphans: 3; widows: 3; }
+  .blk { page-break-inside: auto; }
+  .sig { white-space: pre-wrap; text-align: left; margin-top: 9mm; page-break-inside: avoid; }
+  strong { font-family: Helvetica, Arial, sans-serif; font-size: 10.5pt; letter-spacing: .2px; }
+`;
+
+const buildLetterhead = (tenant: Tenant | null): string => {
+  const meta = [tenant?.cnpj ? `CNPJ ${esc(tenant.cnpj)}` : '', esc(tenant?.address || '')].filter(Boolean).join('<br>');
+  const brand = tenant?.logo_url
+    ? `<img src="${esc(tenant.logo_url)}" alt="${esc(tenant?.name || '')}">`
+    : `<div class="brand">${esc(tenant?.name || '')}</div>`;
+  return `<div class="letterhead">${brand}<div class="meta">${meta}</div></div>`;
+};
+
+const buildFooter = (tenant: Tenant | null): string => {
+  const line = [tenant?.name, tenant?.phone, tenant?.email, tenant?.website?.replace(/^https?:\/\//, '')]
+    .filter(Boolean).map(s => esc(String(s))).join('  ·  ');
+  return `<div class="footer">${line}</div>`;
+};
+
+const ContractViewer: React.FC<{ contract: Contract; clientName: string; tenant: Tenant | null; onClose: () => void }> = ({ contract, clientName, tenant, onClose }) => {
   const [copied, setCopied] = useState(false);
   const copy = () => { navigator.clipboard?.writeText(contract.content); setCopied(true); setTimeout(() => setCopied(false), 1600); };
+
   const print = () => {
     const w = window.open('', '_blank', 'width=820,height=900');
-    if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${contract.number || 'Contrato'} — ${clientName}</title>
-      <style>
-        @page { margin: 2.5cm 2cm; }
-        body { font-family: Georgia, 'Times New Roman', serif; font-size: 12pt; line-height: 1.7; color: #111; white-space: pre-wrap; }
-      </style></head><body>${contract.content.replace(/[<>&]/g, s => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[s] as string))}</body></html>`);
+    if (!w) { alert('O navegador bloqueou a janela de impressão. Libere pop-ups para este site e tente de novo.'); return; }
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+      <title>${esc(contract.number || 'Contrato')} — ${esc(clientName)}</title>
+      <style>${letterheadCSS}</style></head>
+      <body>${buildLetterhead(tenant)}${buildFooter(tenant)}<main>${contractBlocks(contract.content)}</main></body></html>`);
     w.document.close();
     w.focus();
-    setTimeout(() => w.print(), 250);
+    // Espera a logo carregar — imprimir antes disso sairia com o timbre vazio.
+    const go = () => { try { w.print(); } catch { /* janela fechada pelo usuário */ } };
+    const img = w.document.querySelector('img');
+    if (!img || img.complete) setTimeout(go, 150);
+    else { img.onload = () => setTimeout(go, 80); img.onerror = () => setTimeout(go, 80); }
   };
 
   return (
@@ -629,10 +693,28 @@ const ContractViewer: React.FC<{ contract: Contract; clientName: string; onClose
             <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg"><X size={18} /></button>
           </div>
         </div>
-        <div className="overflow-y-auto p-8 bg-gray-50">
-          <div className="bg-white shadow-sm border border-gray-200 rounded-lg p-10 mx-auto max-w-2xl">
+        {/* Preview no mesmo formato da impressão — o que se vê é o que sai no PDF */}
+        <div className="overflow-y-auto p-8 bg-gray-100">
+          <div className="bg-white shadow-md border border-gray-200 mx-auto" style={{ maxWidth: '210mm', padding: '18mm 20mm' }}>
+            <div className="flex items-end justify-between gap-8 pb-3 mb-8 border-b border-gray-300">
+              {tenant?.logo_url
+                ? <img src={tenant.logo_url} alt={tenant?.name || ''} className="max-h-[17mm] max-w-[62mm] object-contain" />
+                : <div className="font-sans font-bold text-gray-900 tracking-tight">{tenant?.name || 'Sua empresa'}</div>}
+              <div className="font-sans text-[9px] leading-relaxed text-gray-500 text-right">
+                {tenant?.cnpj && <div>CNPJ {tenant.cnpj}</div>}
+                {tenant?.address && <div>{tenant.address}</div>}
+              </div>
+            </div>
             <pre className="whitespace-pre-wrap font-serif text-[13px] leading-relaxed text-gray-800">{contract.content}</pre>
+            <div className="mt-10 pt-3 border-t border-gray-300 font-sans text-[9px] text-gray-500 text-center">
+              {[tenant?.name, tenant?.phone, tenant?.email, tenant?.website?.replace(/^https?:\/\//, '')].filter(Boolean).join('  ·  ')}
+            </div>
           </div>
+          {!tenant?.logo_url && (
+            <p className="text-center text-xs text-gray-500 mt-4">
+              Sem logo cadastrada — envie a sua em <span className="font-semibold">Configurações → Informações da Empresa</span> para ela entrar no timbre.
+            </p>
+          )}
         </div>
       </div>
     </div>

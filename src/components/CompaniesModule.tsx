@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Company, User, NoteColor, FinancialRecord, TransactionType, TransactionStatus, RevenueType, Bank, GeneralNote } from '../types';
+import { Company, User, NoteColor, FinancialRecord, TransactionType, TransactionStatus, RevenueType, Bank, GeneralNote, Product, Subscription } from '../types';
 import { Search, Plus, Pencil, Trash2, X, Save, User as UserIcon, ChevronDown, StickyNote, TrendingUp, LayoutDashboard, CheckSquare, HelpCircle, LayoutGrid, LayoutList, Square, Copy, ArrowUpDown } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 
@@ -14,20 +14,72 @@ interface CompaniesModuleProps {
   banks: Bank[];
   allUsers: User[];
   currentUser: User;
+  products: Product[];
+  subscriptions: Subscription[];
   onOpenHelp: (title: string, content: React.ReactNode) => void;
 }
 
 type CompanyTab = 'OVERVIEW' | 'FINANCE' | 'NOTES';
+
+const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+
+/** Quantas vezes o ciclo da assinatura cabe em um mês (para normalizar o MRR). */
+const CYCLE_LABEL: Record<string, string> = {
+  WEEKLY: 'Semanal', BIWEEKLY: 'Quinzenal', MONTHLY: 'Mensal', BIMONTHLY: 'Bimestral',
+  QUARTERLY: 'Trimestral', SEMIANNUALLY: 'Semestral', YEARLY: 'Anual',
+};
+
+const CYCLE_TO_MONTHLY: Record<string, number> = {
+  WEEKLY: 52 / 12,
+  BIWEEKLY: 26 / 12,
+  MONTHLY: 1,
+  BIMONTHLY: 1 / 2,
+  QUARTERLY: 1 / 3,
+  SEMIANNUALLY: 1 / 6,
+  YEARLY: 1 / 12,
+};
+
+/**
+ * Produtos do cliente. Recorrente (assinatura ativa) em destaque; produto que
+ * só apareceu em cobrança avulsa fica apagado, para dar pra distinguir de
+ * relance quem é receita recorrente e quem foi venda pontual.
+ */
+const ProductTags: React.FC<{ m: { products: string[]; recurring: Set<string> } }> = ({ m }) => {
+  if (!m.products.length) return <span className="text-gray-300 text-xs">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1 max-w-[240px]">
+      {m.products.slice(0, 3).map(name => (
+        <span
+          key={name}
+          title={m.recurring.has(name) ? 'Assinatura ativa' : 'Cobrança avulsa'}
+          className={`px-2 py-1 rounded text-xs whitespace-nowrap ${
+            m.recurring.has(name)
+              ? 'bg-mcsystem-50 text-mcsystem-700 font-medium'
+              : 'bg-gray-100 text-gray-500'
+          }`}
+        >
+          {name}
+        </span>
+      ))}
+      {m.products.length > 3 && (
+        <span className="text-xs text-gray-400 self-center" title={m.products.slice(3).join(', ')}>
+          +{m.products.length - 3}
+        </span>
+      )}
+    </div>
+  );
+};
 
 export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
     companies, setCompanies,
     financeRecords = [], setFinanceRecords,
     generalNotes, setGeneralNotes,
     revenueTypes = [], banks = [], allUsers = [], currentUser,
+    products = [], subscriptions = [],
     onOpenHelp
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortField, setSortField] = useState<'name' | 'status' | 'segment'>('name');
+  const [sortField, setSortField] = useState<'name' | 'status' | 'segment' | 'paid' | 'mrr'>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   // View Mode State (LIST or CARDS)
@@ -94,6 +146,63 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
     return () => { document.removeEventListener("mousedown", handleClickOutside); };
   }, [importMenuRef]);
 
+  /**
+   * Produto contratado, quanto já pagou e MRR — por cliente.
+   * O produto vem primeiro das assinaturas ativas (é o que ele contratou de
+   * fato); quem só tem cobrança avulsa cai nos produtos das próprias cobranças.
+   * Assinatura com rateio conta os dois produtos, cada um com sua fatia do MRR.
+   */
+  const clientMetrics = useMemo(() => {
+    const productName = (id?: string | null) => products.find(p => p.id === id)?.name;
+    const map = new Map<string, { subProducts: Map<string, number>; otherProducts: Set<string>; paid: number; mrr: number }>();
+    const slot = (id: string) => {
+      if (!map.has(id)) map.set(id, { subProducts: new Map(), otherProducts: new Set(), paid: 0, mrr: 0 });
+      return map.get(id)!;
+    };
+
+    subscriptions.forEach(s => {
+      if (!s.client_id || (s.status && s.status !== 'ACTIVE')) return;
+      const factor = CYCLE_TO_MONTHLY[(s.cycle || 'MONTHLY').toUpperCase()] ?? 1;
+      const monthly = (Number(s.value) || 0) * factor;
+      const e = slot(s.client_id);
+      e.mrr += monthly;
+      if (s.split_products?.length) {
+        s.split_products.forEach(sp => {
+          const n = productName(sp.product_id);
+          if (n) e.subProducts.set(n, (e.subProducts.get(n) || 0) + monthly * (sp.pct / 100));
+        });
+      } else {
+        const n = productName(s.product_id);
+        if (n) e.subProducts.set(n, (e.subProducts.get(n) || 0) + monthly);
+      }
+    });
+
+    financeRecords.forEach(f => {
+      // needsValidation fica de fora, igual ao Dashboard e ao DRE.
+      if (!f.companyId || f.needsValidation || f.type !== TransactionType.INCOME) return;
+      const e = slot(f.companyId);
+      if (f.status === TransactionStatus.PAID) e.paid += Number(f.amount) || 0;
+      if (f.split_revenue?.length) {
+        f.split_revenue.forEach(sp => { const n = productName(sp.product_id); if (n) e.otherProducts.add(n); });
+      } else {
+        const n = productName(f.product_id);
+        if (n) e.otherProducts.add(n);
+      }
+    });
+
+    // Assinatura na frente; produto que só apareceu em cobrança avulsa depois.
+    const out = new Map<string, { products: string[]; recurring: Set<string>; paid: number; mrr: number }>();
+    map.forEach((e, id) => {
+      const recurring = new Set(e.subProducts.keys());
+      const extras = [...e.otherProducts].filter(n => !recurring.has(n)).sort();
+      const ordered = [...e.subProducts.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
+      out.set(id, { products: [...ordered, ...extras], recurring, paid: e.paid, mrr: e.mrr });
+    });
+    return out;
+  }, [subscriptions, financeRecords, products]);
+
+  const metricsFor = (id: string) => clientMetrics.get(id) || { products: [] as string[], recurring: new Set<string>(), paid: 0, mrr: 0 };
+
   const filteredCompanies = useMemo(() => {
     const list = companies.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.cnpj.includes(searchTerm));
     const dir = sortDir === 'asc' ? 1 : -1;
@@ -101,11 +210,19 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
       switch (sortField) {
         case 'status': return (c.status || '').toLowerCase();
         case 'segment': return (c.segment || '').toLowerCase();
+        case 'paid': return metricsFor(c.id).paid;
+        case 'mrr': return metricsFor(c.id).mrr;
         default: return (c.name || '').toLowerCase();
       }
     };
     return [...list].sort((a, b) => { const ka = key(a), kb = key(b); return ka < kb ? -dir : ka > kb ? dir : 0; });
-  }, [companies, searchTerm, sortField, sortDir]);
+  }, [companies, searchTerm, sortField, sortDir, clientMetrics]);
+
+  /** Totais da carteira filtrada — o número que interessa no topo da tela. */
+  const walletTotals = useMemo(() => filteredCompanies.reduce(
+    (acc, c) => { const m = metricsFor(c.id); return { paid: acc.paid + m.paid, mrr: acc.mrr + m.mrr, active: acc.active + (m.mrr > 0 ? 1 : 0) }; },
+    { paid: 0, mrr: 0, active: 0 },
+  ), [filteredCompanies, clientMetrics]);
 
   // --- Derived Data ---
   const companyData = useMemo(() => {
@@ -510,6 +627,28 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
         </div>
       </div>
 
+      {isAdmin && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-4">
+            <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">MRR da carteira</p>
+            <p className="text-2xl font-bold text-mcsystem-700 mt-1">{brl(walletTotals.mrr)}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{brl(walletTotals.mrr * 12)} por ano</p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-4">
+            <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Já recebido</p>
+            <p className="text-2xl font-bold text-green-700 mt-1">{brl(walletTotals.paid)}</p>
+            <p className="text-xs text-gray-400 mt-0.5">todo o histórico</p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-4">
+            <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Clientes com recorrência</p>
+            <p className="text-2xl font-bold text-gray-800 mt-1">{walletTotals.active}</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              de {filteredCompanies.length} · ticket médio {brl(walletTotals.active ? walletTotals.mrr / walletTotals.active : 0)}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-4 border-b border-gray-200 bg-gray-50 flex flex-wrap gap-4 items-center justify-between">
             <div className="flex items-center gap-4">
@@ -529,13 +668,15 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                 {/* Ordenação */}
                 <select
                     value={sortField}
-                    onChange={(e) => setSortField(e.target.value as 'name' | 'status' | 'segment')}
+                    onChange={(e) => setSortField(e.target.value as typeof sortField)}
                     className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-mcsystem-500"
                     title="Ordenar por"
                 >
                     <option value="name">Nome</option>
                     <option value="status">Status</option>
                     <option value="segment">Segmento</option>
+                    <option value="mrr">MRR</option>
+                    <option value="paid">Já pagou</option>
                 </select>
                 <button
                     onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))}
@@ -564,6 +705,7 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
 
         {/* LIST VIEW */}
         {viewMode === 'LIST' && (
+          <div className="overflow-x-auto">
           <table className="w-full text-left text-sm text-gray-600">
               <thead className="bg-gray-100 text-gray-700 font-medium">
                   <tr>
@@ -573,6 +715,9 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                           </button>
                       </th>
                       <th className="p-4">Cliente</th>
+                      <th className="p-4">Produto contratado</th>
+                      {isAdmin && <th className="p-4 text-right whitespace-nowrap">Já pagou</th>}
+                      {isAdmin && <th className="p-4 text-right whitespace-nowrap">MRR</th>}
                       <th className="p-4">Segmento</th>
                       <th className="p-4">Responsáveis</th>
                       <th className="p-4">Status</th>
@@ -588,6 +733,9 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                               </button>
                           </td>
                           <td className="p-4"><div className="flex items-center"><div className="h-10 w-10 bg-mcsystem-900 rounded-lg flex items-center justify-center text-white font-bold mr-3">{company.name.substring(0, 2).toUpperCase()}</div><div><p className="font-semibold text-gray-900">{company.name}</p><p className="text-xs text-gray-400">{company.cnpj}</p></div></div></td>
+                          <td className="p-4"><ProductTags m={metricsFor(company.id)} /></td>
+                          {isAdmin && <td className="p-4 text-right font-medium text-gray-700 whitespace-nowrap">{metricsFor(company.id).paid > 0 ? brl(metricsFor(company.id).paid) : <span className="text-gray-300">—</span>}</td>}
+                          {isAdmin && <td className="p-4 text-right font-semibold whitespace-nowrap">{metricsFor(company.id).mrr > 0 ? <span className="text-mcsystem-700">{brl(metricsFor(company.id).mrr)}</span> : <span className="text-gray-300">—</span>}</td>}
                           <td className="p-4"><span className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs">{company.segment}</span></td>
                           <td className="p-4">
                             <div className="flex flex-wrap gap-1">
@@ -615,6 +763,7 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                   ))}
               </tbody>
           </table>
+          </div>
         )}
 
         {/* CARDS VIEW */}
@@ -655,6 +804,23 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
 
                           {/* Info Grid */}
                           <div className="space-y-3">
+                              {/* Produto + faturamento */}
+                              <div>
+                                  <span className="text-xs text-gray-500 block mb-1.5">Produto contratado</span>
+                                  <ProductTags m={metricsFor(company.id)} />
+                              </div>
+                              {isAdmin && (
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="bg-mcsystem-50 rounded-lg px-2 py-1.5">
+                                        <span className="text-[9px] uppercase font-bold text-mcsystem-600 block">MRR</span>
+                                        <span className="text-sm font-bold text-mcsystem-700">{metricsFor(company.id).mrr > 0 ? brl(metricsFor(company.id).mrr) : '—'}</span>
+                                    </div>
+                                    <div className="bg-green-50 rounded-lg px-2 py-1.5">
+                                        <span className="text-[9px] uppercase font-bold text-green-600 block">Já pagou</span>
+                                        <span className="text-sm font-bold text-green-700">{metricsFor(company.id).paid > 0 ? brl(metricsFor(company.id).paid) : '—'}</span>
+                                    </div>
+                                </div>
+                              )}
                               {/* Segment */}
                               <div className="flex items-center justify-between">
                                   <span className="text-xs text-gray-500">Segmento</span>
@@ -737,6 +903,73 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                    <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
                        {activeTab === 'OVERVIEW' && (
                            <div className="animate-in slide-in-from-left-4 duration-300 space-y-6">
+                                {/* 0. CONTRATO — o que ele contratou e quanto vale */}
+                                {isAdmin && (() => {
+                                  const m = metricsFor(selectedCompany.id);
+                                  const subs = subscriptions.filter(s => s.client_id === selectedCompany.id && (!s.status || s.status === 'ACTIVE'));
+                                  return (
+                                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                                      <h3 className="text-xs font-bold text-gray-900 mb-4 uppercase tracking-wider">Contrato</h3>
+                                      <div className="grid grid-cols-3 gap-3 mb-4">
+                                        <div className="bg-mcsystem-50 p-3 rounded-lg border border-mcsystem-100">
+                                          <span className="text-[10px] text-mcsystem-600 uppercase font-bold">MRR</span>
+                                          <p className="text-lg font-bold text-mcsystem-700">{brl(m.mrr)}</p>
+                                        </div>
+                                        <div className="bg-green-50 p-3 rounded-lg border border-green-100">
+                                          <span className="text-[10px] text-green-600 uppercase font-bold">Já pagou</span>
+                                          <p className="text-lg font-bold text-green-700">{brl(m.paid)}</p>
+                                        </div>
+                                        <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                                          <span className="text-[10px] text-gray-500 uppercase font-bold">Por ano</span>
+                                          <p className="text-lg font-bold text-gray-700">{brl(m.mrr * 12)}</p>
+                                        </div>
+                                      </div>
+                                      {subs.length > 0 ? (
+                                        <div className="space-y-2">
+                                          {subs.map(s => {
+                                            const factor = CYCLE_TO_MONTHLY[(s.cycle || 'MONTHLY').toUpperCase()] ?? 1;
+                                            const names = s.split_products?.length
+                                              ? s.split_products.map(sp => ({
+                                                  name: products.find(p => p.id === sp.product_id)?.name || 'Sem produto',
+                                                  value: (Number(s.value) || 0) * sp.pct / 100,
+                                                }))
+                                              : [{ name: products.find(p => p.id === s.product_id)?.name || 'Sem produto', value: Number(s.value) || 0 }];
+                                            return (
+                                              <div key={s.id} className="border border-gray-100 rounded-lg p-3">
+                                                <div className="flex justify-between items-start gap-3">
+                                                  <div className="min-w-0">
+                                                    <p className="text-sm font-semibold text-gray-800 truncate">{s.description || 'Assinatura'}</p>
+                                                    <p className="text-xs text-gray-400 mt-0.5">
+                                                      {CYCLE_LABEL[(s.cycle || 'MONTHLY').toUpperCase()] || s.cycle}
+                                                      {s.next_due_date ? ` · próx. ${s.next_due_date.split('-').reverse().join('/')}` : ''}
+                                                    </p>
+                                                  </div>
+                                                  <div className="text-right shrink-0">
+                                                    <p className="text-sm font-bold text-gray-800">{brl(Number(s.value) || 0)}</p>
+                                                    {factor !== 1 && <p className="text-[10px] text-gray-400">{brl((Number(s.value) || 0) * factor)}/mês</p>}
+                                                  </div>
+                                                </div>
+                                                <div className="flex flex-wrap gap-1 mt-2">
+                                                  {names.map((n, i) => (
+                                                    <span key={i} className="bg-mcsystem-50 text-mcsystem-700 px-2 py-0.5 rounded text-xs">
+                                                      {n.name} <span className="text-mcsystem-400">{brl(n.value)}</span>
+                                                    </span>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        <div>
+                                          <p className="text-xs text-gray-400 italic mb-2">Sem assinatura ativa — só cobranças avulsas.</p>
+                                          <ProductTags m={m} />
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+
                                 {/* 1. DADOS GERAIS */}
                                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                                     <h3 className="text-xs font-bold text-gray-900 mb-4 uppercase tracking-wider flex justify-between">Dados Gerais<button onClick={() => openEditModal(selectedCompany)} className="text-mcsystem-500 hover:underline text-[10px] capitalize">Editar</button></h3>

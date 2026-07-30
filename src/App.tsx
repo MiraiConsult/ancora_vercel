@@ -594,6 +594,8 @@ const handleAddUser = async (newUser: User) => {
             banks={banks}
             allUsers={allUsers}
             currentUser={user}
+            products={products}
+            subscriptions={subscriptions}
             onOpenHelp={openHelp}
           />
         ) : <AccessDenied />;

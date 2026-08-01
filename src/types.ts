@@ -92,6 +92,8 @@ export interface FinancialRecord {
   product_manual?: boolean;
   /** Onde o dinheiro vai ser pago (chave PIX ou banco/agência/conta). */
   payment_account?: PaymentAccount;
+  /** Transferência do Asaas gerada por este lançamento (pagamento por PIX). */
+  asaas_transfer_id?: string;
   // Integração Asaas
   asaas_payment_id?: string;
   asaas_invoice_url?: string;

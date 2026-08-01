@@ -103,6 +103,14 @@ export const asaasUpdateSubscription = (params: {
   productManual?: boolean;
 }) => invoke('update_subscription', params);
 
+/**
+ * Envia um PIX a partir de um lançamento de despesa, usando a chave já
+ * cadastrada nele. A transferência ainda passa pela validação de saque do
+ * Asaas antes do dinheiro sair — ver a função asaas-transfer-approval.
+ */
+export const asaasCreateTransfer = (params: { recordId: string }) =>
+  invoke('create_transfer', params) as Promise<{ transfer: { id: string; status: string; value: number }; intentId: string }>;
+
 export const asaasDeleteSubscription = (params: { rowId: string; subscriptionId?: string }) =>
   invoke('delete_subscription', params);
 

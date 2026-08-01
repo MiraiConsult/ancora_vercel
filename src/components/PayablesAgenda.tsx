@@ -1,10 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { FinancialRecord, Company, ChartOfAccount, Bank, TransactionStatus } from '../types';
+import { FinancialRecord, Company, ChartOfAccount, Bank, TransactionStatus, User } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import {
   AlertTriangle, CalendarClock, CheckCircle2, Search, ChevronDown, Loader2, Wallet, Landmark,
-  Copy, Check,
+  Copy, Check, Send,
 } from 'lucide-react';
+import { asaasCreateTransfer } from '../services/asaasService';
+import { isAsaasEnabled } from '../config';
 
 interface PayablesAgendaProps {
   records: FinancialRecord[];
@@ -12,6 +14,7 @@ interface PayablesAgendaProps {
   companies: Company[];
   chartOfAccounts: ChartOfAccount[];
   banks: Bank[];
+  currentUser: User;
 }
 
 const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Math.abs(v) || 0);
@@ -27,10 +30,12 @@ const daysBetween = (iso: string) => {
   return Math.round((d.getTime() - t.getTime()) / 86400000);
 };
 
-export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setRecords, companies, chartOfAccounts, banks }) => {
+export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setRecords, companies, chartOfAccounts, banks, currentUser }) => {
   const [search, setSearch] = useState('');
   const [horizon, setHorizon] = useState(30);
   const [payingId, setPayingId] = useState<string | null>(null);
+  const [payTarget, setPayTarget] = useState<FinancialRecord | null>(null);
+  const [sending, setSending] = useState(false);
 
   const companyName = (id?: string) => companies.find(c => c.id === id)?.name || null;
   const rubricName = (id?: string) => chartOfAccounts.find(c => c.id === id)?.rubricName || null;
@@ -75,6 +80,26 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
     if (error) {
       setRecords(prev);
       alert('Erro ao dar baixa: ' + error.message);
+    }
+  };
+
+  /**
+   * Envia o PIX pelo Asaas. O dinheiro não sai aqui: a transferência é criada e
+   * fica retida até a nossa função de validação conferir que ela corresponde a
+   * este pedido. A baixa do lançamento vem depois, pelo evento TRANSFER_DONE.
+   */
+  const confirmAndPay = async () => {
+    if (!payTarget) return;
+    setSending(true);
+    try {
+      const { transfer } = await asaasCreateTransfer({ recordId: payTarget.id });
+      setRecords(list => list.map(x => x.id === payTarget.id ? { ...x, asaas_transfer_id: transfer.id } : x));
+      setPayTarget(null);
+      alert('PIX enviado ao Asaas. A baixa do lançamento acontece assim que a transferência for concluída.');
+    } catch (e: any) {
+      alert(`Erro ao enviar o PIX: ${e.message}`);
+    } finally {
+      setSending(false);
     }
   };
 
@@ -133,10 +158,26 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
               {late ? `${lateDays} ${lateDays === 1 ? 'dia' : 'dias'} · ${fmtDate(r.dueDate)}` : fmtDate(r.dueDate)}
             </div>
           </div>
-          <button onClick={() => markPaid(r)} disabled={payingId === r.id}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-green-50 text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50">
-            {payingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Pagar
-          </button>
+          {r.asaas_transfer_id ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-blue-50 text-blue-700">
+              <Send size={14} /> PIX enviado
+            </span>
+          ) : (
+            <>
+              {r.payment_account?.type === 'PIX' && r.payment_account?.pixKey && isAsaasEnabled(currentUser.tenant_id) && (
+                <button onClick={() => setPayTarget(r)}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-mcsystem-50 text-mcsystem-700 hover:bg-mcsystem-100 transition-colors"
+                  title="Enviar PIX pelo Asaas">
+                  <Send size={14} /> Pagar por PIX
+                </button>
+              )}
+              <button onClick={() => markPaid(r)} disabled={payingId === r.id}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-green-50 text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50"
+                title="Marcar como pago (sem mover dinheiro)">
+                {payingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Dar baixa
+              </button>
+            </>
+          )}
         </div>
       </div>
     );
@@ -222,6 +263,52 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
           </div>
         )}
       </div>
+
+      {/* Confirmação do PIX — última chance de conferir destino e valor */}
+      {payTarget && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2.5">
+              <div className="bg-mcsystem-50 text-mcsystem-700 p-2 rounded-lg"><Send size={18} /></div>
+              <h3 className="font-bold text-gray-900">Confirmar pagamento por PIX</h3>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="text-center py-2">
+                <p className="text-3xl font-bold text-gray-900 tabular-nums">{brl(payTarget.amount)}</p>
+                <p className="text-sm text-gray-500 mt-1">{payTarget.description}</p>
+              </div>
+
+              <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-500 flex-shrink-0">Chave PIX</span>
+                  <span className="font-mono text-gray-900 text-right break-all">{payTarget.payment_account?.pixKey}</span>
+                </div>
+                {payTarget.payment_account?.pixKeyType && (
+                  <div className="flex justify-between"><span className="text-gray-500">Tipo</span><span className="text-gray-900">{payTarget.payment_account.pixKeyType}</span></div>
+                )}
+                {payTarget.payment_account?.holder && (
+                  <div className="flex justify-between gap-4"><span className="text-gray-500 flex-shrink-0">Favorecido</span><span className="text-gray-900 text-right">{payTarget.payment_account.holder}</span></div>
+                )}
+              </div>
+
+              <p className="text-xs text-gray-500 leading-relaxed">
+                O Asaas ainda vai pedir a confirmação do sistema antes de executar. O lançamento só
+                é baixado quando a transferência for concluída de fato.
+              </p>
+            </div>
+
+            <div className="bg-gray-50 px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+              <button onClick={() => setPayTarget(null)} disabled={sending}
+                className="px-4 py-2.5 rounded-lg text-gray-600 font-medium hover:bg-gray-200 disabled:opacity-50">Cancelar</button>
+              <button onClick={confirmAndPay} disabled={sending}
+                className="px-5 py-2.5 bg-mcsystem-900 text-white rounded-lg font-semibold hover:bg-mcsystem-800 flex items-center gap-2 disabled:opacity-50">
+                {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Enviar PIX
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -63,6 +63,44 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // ---- Transferências enviadas pelo sistema (eventos TRANSFER_*) ----
+    const transfer = body?.transfer;
+    if (transfer?.id) {
+      // Casa pelo externalReference (id da intenção) e cai no id do Asaas
+      // quando o evento não trouxer a referência.
+      const ref = transfer.externalReference;
+      const { data: intent } = ref
+        ? await admin.from('payment_intents').select('*').eq('id', ref).maybeSingle()
+        : await admin.from('payment_intents').select('*').eq('asaas_transfer_id', transfer.id).maybeSingle();
+
+      if (intent) {
+        const done = event === 'TRANSFER_DONE';
+        const dead = ['TRANSFER_FAILED', 'TRANSFER_CANCELLED', 'TRANSFER_BLOCKED'].includes(event || '');
+
+        if (done || dead) {
+          await admin.from('payment_intents').update({
+            status: done ? 'DONE' : 'FAILED',
+            refuse_reason: dead ? (transfer.failReason || event) : null,
+            decided_at: new Date().toISOString(),
+          }).eq('id', intent.id);
+        }
+
+        if (intent.record_id) {
+          if (done) {
+            await admin.from('financial_records').update({
+              status: 'Pago',
+              paymentDate: transfer.effectiveDate || new Date().toISOString().slice(0, 10),
+            }).eq('id', intent.record_id);
+          } else if (dead) {
+            // Dinheiro não saiu: volta a conta para a fila de pagamento.
+            await admin.from('financial_records').update({
+              status: 'Pendente', asaas_transfer_id: null,
+            }).eq('id', intent.record_id);
+          }
+        }
+      }
+    }
+
     // ---- Contas pagas pelo Asaas (eventos BILL_*) ----
     // Chegam com body.bill (e não body.payment), por isso passavam batido.
     const bill = body?.bill;

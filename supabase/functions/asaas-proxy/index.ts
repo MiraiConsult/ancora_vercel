@@ -292,6 +292,65 @@ Deno.serve(async (req: Request) => {
         break;
       }
 
+      case 'create_transfer': {
+        // Pagamento por PIX a partir de um lançamento de despesa.
+        // A intenção é gravada ANTES de chamar o Asaas: a validação de saque
+        // chega ~5s depois da criação e precisa ter contra o que conferir.
+        const { data: rec, error: recErr } = await supabase
+          .from('financial_records').select('*').eq('id', params.recordId).single();
+        if (recErr || !rec) throw new Error('Lançamento não encontrado.');
+        if (rec.type !== 'Despesa') throw new Error('Só é possível pagar lançamentos de despesa.');
+        if (rec.status === 'Pago') throw new Error('Este lançamento já está pago.');
+        if (rec.asaas_transfer_id) throw new Error('Já existe uma transferência para este lançamento.');
+
+        const acc = rec.payment_account || {};
+        if (acc.type !== 'PIX' || !acc.pixKey) {
+          throw new Error('Cadastre uma chave PIX no lançamento antes de pagar.');
+        }
+        const value = Math.abs(Number(rec.amount) || 0);
+        if (!value) throw new Error('Valor do lançamento inválido.');
+
+        const intentId = `pi_${crypto.randomUUID()}`;
+        const { error: intErr } = await supabase.from('payment_intents').insert({
+          id: intentId,
+          tenant_id: rec.tenant_id,
+          record_id: rec.id,
+          value,
+          pix_key: acc.pixKey,
+          pix_key_type: acc.pixKeyType || null,
+          holder: acc.holder || null,
+          description: rec.description || null,
+          status: 'AWAITING_APPROVAL',
+        });
+        if (intErr) throw new Error('Falha ao registrar a intenção de pagamento: ' + intErr.message);
+
+        let transfer: any;
+        try {
+          transfer = await asaas('/transfers', 'POST', {
+            value,
+            pixAddressKey: acc.pixKey,
+            pixAddressKeyType: acc.pixKeyType || undefined,
+            description: (rec.description || 'Pagamento').slice(0, 120),
+            externalReference: intentId,
+          });
+        } catch (e) {
+          // Sem transferência criada a intenção não pode ficar viva: ela é o que
+          // autoriza um saque na validação.
+          await supabase.from('payment_intents')
+            .update({ status: 'FAILED', refuse_reason: String((e as Error)?.message || e), decided_at: new Date().toISOString() })
+            .eq('id', intentId);
+          throw e;
+        }
+
+        await supabase.from('payment_intents')
+          .update({ asaas_transfer_id: transfer.id }).eq('id', intentId);
+        await supabase.from('financial_records')
+          .update({ asaas_transfer_id: transfer.id }).eq('id', rec.id);
+
+        result = { transfer, intentId };
+        break;
+      }
+
       case 'delete_subscription': {
         if (params.subscriptionId) await asaas(`/subscriptions/${params.subscriptionId}`, 'DELETE');
         const { error } = await supabase.from('subscriptions').delete().eq('id', params.rowId);

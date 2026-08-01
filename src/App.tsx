@@ -644,6 +644,7 @@ const handleAddUser = async (newUser: User) => {
         return (hasPermission('billing') && isAsaasEnabled(user.tenant_id)) ? (
           <BillingModule
             companies={companies}
+            setCompanies={setCompanies}
             products={products}
             financeRecords={financeRecords}
             setFinanceRecords={setFinanceRecords}

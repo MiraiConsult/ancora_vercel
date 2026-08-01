@@ -1,14 +1,14 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Company, Product, FinancialRecord, Subscription, RevenueType, User } from '../types';
 import {
-  asaasCreateCharge, asaasCreateSubscription, asaasSyncAll,
+  asaasCreateCharge, asaasCreateSubscription, asaasSyncAll, asaasCreateClient,
   asaasUpdateCharge, asaasDeleteCharge, asaasUpdateSubscription, asaasDeleteSubscription,
 } from '../services/asaasService';
 import { supabase } from '../lib/supabaseClient';
 import {
   FileText, Repeat, Plus, X, Save, Search, ExternalLink, Loader2,
   CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown,
-  Pencil, Trash2, CalendarClock, ChevronDown, ChevronRight, Wallet,
+  Pencil, Trash2, CalendarClock, ChevronDown, ChevronRight, Wallet, UserPlus,
 } from 'lucide-react';
 import { ReceivablesAgenda } from './ReceivablesAgenda';
 import { BillingProjection } from './BillingProjection';
@@ -16,6 +16,7 @@ import { CYCLE_OPTIONS, cycleLabel } from '../lib/cycles';
 
 interface BillingModuleProps {
   companies: Company[];
+  setCompanies: React.Dispatch<React.SetStateAction<Company[]>>;
   products: Product[];
   financeRecords: FinancialRecord[];
   setFinanceRecords: React.Dispatch<React.SetStateAction<FinancialRecord[]>>;
@@ -64,7 +65,7 @@ interface BillingRow {
 }
 
 export const BillingModule: React.FC<BillingModuleProps> = ({
-  companies, products, financeRecords, setFinanceRecords,
+  companies, setCompanies, products, financeRecords, setFinanceRecords,
   subscriptions, setSubscriptions, revenueTypes, currentUser, onRefresh,
 }) => {
   const [tab, setTab] = useState<'AGENDA' | 'BILLING'>('AGENDA');
@@ -114,6 +115,10 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
       setSyncing(false);
     }
   };
+
+  // Cliente cadastrado de dentro do modal de cobrança/assinatura já entra na lista.
+  const handleClientCreated = (c: Company) =>
+    setCompanies(prev => (prev.some(x => x.id === c.id) ? prev : [...prev, c]));
 
   // Pergunta se quer aplicar o mesmo produto às demais cobranças do cliente (local)
   const applyProductToClient = async (companyId: string | undefined, productId: string | null) => {
@@ -425,6 +430,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
           revenueTypes={revenueTypes}
           submitting={submitting}
           onClose={() => setModal(null)}
+          onClientCreated={handleClientCreated}
           onSubmit={async (form) => {
             setSubmitting(true);
             try {
@@ -449,6 +455,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
           products={activeProducts}
           submitting={submitting}
           onClose={() => setModal(null)}
+          onClientCreated={handleClientCreated}
           onSubmit={async (form) => {
             setSubmitting(true);
             try {
@@ -705,6 +712,233 @@ const ModalShell: React.FC<{ title: string; icon: React.ReactNode; onClose: () =
 const inputCls = 'w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:border-mcsystem-500 focus:ring-2 focus:ring-mcsystem-100 outline-none';
 const labelCls = 'block text-sm font-medium text-gray-600 mb-1';
 
+/** Máscara de CPF/CNPJ conforme vai digitando. */
+const maskDoc = (v: string) => {
+  const d = v.replace(/\D/g, '').slice(0, 14);
+  if (d.length <= 11) {
+    return d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+  }
+  return d
+    .replace(/(\d{2})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1/$2')
+    .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+};
+
+/**
+ * Cadastro rápido de cliente sem sair da cobrança. Grava aqui e no Asaas na
+ * mesma ação — CNPJ/CPF é obrigatório porque sem ele o Asaas não aceita o
+ * customer, e é ele que evita cadastro duplicado.
+ */
+const NewClientModal: React.FC<{
+  initialName?: string; onClose: () => void; onCreated: (c: Company) => void;
+}> = ({ initialName = '', onClose, onCreated }) => {
+  const [name, setName] = useState(initialName);
+  const [cnpj, setCnpj] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const doc = cnpj.replace(/\D/g, '');
+    if (!name.trim()) return alert('Informe o nome do cliente.');
+    if (doc.length !== 11 && doc.length !== 14) return alert('Informe um CPF (11 dígitos) ou CNPJ (14 dígitos).');
+    setSaving(true);
+    try {
+      const res = await asaasCreateClient({
+        name: name.trim(), cnpj: doc,
+        email: email.trim() || undefined,
+        phone: phone.trim() || undefined,
+      });
+      if (res.linked) {
+        alert('Este CNPJ/CPF já existia no Asaas — o cadastro foi vinculado ao cliente de lá.');
+      }
+      onCreated(res.client as Company);
+      onClose();
+    } catch (e: any) {
+      alert(`Erro ao cadastrar cliente: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[210] p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in zoom-in-95 duration-300 overflow-hidden">
+        <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+          <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+            <UserPlus size={20} className="text-mcsystem-500" />Novo Cliente
+          </h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-200 transition-colors"><X size={22} /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="bg-mcsystem-50 border border-mcsystem-100 text-mcsystem-800 text-xs rounded-lg px-3 py-2">
+            O cliente é criado aqui e no Asaas ao mesmo tempo. Se o CNPJ/CPF já existir no Asaas, os dois cadastros são vinculados.
+          </div>
+          <div>
+            <label className={labelCls}>Nome *</label>
+            <input type="text" value={name} onChange={e => setName(e.target.value)} className={inputCls} placeholder="Ex: Ancóra Consultoria" autoFocus />
+          </div>
+          <div>
+            <label className={labelCls}>CNPJ/CPF *</label>
+            <input type="text" value={cnpj} onChange={e => setCnpj(maskDoc(e.target.value))} className={inputCls} placeholder="00.000.000/0000-00" inputMode="numeric" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls}>E-mail</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} placeholder="financeiro@empresa.com" />
+            </div>
+            <div>
+              <label className={labelCls}>Celular</label>
+              <input type="text" value={phone} onChange={e => setPhone(e.target.value)} className={inputCls} placeholder="(11) 90000-0000" />
+            </div>
+          </div>
+          <p className="text-xs text-gray-400">
+            E-mail e celular ficam só no Asaas — é por eles que a cobrança é enviada.
+          </p>
+        </div>
+        <ModalFooter submitting={saving} onClose={onClose} onSubmit={save} label="Cadastrar cliente" />
+      </div>
+    </div>
+  );
+};
+
+/** Ignora acento e caixa — "ancora" acha "Ancóra". */
+const norm = (s: string) =>
+  (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+/**
+ * Seleção de cliente por digitação, com atalho para cadastrar um novo na hora.
+ * A carteira já passa de uma centena de nomes: rolar a lista inteira não é
+ * opção, então a lista sai em ordem alfabética e filtra por nome ou documento.
+ */
+const ClientField: React.FC<{
+  companies: Company[]; value: string;
+  onChange: (id: string) => void;
+  onClientCreated: (c: Company) => void;
+}> = ({ companies, value, onChange, onClientCreated }) => {
+  const [creating, setCreating] = useState<null | string>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  const selected = companies.find(c => c.id === value);
+
+  const sorted = useMemo(
+    () => [...companies].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR')),
+    [companies],
+  );
+
+  const options = useMemo(() => {
+    const q = norm(query.trim());
+    if (!q) return sorted;
+    const digitsQ = query.replace(/\D/g, '');
+    return sorted.filter(c =>
+      norm(c.name).includes(q) || (!!digitsQ && (c.cnpj || '').replace(/\D/g, '').includes(digitsQ)));
+  }, [sorted, query]);
+
+  // Clique fora fecha e devolve o campo ao cliente que estava selecionado.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  const pick = (c: Company) => {
+    onChange(c.id);
+    setQuery('');
+    setOpen(false);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) { setOpen(true); return; }
+      setHighlight(h => {
+        const next = e.key === 'ArrowDown' ? h + 1 : h - 1;
+        return Math.max(0, Math.min(options.length - 1, next));
+      });
+    } else if (e.key === 'Enter') {
+      if (open && options[highlight]) { e.preventDefault(); pick(options[highlight]); }
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+      setQuery('');
+    }
+  };
+
+  return (
+    <div ref={boxRef} className="relative">
+      <div className="flex items-center justify-between mb-1">
+        <label className={`${labelCls} mb-0`}>Cliente *</label>
+        <button
+          type="button" onClick={() => setCreating('')}
+          className="text-xs font-medium text-mcsystem-600 hover:text-mcsystem-700 flex items-center gap-1"
+        >
+          <Plus size={12} /> Novo cliente
+        </button>
+      </div>
+
+      <div className="relative">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          className={`${inputCls} pl-9 pr-8`}
+          placeholder={selected ? selected.name : 'Digite para buscar o cliente...'}
+          value={open ? query : (selected?.name || '')}
+          onChange={e => { setQuery(e.target.value); setHighlight(0); setOpen(true); }}
+          onFocus={() => { setQuery(''); setHighlight(0); setOpen(true); }}
+          onKeyDown={onKeyDown}
+        />
+        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+      </div>
+
+      {open && (
+        <div className="absolute z-10 mt-1 w-full max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+          {options.length === 0 ? (
+            <button
+              type="button" onClick={() => { setOpen(false); setCreating(query.trim()); }}
+              className="w-full text-left px-3 py-2.5 text-sm text-mcsystem-600 hover:bg-mcsystem-50 flex items-center gap-1.5"
+            >
+              <Plus size={14} /> Nenhum cliente encontrado — cadastrar "{query.trim()}"
+            </button>
+          ) : options.map((c, i) => (
+            <button
+              key={c.id} type="button"
+              onMouseEnter={() => setHighlight(i)}
+              onClick={() => pick(c)}
+              className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 ${
+                i === highlight ? 'bg-mcsystem-50' : ''} ${c.id === value ? 'font-semibold text-mcsystem-700' : 'text-gray-700'}`}
+            >
+              <span className="truncate">{c.name}</span>
+              <span className={`text-xs whitespace-nowrap ${c.cnpj ? 'text-gray-400' : 'text-red-400'}`}>
+                {c.cnpj || 'sem CNPJ/CPF'}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selected && !selected.cnpj && (
+        <p className="text-xs text-red-500 mt-1">Este cliente não tem CNPJ/CPF — obrigatório para o Asaas. Complete o cadastro em Clientes.</p>
+      )}
+      {creating !== null && (
+        <NewClientModal
+          initialName={creating}
+          onClose={() => setCreating(null)}
+          onCreated={c => { onClientCreated(c); onChange(c.id); setQuery(''); }}
+        />
+      )}
+    </div>
+  );
+};
+
 const todayPlus = (days: number) => {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -714,7 +948,8 @@ const todayPlus = (days: number) => {
 const ChargeModal: React.FC<{
   companies: Company[]; products: Product[]; revenueTypes: RevenueType[];
   submitting: boolean; onClose: () => void; onSubmit: (form: any) => void;
-}> = ({ companies, products, revenueTypes, submitting, onClose, onSubmit }) => {
+  onClientCreated: (c: Company) => void;
+}> = ({ companies, products, revenueTypes, submitting, onClose, onSubmit, onClientCreated }) => {
   const [clientId, setClientId] = useState('');
   const [productId, setProductId] = useState('');
   const [value, setValue] = useState(0);
@@ -739,24 +974,13 @@ const ChargeModal: React.FC<{
     onSubmit({ clientId, productId: productId || undefined, value, dueDate, description, billingType, revenueTypeId: revenueTypeId || undefined });
   };
 
-  const clientsWithoutDoc = companies.find(c => c.id === clientId && !c.cnpj);
-
   return (
     <ModalShell title="Nova Cobrança" icon={<FileText size={20} className="text-mcsystem-500" />} onClose={onClose}>
       <div className="p-6 space-y-4">
         <div className="bg-mcsystem-50 border border-mcsystem-100 text-mcsystem-800 text-xs rounded-lg px-3 py-2">
           Cobrança única, sem recorrência. Se o cliente paga todo mês, crie uma <b>assinatura</b>.
         </div>
-        <div>
-          <label className={labelCls}>Cliente *</label>
-          <select value={clientId} onChange={e => setClientId(e.target.value)} className={inputCls}>
-            <option value="">Selecione...</option>
-            {companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.cnpj ? '' : ' (sem CNPJ/CPF)'}</option>)}
-          </select>
-          {clientsWithoutDoc && (
-            <p className="text-xs text-red-500 mt-1">Este cliente não tem CNPJ/CPF — obrigatório para o Asaas. Cadastre em Clientes.</p>
-          )}
-        </div>
+        <ClientField companies={companies} value={clientId} onChange={setClientId} onClientCreated={onClientCreated} />
 
         <div>
           <label className={labelCls}>Produto (opcional — preenche valor/descrição)</label>
@@ -809,7 +1033,8 @@ const ChargeModal: React.FC<{
 const SubscriptionModal: React.FC<{
   companies: Company[]; products: Product[];
   submitting: boolean; onClose: () => void; onSubmit: (form: any) => void;
-}> = ({ companies, products, submitting, onClose, onSubmit }) => {
+  onClientCreated: (c: Company) => void;
+}> = ({ companies, products, submitting, onClose, onSubmit, onClientCreated }) => {
   const [clientId, setClientId] = useState('');
   const [productId, setProductId] = useState('');
   const [value, setValue] = useState(0);
@@ -849,13 +1074,7 @@ const SubscriptionModal: React.FC<{
   return (
     <ModalShell title="Nova Assinatura" icon={<Repeat size={20} className="text-mcsystem-500" />} onClose={onClose}>
       <div className="p-6 space-y-4">
-        <div>
-          <label className={labelCls}>Cliente *</label>
-          <select value={clientId} onChange={e => setClientId(e.target.value)} className={inputCls}>
-            <option value="">Selecione...</option>
-            {companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.cnpj ? '' : ' (sem CNPJ/CPF)'}</option>)}
-          </select>
-        </div>
+        <ClientField companies={companies} value={clientId} onChange={setClientId} onClientCreated={onClientCreated} />
 
         <div>
           <div className="flex items-center justify-between mb-1">

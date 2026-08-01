@@ -32,6 +32,15 @@ async function asaas(path: string, method: string, body?: unknown) {
   return data;
 }
 
+const digits = (v: unknown) => String(v || '').replace(/\D/g, '');
+
+/** CPF/CNPJ com a máscara — o documento só é guardado formatado aqui. */
+function formatDoc(d: string) {
+  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  return d;
+}
+
 // Aplica um rateio percentual sobre o valor da cobrança. O resto do
 // arredondamento vai para a maior fatia, para o rateio fechar exatamente com o
 // valor cobrado. Mesma regra do asaas-sync.
@@ -100,6 +109,53 @@ Deno.serve(async (req: Request) => {
     let result: Record<string, unknown>;
 
     switch (action) {
+      case 'create_client': {
+        // Cadastro de cliente feito de dentro da cobrança: grava aqui e no Asaas
+        // na mesma ação, para não ter que passar pela tela de Clientes antes.
+        const name = String(params.name || '').trim();
+        const cpfCnpj = digits(params.cnpj);
+        const email = String(params.email || '').trim();
+        const phone = digits(params.phone);
+
+        if (!name) throw new Error('Informe o nome do cliente.');
+        if (cpfCnpj.length !== 11 && cpfCnpj.length !== 14) {
+          throw new Error('CNPJ/CPF inválido — informe 11 dígitos (CPF) ou 14 (CNPJ).');
+        }
+
+        // Mesmo documento já cadastrado por aqui: não abre um segundo cliente.
+        const { data: existing } = await supabase.from('clients').select('id, name, cnpj');
+        const dup = (existing || []).find((c) => digits(c.cnpj) === cpfCnpj);
+        if (dup) throw new Error(`Já existe um cliente com este CNPJ/CPF: ${dup.name}.`);
+
+        // Se o documento já é customer no Asaas, vincula em vez de duplicar lá.
+        const found = await asaas(`/customers?cpfCnpj=${cpfCnpj}`, 'GET');
+        const remote = found?.data?.[0];
+        const customer = remote || await asaas('/customers', 'POST', {
+          name,
+          cpfCnpj,
+          email: email || undefined,
+          mobilePhone: phone || undefined,
+        });
+
+        // tenant_id vem do trigger set_record_tenant_id, igual ao cadastro em Clientes.
+        const row = {
+          id: `c${Date.now()}`,
+          name,
+          cnpj: formatDoc(cpfCnpj),
+          segment: String(params.segment || ''),
+          status: 'Active',
+          location: '',
+          notes: [],
+          asaas_customer_id: customer.id,
+        };
+        const { data: client, error: insErr } = await supabase
+          .from('clients').insert(row).select().single();
+        if (insErr) throw new Error('Cliente criado no Asaas, mas falhou ao gravar aqui: ' + insErr.message);
+
+        result = { client, linked: !!remote };
+        break;
+      }
+
       case 'sync_customer': {
         const { customerId } = await ensureCustomer(params.clientId);
         result = { customerId };

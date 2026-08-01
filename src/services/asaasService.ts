@@ -57,6 +57,21 @@ export interface CreateSubscriptionParams {
 export const asaasSyncCustomer = (clientId: string) =>
   invoke('sync_customer', { clientId });
 
+export interface CreateClientParams {
+  name: string;
+  cnpj: string;          // CPF (11) ou CNPJ (14) — com ou sem máscara
+  email?: string;
+  phone?: string;
+  segment?: string;
+}
+
+/**
+ * Cadastra o cliente aqui e no Asaas de uma vez. Documento que já existe como
+ * customer no Asaas é vinculado (linked = true), não duplicado.
+ */
+export const asaasCreateClient = (params: CreateClientParams) =>
+  invoke('create_client', params) as Promise<{ client: any; linked: boolean }>;
+
 /**
  * Importa/sincroniza clientes, cobranças e assinaturas existentes da conta Asaas.
  * Chama a Edge Function 'asaas-sync' (idempotente).

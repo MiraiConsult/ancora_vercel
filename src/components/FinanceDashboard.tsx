@@ -2168,14 +2168,21 @@ const newRecords: FinancialRecord[] = [];
         });
       }
 
-      // Saldo acumulado: sempre calculado em ordem de vencimento, mesmo quando a
-      // tabela está ordenada por outra coluna — um acumulado que segue a
-      // ordenação da tela não significaria nada.
+      // Saldo acumulado: acumula sobre a MESMA lista que a tabela mostra, só que
+      // sempre no sentido cronológico (de baixo pra cima quando a ordenação é do
+      // mais novo pro mais antigo). Antes ele acumulava numa ordem própria
+      // (vencimento + id): como quase todo dia tem mais de um lançamento, o
+      // desempate não batia com o da tela e a coluna não fechava de uma linha
+      // para a seguinte — a diferença entre duas linhas vizinhas era o valor de
+      // outra linha, o que dava a impressão de valor somado com o sinal errado.
       const runningBalance = new Map<string, number>();
+      const chronological = sortConfig.key === 'dueDate'
+        ? (sortConfig.direction === 'descending' ? [...filtered].reverse() : filtered)
+        // Ordenada por outra coluna, a leitura linha a linha não existe: cai no
+        // saldo por data mesmo, preservando a ordem da tela dentro do mesmo dia.
+        : [...filtered].sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
       let acc = 0;
-      [...filtered]
-        .sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '') || a.id.localeCompare(b.id))
-        .forEach(r => { acc += (r.amount || 0); runningBalance.set(r.id, acc); });
+      chronological.forEach(r => { acc += (r.amount || 0); runningBalance.set(r.id, acc); });
       const finalBalance = acc;
 
       const allSelected = filtered.length > 0 && selectedRecordIds.size === filtered.length;
@@ -2214,7 +2221,7 @@ const newRecords: FinancialRecord[] = [];
                             <th className="p-4 cursor-pointer group hover:bg-gray-100" onClick={() => requestSort('description')}><div className="flex items-center gap-1.5">Descrição{sortConfig.key === 'description' ? (sortConfig.direction === 'ascending' ? <ArrowUp size={12} className="text-mcsystem-500"/> : <ArrowDown size={12} className="text-mcsystem-500"/>) : <ArrowUpDown size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity"/>}</div></th>
                             <th className="p-4 cursor-pointer group hover:bg-gray-100" onClick={() => requestSort('status')}><div className="flex items-center gap-1.5">Status{sortConfig.key === 'status' ? (sortConfig.direction === 'ascending' ? <ArrowUp size={12} className="text-mcsystem-500"/> : <ArrowDown size={12} className="text-mcsystem-500"/>) : <ArrowUpDown size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity"/>}</div></th>
                             <th className="p-4 text-right cursor-pointer group hover:bg-gray-100" onClick={() => requestSort('amount')}><div className="flex items-center justify-end gap-1.5">Valor{sortConfig.key === 'amount' ? (sortConfig.direction === 'ascending' ? <ArrowUp size={12} className="text-mcsystem-500"/> : <ArrowDown size={12} className="text-mcsystem-500"/>) : <ArrowUpDown size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity"/>}</div></th>
-                            <th className="p-4 text-right whitespace-nowrap" title="Soma dos lançamentos filtrados em ordem de vencimento, incluindo os ainda não pagos">Saldo acum.</th>
+                            <th className="p-4 text-right whitespace-nowrap" title="Saldo dos lançamentos filtrados acumulado em ordem de vencimento, incluindo os ainda não pagos. Cada linha difere da vizinha pelo próprio valor — ordene por Vencimento para ler a coluna de cima a baixo.">Saldo acum.</th>
                             <th className="p-4 text-center">Ações</th>
                           </tr>
                       </thead>

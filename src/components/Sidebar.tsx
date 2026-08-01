@@ -4,6 +4,7 @@ import React from 'react';
 import {
   Users, UserCog, LogOut, List, Bell, Database, ChevronsLeft, Package, Zap,
   LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Landmark, Tags, FileCheck, FileSignature, Wallet,
+  FileBarChart,
 } from 'lucide-react';
 import { User } from '../types';
 import { isAsaasEnabled } from '../config';
@@ -44,6 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
     {
       section: 'Relatórios',
       items: [
+        { id: 'reports', label: 'Relatórios', icon: FileBarChart, perm: 'finance' },
         { id: 'dre', label: 'DRE Gerencial', icon: FileText, perm: 'finance' },
         { id: 'cashflow', label: 'Fluxo de Caixa', icon: TrendingUp, perm: 'finance' },
       ],

@@ -2168,6 +2168,16 @@ const newRecords: FinancialRecord[] = [];
         });
       }
 
+      // Saldo acumulado: sempre calculado em ordem de vencimento, mesmo quando a
+      // tabela está ordenada por outra coluna — um acumulado que segue a
+      // ordenação da tela não significaria nada.
+      const runningBalance = new Map<string, number>();
+      let acc = 0;
+      [...filtered]
+        .sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '') || a.id.localeCompare(b.id))
+        .forEach(r => { acc += (r.amount || 0); runningBalance.set(r.id, acc); });
+      const finalBalance = acc;
+
       const allSelected = filtered.length > 0 && selectedRecordIds.size === filtered.length;
       return (
           <div className="space-y-4 animate-in fade-in">
@@ -2204,12 +2214,14 @@ const newRecords: FinancialRecord[] = [];
                             <th className="p-4 cursor-pointer group hover:bg-gray-100" onClick={() => requestSort('description')}><div className="flex items-center gap-1.5">Descrição{sortConfig.key === 'description' ? (sortConfig.direction === 'ascending' ? <ArrowUp size={12} className="text-mcsystem-500"/> : <ArrowDown size={12} className="text-mcsystem-500"/>) : <ArrowUpDown size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity"/>}</div></th>
                             <th className="p-4 cursor-pointer group hover:bg-gray-100" onClick={() => requestSort('status')}><div className="flex items-center gap-1.5">Status{sortConfig.key === 'status' ? (sortConfig.direction === 'ascending' ? <ArrowUp size={12} className="text-mcsystem-500"/> : <ArrowDown size={12} className="text-mcsystem-500"/>) : <ArrowUpDown size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity"/>}</div></th>
                             <th className="p-4 text-right cursor-pointer group hover:bg-gray-100" onClick={() => requestSort('amount')}><div className="flex items-center justify-end gap-1.5">Valor{sortConfig.key === 'amount' ? (sortConfig.direction === 'ascending' ? <ArrowUp size={12} className="text-mcsystem-500"/> : <ArrowDown size={12} className="text-mcsystem-500"/>) : <ArrowUpDown size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity"/>}</div></th>
+                            <th className="p-4 text-right whitespace-nowrap" title="Soma dos lançamentos filtrados em ordem de vencimento, incluindo os ainda não pagos">Saldo acum.</th>
                             <th className="p-4 text-center">Ações</th>
                           </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                           {filtered.map(r => {
                               const realValue = r.amount; const isPositiveFlow = realValue >= 0; const isSelected = selectedRecordIds.has(r.id);
+                              const saldo = runningBalance.get(r.id) ?? 0;
 
                               return (
                               <tr key={r.id} className={`group transition-colors ${isSelected ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`}>
@@ -2221,10 +2233,18 @@ const newRecords: FinancialRecord[] = [];
                                   <td className="p-4 font-medium text-gray-800">{r.description}{r.companyId && (<div className="flex items-center mt-1 text-[10px] text-gray-500 font-normal"><Building size={10} className="mr-1" />{companies.find(c => c.id === r.companyId)?.name}</div>)}</td>
                                   <td className="p-4"><div className="relative group/status inline-block"><select value={r.status} onChange={(e) => handleStatusChange(r.id, e.target.value as TransactionStatus)} className={`appearance-none pl-3 pr-8 py-1.5 rounded-full text-xs font-bold border-0 cursor-pointer outline-none focus:ring-2 focus:ring-offset-1 transition-all ${r.status === TransactionStatus.PAID ? 'bg-green-100 text-green-700 focus:ring-green-500' : r.status === TransactionStatus.OVERDUE ? 'bg-red-100 text-red-700 focus:ring-red-500' : 'bg-yellow-100 text-yellow-700 focus:ring-yellow-500'}`}><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.PAID}>Pago</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select><ChevronDown size={12} className={`absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${r.status === TransactionStatus.PAID ? 'text-green-700' : r.status === TransactionStatus.OVERDUE ? 'text-red-700' : 'text-yellow-700'}`} /></div></td>
                                   <td className="p-4 text-right"><div className="flex items-center justify-end gap-2"><span className={`font-bold ${isPositiveFlow ? 'text-green-600' : 'text-red-500'}`}>{isPositiveFlow ? '+' : ''} R$ {Math.abs(realValue || 0).toLocaleString('pt-BR')}</span></div></td>
+                                  <td className={`p-4 text-right font-semibold whitespace-nowrap ${saldo < 0 ? 'text-red-600' : 'text-gray-700'}`}>R$ {saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                   <td className="p-4 text-center"><div className="flex justify-center space-x-2"><button onClick={(e) => handleEditTransaction(e, r)} className="flex items-center px-2.5 py-1 bg-mcsystem-50 text-mcsystem-600 rounded text-xs font-medium hover:bg-mcsystem-100 transition-colors"><Pencil size={12} className="mr-1"/> Editar</button><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(e, r.id); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors relative z-10"><Trash2 size={16} className="pointer-events-none" /></button></div></td>
                               </tr>
                           )})}
-                          {filtered.length === 0 && <tr><td colSpan={9} className="p-8 text-center text-gray-400">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
+                          {filtered.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-gray-400">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
+                          {filtered.length > 0 && (
+                            <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
+                              <td colSpan={8} className="p-4 text-right text-gray-600 uppercase text-xs tracking-wider">Saldo do período filtrado</td>
+                              <td className={`p-4 text-right whitespace-nowrap ${finalBalance < 0 ? 'text-red-600' : 'text-green-600'}`}>R$ {finalBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                              <td></td>
+                            </tr>
+                          )}
                       </tbody>
                   </table>
               </div>
@@ -2572,6 +2592,95 @@ const newRecords: FinancialRecord[] = [];
                                         </div>
                                         )}
                                     </div>
+                                </div>
+
+                                {/* Conta de destino do pagamento — fica no lançamento
+                                    para não precisar caçar a chave PIX na hora de pagar. */}
+                                <div className="p-4 bg-gray-50/70 rounded-xl border border-gray-100">
+                                    <div className="flex items-center justify-between mb-2.5">
+                                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide">Conta para pagamento</label>
+                                        <select
+                                            value={newRecord.payment_account?.type || ''}
+                                            onChange={e => {
+                                                const type = e.target.value as 'PIX' | 'BANK' | '';
+                                                setNewRecord({ ...newRecord, payment_account: type ? { ...(newRecord.payment_account || {}), type } : undefined });
+                                            }}
+                                            className="text-xs px-2 py-1.5 border border-gray-200 rounded-lg bg-white"
+                                        >
+                                            <option value="">Não informar</option>
+                                            <option value="PIX">PIX</option>
+                                            <option value="BANK">Conta bancária</option>
+                                        </select>
+                                    </div>
+
+                                    {newRecord.payment_account?.type === 'PIX' && (
+                                        <div className="space-y-2">
+                                            <div className="flex gap-2">
+                                                <select
+                                                    value={newRecord.payment_account?.pixKeyType || 'CNPJ'}
+                                                    onChange={e => setNewRecord({ ...newRecord, payment_account: { ...newRecord.payment_account, pixKeyType: e.target.value as any } })}
+                                                    className="px-2 py-2 border border-gray-200 rounded-lg text-sm bg-white w-32"
+                                                >
+                                                    <option value="CNPJ">CNPJ</option>
+                                                    <option value="CPF">CPF</option>
+                                                    <option value="EMAIL">E-mail</option>
+                                                    <option value="PHONE">Telefone</option>
+                                                    <option value="RANDOM">Aleatória</option>
+                                                </select>
+                                                <input
+                                                    type="text" placeholder="Chave PIX"
+                                                    value={newRecord.payment_account?.pixKey || ''}
+                                                    onChange={e => setNewRecord({ ...newRecord, payment_account: { ...newRecord.payment_account, pixKey: e.target.value } })}
+                                                    className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                                                />
+                                            </div>
+                                            <input
+                                                type="text" placeholder="Favorecido (opcional)"
+                                                value={newRecord.payment_account?.holder || ''}
+                                                onChange={e => setNewRecord({ ...newRecord, payment_account: { ...newRecord.payment_account, holder: e.target.value } })}
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                                            />
+                                        </div>
+                                    )}
+
+                                    {newRecord.payment_account?.type === 'BANK' && (
+                                        <div className="space-y-2">
+                                            <input
+                                                type="text" placeholder="Banco (ex: 341 - Itaú)"
+                                                value={newRecord.payment_account?.bank || ''}
+                                                onChange={e => setNewRecord({ ...newRecord, payment_account: { ...newRecord.payment_account, bank: e.target.value } })}
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                                            />
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <input
+                                                    type="text" placeholder="Agência"
+                                                    value={newRecord.payment_account?.agency || ''}
+                                                    onChange={e => setNewRecord({ ...newRecord, payment_account: { ...newRecord.payment_account, agency: e.target.value } })}
+                                                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                                                />
+                                                <input
+                                                    type="text" placeholder="Conta c/ dígito"
+                                                    value={newRecord.payment_account?.account || ''}
+                                                    onChange={e => setNewRecord({ ...newRecord, payment_account: { ...newRecord.payment_account, account: e.target.value } })}
+                                                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                                                />
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <input
+                                                    type="text" placeholder="Favorecido"
+                                                    value={newRecord.payment_account?.holder || ''}
+                                                    onChange={e => setNewRecord({ ...newRecord, payment_account: { ...newRecord.payment_account, holder: e.target.value } })}
+                                                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                                                />
+                                                <input
+                                                    type="text" placeholder="CPF/CNPJ do favorecido"
+                                                    value={newRecord.payment_account?.document || ''}
+                                                    onChange={e => setNewRecord({ ...newRecord, payment_account: { ...newRecord.payment_account, document: e.target.value } })}
+                                                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* RESTORED SPLIT UI */}

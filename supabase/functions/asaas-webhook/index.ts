@@ -6,6 +6,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const WEBHOOK_TOKEN = Deno.env.get('ASAAS_WEBHOOK_TOKEN') || '';
+// Conta Asaas única — as contas pagas não trazem tenant, então vêm daqui.
+const ASAAS_TENANT_ID = Deno.env.get('ASAAS_TENANT_ID') || '';
 
 Deno.serve(async (req: Request) => {
   try {
@@ -59,6 +61,47 @@ Deno.serve(async (req: Request) => {
       if (update) {
         await admin.from('financial_records').update(update).eq('asaas_payment_id', payment.id);
       }
+    }
+
+    // ---- Contas pagas pelo Asaas (eventos BILL_*) ----
+    // Chegam com body.bill (e não body.payment), por isso passavam batido.
+    const bill = body?.bill;
+    if (bill?.id && ASAAS_TENANT_ID) {
+      const status = bill.status === 'PAID' ? 'Pago'
+        : ['FAILED', 'CANCELLED', 'REFUNDED'].includes(bill.status) ? null
+        : 'Pendente';
+
+      if (status === null) {
+        // Pagamento não aconteceu — some com o lançamento se ele existir.
+        await admin.from('financial_records').delete().eq('asaas_bill_id', bill.id);
+      } else {
+        const { data: existing } = await admin.from('financial_records')
+          .select('id').eq('asaas_bill_id', bill.id).maybeSingle();
+
+        if (existing) {
+          // Já classificado pelo usuário: só acompanha status e baixa.
+          await admin.from('financial_records')
+            .update({ status, paymentDate: bill.paymentDate || null })
+            .eq('asaas_bill_id', bill.id);
+        } else {
+          const who = bill.beneficiaryName || bill.companyName || 'Conta paga pelo Asaas';
+          await admin.from('financial_records').insert({
+            id: `fb${bill.id}`,
+            tenant_id: ASAAS_TENANT_ID,
+            description: bill.description ? `${who} — ${bill.description}` : who,
+            amount: -Math.abs(Number(bill.value) || 0),
+            type: 'Despesa',
+            status,
+            dueDate: bill.dueDate || bill.scheduleDate || null,
+            competenceDate: bill.dueDate || bill.scheduleDate || null,
+            paymentDate: bill.paymentDate || null,
+            category: 'A CLASSIFICAR',
+            needsValidation: true,
+            asaas_bill_id: bill.id,
+          });
+        }
+      }
+      await admin.from('asaas_webhook_events').update({ processed: true }).eq('payload->>id', body?.id);
     }
 
     return new Response(JSON.stringify({ received: true }), {

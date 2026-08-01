@@ -28,6 +28,7 @@ const PAGE_TITLES: Record<string, string> = {
   payables: 'Contas a Pagar',
   contracts: 'Contratos',
   validation: 'Validação',
+  reports: 'Relatórios',
   dre: 'DRE Gerencial',
   cashflow: 'Fluxo de Caixa',
   'cash-evolution': 'Evolução do Caixa',
@@ -42,6 +43,7 @@ const PAGE_TITLES: Record<string, string> = {
 import { LoginScreen } from './components/LoginScreen';
 import { LandingPage } from './components/LandingPage';
 import { SettingsModule } from './components/SettingsModule';
+import { ReportsModule } from './components/ReportsModule';
 import { ListsModule } from './components/ListsModule';
 import { AlertsModule } from './components/AlertsModule';
 import { DataExportModule } from './components/DataExportModule';
@@ -581,6 +583,11 @@ const handleAddUser = async (newUser: User) => {
             products={products}
             currentUser={user}
           />
+        ) : <AccessDenied />;
+
+      case 'reports':
+        return hasPermission('finance') ? (
+          <ReportsModule records={financeRecords} companies={companies} products={products} />
         ) : <AccessDenied />;
 
       case 'companies':

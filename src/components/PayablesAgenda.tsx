@@ -3,6 +3,7 @@ import { FinancialRecord, Company, ChartOfAccount, Bank, TransactionStatus } fro
 import { supabase } from '../lib/supabaseClient';
 import {
   AlertTriangle, CalendarClock, CheckCircle2, Search, ChevronDown, Loader2, Wallet, Landmark,
+  Copy, Check,
 } from 'lucide-react';
 
 interface PayablesAgendaProps {
@@ -77,6 +78,36 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
     }
   };
 
+  /** Dados de pagamento com botão de copiar — é o que se usa na hora de pagar. */
+  const PaymentAccountLine: React.FC<{ account?: FinancialRecord['payment_account'] }> = ({ account }) => {
+    const [copied, setCopied] = useState(false);
+    if (!account?.type) return null;
+
+    const value = account.type === 'PIX'
+      ? (account.pixKey || '')
+      : [account.bank, account.agency && `Ag. ${account.agency}`, account.account && `C/C ${account.account}`].filter(Boolean).join(' · ');
+    if (!value) return null;
+
+    const copy = () => {
+      navigator.clipboard?.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    };
+
+    return (
+      <div className="text-xs mt-1 flex items-center gap-1.5 flex-wrap">
+        <span className="bg-mcsystem-50 text-mcsystem-700 px-1.5 py-0.5 rounded font-medium">
+          {account.type === 'PIX' ? 'PIX' : 'TED'}
+        </span>
+        <span className="text-gray-600 font-mono truncate max-w-[280px]" title={value}>{value}</span>
+        {account.holder && <span className="text-gray-400">· {account.holder}</span>}
+        <button onClick={copy} className="text-gray-400 hover:text-mcsystem-600 transition-colors" title="Copiar">
+          {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
+        </button>
+      </div>
+    );
+  };
+
   const Row: React.FC<{ r: FinancialRecord; late?: boolean }> = ({ r, late }) => {
     const lateDays = Math.max(0, -daysBetween(r.dueDate));
     const cat = rubricName(r.rubricId) || r.category;
@@ -92,6 +123,7 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
             {companyName(r.companyId) && <span>{companyName(r.companyId)}</span>}
             {bank && <span className="inline-flex items-center gap-1"><Landmark size={10} /> {bank}</span>}
           </div>
+          <PaymentAccountLine account={r.payment_account} />
         </div>
 
         <div className="flex items-center gap-4 flex-shrink-0">

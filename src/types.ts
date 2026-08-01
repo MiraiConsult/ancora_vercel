@@ -45,6 +45,18 @@ export interface Company {
   asaas_customer_id?: string;    // vínculo com o customer no Asaas
 }
 
+/** Dados de destino do pagamento, guardados no próprio lançamento. */
+export interface PaymentAccount {
+  type?: 'PIX' | 'BANK';
+  pixKey?: string;
+  pixKeyType?: 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'RANDOM';
+  bank?: string;
+  agency?: string;
+  account?: string;
+  holder?: string;
+  document?: string;
+}
+
 export enum TransactionType {
   INCOME = 'Receita',
   EXPENSE = 'Despesa'
@@ -78,6 +90,8 @@ export interface FinancialRecord {
   split_revenue?: { revenue_type_id?: string; product_id?: string; amount: number; }[];
   /** Produto/rateio definido na mão — o sync do Asaas não sobrescreve. */
   product_manual?: boolean;
+  /** Onde o dinheiro vai ser pago (chave PIX ou banco/agência/conta). */
+  payment_account?: PaymentAccount;
   // Integração Asaas
   asaas_payment_id?: string;
   asaas_invoice_url?: string;

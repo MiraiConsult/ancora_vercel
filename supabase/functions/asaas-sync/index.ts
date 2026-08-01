@@ -70,6 +70,14 @@ function mapStatus(s: string): string {
   return 'Pendente';
 }
 
+// Contas pagas pelo Asaas (boletos/tributos). Vira despesa no sistema.
+// FAILED/CANCELLED não geram lançamento: dinheiro nenhum saiu.
+function mapBillStatus(s: string): string | null {
+  if (s === 'PAID') return 'Pago';
+  if (['FAILED', 'CANCELLED', 'REFUNDED'].includes(s)) return null;
+  return 'Pendente';
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -110,7 +118,7 @@ Deno.serve(async (req: Request) => {
       throw new Error('Não autorizado.');
     }
 
-    const counts = { customers_new: 0, customers_linked: 0, payments: 0, subscriptions: 0 };
+    const counts = { customers_new: 0, customers_linked: 0, payments: 0, subscriptions: 0, bills: 0 };
 
     // ---- 1) Customers ----
     const asaasCustomers = await asaasList('/customers');
@@ -307,6 +315,64 @@ Deno.serve(async (req: Request) => {
       const { error } = await admin.from('subscriptions').upsert(subRows, { onConflict: 'asaas_id' });
       if (error) throw new Error('Erro ao gravar assinaturas: ' + error.message);
       counts.subscriptions = subRows.length;
+    }
+
+    // ---- 4) Bills (contas pagas pelo Asaas) ----
+    // Saídas de dinheiro: boletos e tributos pagos pela conta Asaas. Sem isso,
+    // o extrato do Asaas e o caixa do sistema não fecham.
+    // A rubrica não dá para adivinhar pelo beneficiário, então entra como
+    // pendente de validação para o usuário classificar.
+    let bills: any[] = [];
+    try {
+      bills = await asaasList('/bill');
+    } catch (e) {
+      // Conta sem permissão de "contas a pagar" não deve derrubar o sync inteiro.
+      console.warn('bills:', String((e as Error)?.message || e));
+    }
+    const billRows = bills.map((b: any) => {
+      const status = mapBillStatus(b.status);
+      if (!status) return null;
+      const who = b.beneficiaryName || b.companyName || 'Conta paga pelo Asaas';
+      return {
+        id: `fb${b.id}`,
+        tenant_id: tenantId,
+        description: b.description ? `${who} — ${b.description}` : who,
+        amount: -Math.abs(Number(b.value) || 0),
+        type: 'Despesa',
+        status,
+        dueDate: b.dueDate || b.scheduleDate || null,
+        competenceDate: b.dueDate || b.scheduleDate || null,
+        paymentDate: b.paymentDate || null,
+        category: 'A CLASSIFICAR',
+        needsValidation: true,
+        asaas_bill_id: b.id,
+      };
+    }).filter(Boolean);
+
+    if (billRows.length) {
+      // Só insere o que ainda não existe: reescrever apagaria a rubrica que o
+      // usuário já tiver classificado na tela de Validação.
+      const { data: known } = await admin.from('financial_records')
+        .select('asaas_bill_id, status, paymentDate')
+        .eq('tenant_id', tenantId).not('asaas_bill_id', 'is', null);
+      const byId = new Map((known || []).map((r: any) => [r.asaas_bill_id, r]));
+
+      const toInsert = billRows.filter((r: any) => !byId.has(r.asaas_bill_id));
+      if (toInsert.length) {
+        const { error } = await admin.from('financial_records').insert(toInsert);
+        if (error) throw new Error('Erro ao gravar contas pagas: ' + error.message);
+      }
+      // Nas que já existem, só o status/baixa acompanha o Asaas.
+      for (const r of billRows as any[]) {
+        const prev = byId.get(r.asaas_bill_id);
+        if (!prev) continue;
+        if (prev.status !== r.status || prev.paymentDate !== r.paymentDate) {
+          await admin.from('financial_records')
+            .update({ status: r.status, paymentDate: r.paymentDate })
+            .eq('asaas_bill_id', r.asaas_bill_id);
+        }
+      }
+      counts.bills = billRows.length;
     }
 
     return new Response(JSON.stringify({ success: true, ...counts }), {

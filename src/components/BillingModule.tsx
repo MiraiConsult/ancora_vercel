@@ -8,9 +8,11 @@ import { supabase } from '../lib/supabaseClient';
 import {
   FileText, Repeat, Plus, X, Save, Search, ExternalLink, Loader2,
   CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown,
-  Pencil, Trash2, CalendarClock,
+  Pencil, Trash2, CalendarClock, ChevronDown, ChevronRight, Wallet,
 } from 'lucide-react';
 import { ReceivablesAgenda } from './ReceivablesAgenda';
+import { BillingProjection } from './BillingProjection';
+import { CYCLE_OPTIONS, cycleLabel } from '../lib/cycles';
 
 interface BillingModuleProps {
   companies: Company[];
@@ -31,34 +33,55 @@ const BILLING_TYPES = [
   { value: 'CREDIT_CARD', label: 'Cartão de crédito' },
 ];
 
-const CYCLES = [
-  { value: 'WEEKLY', label: 'Semanal' },
-  { value: 'MONTHLY', label: 'Mensal' },
-  { value: 'QUARTERLY', label: 'Trimestral' },
-  { value: 'SEMIANNUALLY', label: 'Semestral' },
-  { value: 'YEARLY', label: 'Anual' },
-];
-
 const formatBRL = (v: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * Cobrança avulsa é exceção: quase tudo aqui nasce de uma assinatura. Por isso a
+ * lista é uma só — a assinatura é a linha, e as cobranças que ela gerou ficam
+ * dentro dela; vira linha própria só a cobrança sem assinatura.
+ */
+type RowFilter = 'all' | 'sub' | 'avulsa' | 'overdue' | 'inactive';
+
+interface BillingRow {
+  id: string;
+  kind: 'sub' | 'charge';
+  sub?: Subscription;
+  charge?: FinancialRecord;
+  charges: FinancialRecord[];
+  client: string;
+  description: string;
+  productLabel: string;
+  value: number;
+  cycle: string;
+  date: string;
+  status: string;
+  paid: number;
+  overdue: number;
+  active: boolean;
+}
 
 export const BillingModule: React.FC<BillingModuleProps> = ({
   companies, products, financeRecords, setFinanceRecords,
   subscriptions, setSubscriptions, revenueTypes, currentUser, onRefresh,
 }) => {
-  const [tab, setTab] = useState<'AGENDA' | 'CHARGES' | 'SUBSCRIPTIONS'>('AGENDA');
+  const [tab, setTab] = useState<'AGENDA' | 'BILLING'>('AGENDA');
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<null | 'charge' | 'subscription'>(null);
   const [submitting, setSubmitting] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [sortField, setSortField] = useState('dueDate');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'Pendente' | 'Pago' | 'Atrasado'>('all');
+  const [sortField, setSortField] = useState('date');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [rowFilter, setRowFilter] = useState<RowFilter>('all');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const changeTab = (t: 'AGENDA' | 'CHARGES' | 'SUBSCRIPTIONS') => {
-    setTab(t);
-    if (t !== 'AGENDA') setSortField(t === 'CHARGES' ? 'dueDate' : 'next_due_date');
-  };
+  const toggleExpand = (id: string) => setExpanded(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const requestSort = (field: string) => {
     if (sortField === field) {
@@ -145,60 +168,107 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
     [financeRecords],
   );
 
-  // Faturamento por produto (a partir das cobranças Asaas)
-  const revenueByProduct = useMemo(() => {
-    const map = new Map<string, { name: string; count: number; total: number; recebido: number }>();
+  /**
+   * Lista única: cada assinatura vira uma linha com as cobranças que ela gerou
+   * dentro; vira linha própria só a cobrança que não pertence a assinatura
+   * nenhuma (a de fato avulsa).
+   */
+  const rows = useMemo<BillingRow[]>(() => {
+    const today = todayISO();
+    const chargesBySub = new Map<string, FinancialRecord[]>();
     for (const r of charges) {
-      const key = r.product_id || '__none__';
-      const name = productName(r.product_id) || 'Sem produto';
-      const cur = map.get(key) || { name, count: 0, total: 0, recebido: 0 };
-      cur.count++;
-      cur.total += r.amount || 0;
-      if ((r.status as string) === 'Pago') cur.recebido += r.amount || 0;
-      map.set(key, cur);
+      const k = r.asaas_subscription_id;
+      if (!k) continue;
+      if (!chargesBySub.has(k)) chargesBySub.set(k, []);
+      chargesBySub.get(k)!.push(r);
     }
-    return Array.from(map.values()).sort((a, b) => b.total - a.total);
-  }, [charges, products]);
+    const isOverdue = (r: FinancialRecord) => (r.status as string) !== 'Pago' && !!r.dueDate && r.dueDate < today;
+    const productLabelOf = (ids: (string | undefined)[]) =>
+      ids.map(id => productName(id) || '').filter(Boolean).join(' ');
 
-  const filteredCharges = useMemo(() => {
+    const subRows: BillingRow[] = subscriptions.map(s => {
+      const list = (chargesBySub.get(s.asaas_id || '') || [])
+        .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || ''));
+      const active = (s.status || 'ACTIVE').toUpperCase() === 'ACTIVE';
+      return {
+        id: `s:${s.id}`,
+        kind: 'sub',
+        sub: s,
+        charges: list,
+        client: clientName(s.client_id),
+        description: s.description || '',
+        productLabel: productLabelOf(s.split_products?.length
+          ? s.split_products.map(p => p.product_id)
+          : [s.product_id]),
+        value: s.value || 0,
+        cycle: cycleLabel(s.cycle),
+        date: s.next_due_date || '',
+        status: active ? 'Ativa' : 'Inativa',
+        paid: list.filter(r => (r.status as string) === 'Pago').reduce((sum, r) => sum + (r.amount || 0), 0),
+        overdue: list.filter(isOverdue).length,
+        active,
+      };
+    });
+
+    const knownSubs = new Set(subscriptions.map(s => s.asaas_id).filter(Boolean) as string[]);
+    const looseRows: BillingRow[] = charges
+      .filter(r => !r.asaas_subscription_id || !knownSubs.has(r.asaas_subscription_id))
+      .map(r => ({
+        id: `c:${r.id}`,
+        kind: 'charge',
+        charge: r,
+        charges: [],
+        client: clientName(r.companyId),
+        description: r.description || '',
+        productLabel: productLabelOf(r.split_revenue?.length
+          ? r.split_revenue.map(s => s.product_id)
+          : [r.product_id]),
+        value: r.amount || 0,
+        cycle: 'Avulsa',
+        date: r.dueDate || '',
+        status: (r.status as string) || 'Pendente',
+        paid: (r.status as string) === 'Pago' ? (r.amount || 0) : 0,
+        overdue: isOverdue(r) ? 1 : 0,
+        active: (r.status as string) !== 'Pago',
+      }));
+
+    return [...subRows, ...looseRows];
+  }, [charges, subscriptions, companies, products]);
+
+  const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = charges.filter(r => {
-      if (statusFilter !== 'all' && (r.status as string) !== statusFilter) return false;
+    const list = rows.filter(row => {
+      if (rowFilter === 'sub' && row.kind !== 'sub') return false;
+      if (rowFilter === 'avulsa' && row.kind !== 'charge') return false;
+      if (rowFilter === 'overdue' && row.overdue === 0) return false;
+      if (rowFilter === 'inactive' && (row.kind !== 'sub' || row.active)) return false;
       if (!q) return true;
-      return (r.description || '').toLowerCase().includes(q)
-        || clientName(r.companyId).toLowerCase().includes(q)
-        || (productName(r.product_id) || '').toLowerCase().includes(q);
+      return row.client.toLowerCase().includes(q)
+        || row.description.toLowerCase().includes(q)
+        || row.productLabel.toLowerCase().includes(q);
     });
     const dir = sortDir === 'asc' ? 1 : -1;
-    const key = (r: FinancialRecord): string | number => {
+    const key = (row: BillingRow): string | number => {
       switch (sortField) {
-        case 'amount': return r.amount || 0;
-        case 'client': return clientName(r.companyId).toLowerCase();
-        case 'product': return (productName(r.product_id) || '').toLowerCase();
-        case 'status': return (r.status as string) || '';
-        default: return r.dueDate || '';
+        case 'value': return row.value;
+        case 'client': return row.client.toLowerCase();
+        case 'product': return row.productLabel.toLowerCase();
+        case 'status': return row.status;
+        case 'cycle': return row.cycle;
+        default: return row.date || '9999-99-99';
       }
     };
     return [...list].sort((a, b) => { const ka = key(a), kb = key(b); return ka < kb ? -dir : ka > kb ? dir : 0; });
-  }, [charges, search, statusFilter, sortField, sortDir]);
+  }, [rows, search, rowFilter, sortField, sortDir]);
 
-  const filteredSubs = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const list = subscriptions.filter(s => !q
-      || (s.description || '').toLowerCase().includes(q)
-      || clientName(s.client_id).toLowerCase().includes(q)
-      || (productName(s.product_id) || '').toLowerCase().includes(q));
-    const dir = sortDir === 'asc' ? 1 : -1;
-    const key = (s: Subscription): string | number => {
-      switch (sortField) {
-        case 'value': case 'amount': return s.value || 0;
-        case 'client': return clientName(s.client_id).toLowerCase();
-        case 'product': return (productName(s.product_id) || '').toLowerCase();
-        default: return s.next_due_date || '';
-      }
-    };
-    return [...list].sort((a, b) => { const ka = key(a), kb = key(b); return ka < kb ? -dir : ka > kb ? dir : 0; });
-  }, [subscriptions, search, sortField, sortDir]);
+  const listTotals = useMemo(() => filteredRows.reduce(
+    (acc, row) => ({
+      paid: acc.paid + row.paid,
+      overdue: acc.overdue + row.overdue,
+      subs: acc.subs + (row.kind === 'sub' && row.active ? 1 : 0),
+    }),
+    { paid: 0, overdue: 0, subs: 0 },
+  ), [filteredRows]);
 
   const statusBadge = (status?: string) => {
     const map: Record<string, { cls: string; icon: React.ReactNode; label: string }> = {
@@ -221,9 +291,10 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         <div className="flex items-start gap-4">
           <div className="bg-mcsystem-100 p-3 rounded-xl text-mcsystem-500"><Zap size={28} /></div>
           <div>
-            <h2 className="text-2xl font-bold text-mcsystem-900">Cobranças (Asaas)</h2>
+            <h2 className="text-2xl font-bold text-mcsystem-900">Assinaturas e cobranças (Asaas)</h2>
             <p className="text-gray-500 mt-1 text-sm max-w-xl">
-              Gere cobranças e assinaturas via Asaas. O status é atualizado automaticamente quando o cliente paga.
+              Tudo em uma lista só: a assinatura é a linha e as cobranças que ela gerou ficam dentro.
+              O status é atualizado automaticamente quando o cliente paga.
             </p>
           </div>
         </div>
@@ -237,10 +308,17 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
             <RefreshCw size={18} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Sincronizando...' : 'Sincronizar'}
           </button>
           <button
-            onClick={() => setModal(tab === 'SUBSCRIPTIONS' ? 'subscription' : 'charge')}
+            onClick={() => setModal('charge')}
+            className="px-4 py-3 bg-white text-mcsystem-700 border border-mcsystem-200 rounded-xl font-semibold hover:bg-mcsystem-50 transition-all flex items-center justify-center gap-2"
+            title="Cobrança única, fora de qualquer assinatura"
+          >
+            <FileText size={18} /> Cobrança avulsa
+          </button>
+          <button
+            onClick={() => setModal('subscription')}
             className="px-5 py-3 bg-mcsystem-900 text-white rounded-xl font-semibold hover:bg-mcsystem-800 transition-all shadow-md flex items-center justify-center gap-2"
           >
-            <Plus size={18} /> {tab === 'SUBSCRIPTIONS' ? 'Nova Assinatura' : 'Nova Cobrança'}
+            <Plus size={18} /> Nova assinatura
           </button>
         </div>
       </div>
@@ -248,64 +326,65 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
       {/* Tabs */}
       <div className="flex gap-2">
         <button
-          onClick={() => changeTab('AGENDA')}
+          onClick={() => setTab('AGENDA')}
           className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${tab === 'AGENDA' ? 'bg-mcsystem-900 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
         >
           <CalendarClock size={16} /> Agenda de recebimentos
         </button>
         <button
-          onClick={() => changeTab('CHARGES')}
-          className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${tab === 'CHARGES' ? 'bg-mcsystem-900 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
+          onClick={() => setTab('BILLING')}
+          className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${tab === 'BILLING' ? 'bg-mcsystem-900 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
         >
-          <FileText size={16} /> Cobranças avulsas
-        </button>
-        <button
-          onClick={() => changeTab('SUBSCRIPTIONS')}
-          className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${tab === 'SUBSCRIPTIONS' ? 'bg-mcsystem-900 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
-        >
-          <Repeat size={16} /> Assinaturas
+          <Repeat size={16} /> Assinaturas e cobranças
         </button>
       </div>
-
-      {/* Busca + ordenação */}
-      {tab !== 'AGENDA' && (
-      <div className="flex flex-col md:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar por cliente, produto ou descrição..."
-            className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-200 focus:border-mcsystem-500 focus:ring-2 focus:ring-mcsystem-100 outline-none"
-          />
-        </div>
-        {tab === 'CHARGES' && (
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value as any)}
-            className="px-3 py-3 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 focus:border-mcsystem-500 outline-none"
-            title="Filtrar por status"
-          >
-            <option value="all">Todos os status</option>
-            <option value="Pendente">Pendente</option>
-            <option value="Pago">Pago</option>
-            <option value="Atrasado">Atrasado</option>
-          </select>
-        )}
-      </div>
-      )}
 
       {/* Content */}
       {tab === 'AGENDA' ? (
         <ReceivablesAgenda records={financeRecords} companies={companies} products={products} />
-      ) : tab === 'CHARGES' ? (
-        <>
-          {revenueByProduct.length > 0 && <RevenueByProduct rows={revenueByProduct} />}
-          <ChargeList charges={filteredCharges} clientName={clientName} productName={productName} statusBadge={statusBadge} onEdit={setEditCharge} onDelete={handleDeleteCharge} {...sortProps} />
-        </>
       ) : (
-        <SubscriptionList subs={filteredSubs} clientName={clientName} productName={productName} onEdit={setEditSub} onDelete={handleDeleteSub} {...sortProps} />
+        <>
+          <BillingProjection charges={charges} subscriptions={subscriptions} products={products} />
+
+          <div className="flex flex-col md:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Buscar por cliente, produto ou descrição..."
+                className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-200 focus:border-mcsystem-500 focus:ring-2 focus:ring-mcsystem-100 outline-none"
+              />
+            </div>
+            <select
+              value={rowFilter}
+              onChange={e => setRowFilter(e.target.value as RowFilter)}
+              className="px-3 py-3 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 focus:border-mcsystem-500 outline-none"
+              title="Filtrar a lista"
+            >
+              <option value="all">Tudo</option>
+              <option value="sub">Só assinaturas</option>
+              <option value="avulsa">Só cobranças avulsas</option>
+              <option value="overdue">Com atraso</option>
+              <option value="inactive">Assinaturas inativas</option>
+            </select>
+          </div>
+
+          <BillingList
+            rows={filteredRows}
+            totals={listTotals}
+            expanded={expanded}
+            onToggle={toggleExpand}
+            productName={productName}
+            statusBadge={statusBadge}
+            onEditSub={setEditSub}
+            onDeleteSub={handleDeleteSub}
+            onEditCharge={setEditCharge}
+            onDeleteCharge={handleDeleteCharge}
+            {...sortProps}
+          />
+        </>
       )}
 
       {editCharge && (
@@ -388,14 +467,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   );
 };
 
-// ---------- Lists ----------
-
-const EmptyState: React.FC<{ icon: React.ReactNode; text: string }> = ({ icon, text }) => (
-  <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-16 text-center text-gray-400">
-    <div className="mx-auto mb-4 opacity-40 flex justify-center">{icon}</div>
-    <p className="font-medium">{text}</p>
-  </div>
-);
+// ---------- Lista ----------
 
 interface SortProps { sortField: string; sortDir: 'asc' | 'desc'; onSort: (f: string) => void }
 
@@ -413,154 +485,205 @@ const SortTh: React.FC<{ label: string; field: string; align?: 'left' | 'right' 
   );
 };
 
-const RevenueByProduct: React.FC<{ rows: { name: string; count: number; total: number; recebido: number }[] }> = ({ rows }) => {
-  const totalGeral = rows.reduce((s, r) => s + r.total, 0);
-  const recebidoGeral = rows.reduce((s, r) => s + r.recebido, 0);
+interface BillingListProps extends SortProps {
+  rows: BillingRow[];
+  totals: { paid: number; overdue: number; subs: number };
+  expanded: Set<string>;
+  onToggle: (id: string) => void;
+  productName: (id?: string) => string | null;
+  statusBadge: (s?: string) => React.ReactNode;
+  onEditSub: (s: Subscription) => void;
+  onDeleteSub: (s: Subscription) => void;
+  onEditCharge: (r: FinancialRecord) => void;
+  onDeleteCharge: (r: FinancialRecord) => void;
+}
+
+const BillingList: React.FC<BillingListProps> = ({
+  rows, totals, expanded, onToggle, productName, statusBadge,
+  onEditSub, onDeleteSub, onEditCharge, onDeleteCharge, sortField, sortDir, onSort,
+}) => {
+  const sp = { sortField, sortDir, onSort };
+  const today = todayISO();
+
+  const chips = (items: { id?: string; value: number }[]) => {
+    const named = items.filter(i => i.id);
+    if (named.length === 0) return <span className="text-gray-300 text-xs">—</span>;
+    if (named.length === 1) {
+      return <span className="inline-block text-xs bg-mcsystem-50 text-mcsystem-700 px-2 py-1 rounded-md">{productName(named[0].id) || 'Sem produto'}</span>;
+    }
+    return <ProductChips items={named.map(i => ({ name: productName(i.id) || undefined, value: i.value }))} />;
+  };
+
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
-        <h3 className="font-bold text-gray-800">Faturamento por produto</h3>
-        <div className="flex items-center gap-4 text-sm">
-          <span className="text-gray-500">Total: <b className="text-gray-800">{formatBRL(totalGeral)}</b></span>
-          <span className="text-gray-500">Recebido: <b className="text-green-600">{formatBRL(recebidoGeral)}</b></span>
+      {/* Totais da lista */}
+      <div className="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+        <span className="font-bold text-gray-800 flex items-center gap-2">
+          <Wallet size={16} className="text-mcsystem-500" /> {rows.length} linha(s)
+        </span>
+        <span className="text-gray-500">Assinaturas ativas: <b className="text-gray-800">{totals.subs}</b></span>
+        <span className="text-gray-500">Recebido: <b className="text-green-600">{formatBRL(totals.paid)}</b></span>
+        <span className="text-gray-500">Em atraso: <b className={totals.overdue ? 'text-red-600' : 'text-gray-800'}>{totals.overdue} cobrança(s)</b></span>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="p-16 text-center text-gray-400">
+          <Repeat size={48} className="mx-auto mb-4 opacity-30" />
+          <p className="font-medium">Nada por aqui ainda.</p>
         </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 text-gray-500 text-left uppercase text-xs tracking-wider">
-              <th className="px-6 py-3 font-semibold">Produto</th>
-              <th className="px-6 py-3 font-semibold text-center">Cobranças</th>
-              <th className="px-6 py-3 font-semibold text-right">Total cobrado</th>
-              <th className="px-6 py-3 font-semibold text-right">Recebido</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {rows.map((r, i) => (
-              <tr key={i} className="hover:bg-gray-50 transition-colors">
-                <td className="px-6 py-3 font-medium text-gray-800">{r.name}</td>
-                <td className="px-6 py-3 text-center text-gray-600">{r.count}</td>
-                <td className="px-6 py-3 text-right font-medium text-gray-700">{formatBRL(r.total)}</td>
-                <td className="px-6 py-3 text-right font-medium text-green-600">{formatBRL(r.recebido)}</td>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 text-gray-500 text-left uppercase text-xs tracking-wider">
+                <SortTh label="Cliente / Descrição" field="client" {...sp} />
+                <SortTh label="Produto" field="product" {...sp} />
+                <SortTh label="Valor" field="value" {...sp} />
+                <SortTh label="Recorrência" field="cycle" {...sp} />
+                <SortTh label="Vencimento" field="date" {...sp} />
+                <SortTh label="Status" field="status" align="center" {...sp} />
+                <th className="px-6 py-4 font-semibold text-center">Ações</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {rows.map(row => {
+                const isSub = row.kind === 'sub';
+                const isOpen = expanded.has(row.id);
+                const s = row.sub;
+                const r = row.charge;
+                return (
+                  <React.Fragment key={row.id}>
+                    <tr className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex items-start gap-2">
+                          {isSub && row.charges.length > 0 ? (
+                            <button
+                              onClick={() => onToggle(row.id)}
+                              className="mt-0.5 text-gray-400 hover:text-mcsystem-600"
+                              title={isOpen ? 'Ocultar cobranças' : 'Ver cobranças'}
+                            >
+                              {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                            </button>
+                          ) : <span className="w-4 flex-shrink-0" />}
+                          <div className="min-w-0">
+                            <div className="font-semibold text-gray-800">{row.client}</div>
+                            <div className="text-gray-400 text-xs mt-0.5 max-w-md truncate">{row.description}</div>
+                            {isSub && row.charges.length > 0 && (
+                              <div className="text-[11px] text-gray-400 mt-1">
+                                {row.charges.length} cobrança(s) · {formatBRL(row.paid)} recebidos
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        {isSub
+                          ? chips(s!.split_products?.length
+                            ? s!.split_products.map(p => ({ id: p.product_id, value: (s!.value || 0) * p.pct / 100 }))
+                            : [{ id: s!.product_id, value: s!.value || 0 }])
+                          : chips(r!.split_revenue?.length
+                            ? r!.split_revenue.map(x => ({ id: x.product_id, value: x.amount }))
+                            : [{ id: r!.product_id, value: r!.amount || 0 }])}
+                      </td>
+                      <td className="px-6 py-4 font-medium text-gray-700 whitespace-nowrap">{formatBRL(row.value)}</td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-block text-xs px-2 py-1 rounded-md whitespace-nowrap ${isSub ? 'bg-mcsystem-50 text-mcsystem-700 font-medium' : 'bg-gray-100 text-gray-500'}`}>
+                          {row.cycle}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-gray-600 whitespace-nowrap">{row.date || '—'}</td>
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          {isSub ? (
+                            <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${row.active ? 'text-green-700 bg-green-50' : 'text-gray-500 bg-gray-100'}`}>
+                              {row.active ? <Repeat size={13} /> : <X size={13} />}{row.status}
+                            </span>
+                          ) : statusBadge(row.status)}
+                          {row.overdue > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 px-2 py-0.5 rounded-full whitespace-nowrap">
+                              <AlertCircle size={11} /> {row.overdue} em atraso
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center justify-center gap-1">
+                          {!isSub && r!.asaas_invoice_url && (
+                            <a href={r!.asaas_invoice_url} target="_blank" rel="noreferrer" title="Abrir fatura"
+                               className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded-lg transition-colors">
+                              <ExternalLink size={16} />
+                            </a>
+                          )}
+                          <button
+                            onClick={() => (isSub ? onEditSub(s!) : onEditCharge(r!))}
+                            className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded-lg transition-colors"
+                            title="Editar"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            onClick={() => (isSub ? onDeleteSub(s!) : onDeleteCharge(r!))}
+                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Excluir"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
 
-const ChargeList: React.FC<{ charges: FinancialRecord[]; clientName: (id?: string) => string; productName: (id?: string) => string | null; statusBadge: (s?: string) => React.ReactNode; onEdit: (r: FinancialRecord) => void; onDelete: (r: FinancialRecord) => void } & SortProps> = ({ charges, clientName, productName, statusBadge, onEdit, onDelete, sortField, sortDir, onSort }) => {
-  if (charges.length === 0) return <EmptyState icon={<FileText size={48} />} text="Nenhuma cobrança Asaas ainda." />;
-  const sp = { sortField, sortDir, onSort };
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 text-gray-500 text-left uppercase text-xs tracking-wider">
-              <SortTh label="Cliente / Descrição" field="client" {...sp} />
-              <SortTh label="Produto" field="product" {...sp} />
-              <SortTh label="Valor" field="amount" {...sp} />
-              <SortTh label="Vencimento" field="dueDate" {...sp} />
-              <SortTh label="Status" field="status" align="center" {...sp} />
-              <th className="px-6 py-4 font-semibold text-right">Fatura</th>
-              <th className="px-6 py-4 font-semibold text-center">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {charges.map(r => (
-              <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-6 py-4">
-                  <div className="font-semibold text-gray-800">{clientName(r.companyId)}</div>
-                  <div className="text-gray-400 text-xs mt-0.5 max-w-md truncate">{r.description}</div>
-                </td>
-                <td className="px-6 py-4">
-                  {r.split_revenue?.length
-                    ? <ProductChips items={r.split_revenue.map(s => ({ name: productName(s.product_id), value: s.amount }))} />
-                    : productName(r.product_id)
-                      ? <span className="inline-block text-xs bg-mcsystem-50 text-mcsystem-700 px-2 py-1 rounded-md">{productName(r.product_id)}</span>
-                      : <span className="text-gray-300 text-xs">—</span>}
-                </td>
-                <td className="px-6 py-4 font-medium text-gray-700">{formatBRL(r.amount)}</td>
-                <td className="px-6 py-4 text-gray-600">{r.dueDate}</td>
-                <td className="px-6 py-4 text-center">{statusBadge(r.status as string)}</td>
-                <td className="px-6 py-4 text-right">
-                  {r.asaas_invoice_url ? (
-                    <a href={r.asaas_invoice_url} target="_blank" rel="noreferrer"
-                       className="inline-flex items-center gap-1 text-mcsystem-600 hover:text-mcsystem-800 text-xs font-medium">
-                      Abrir <ExternalLink size={12} />
-                    </a>
-                  ) : <span className="text-gray-300 text-xs">—</span>}
-                </td>
-                <td className="px-6 py-4">
-                  <div className="flex items-center justify-center gap-1">
-                    <button onClick={() => onEdit(r)} className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded-lg transition-colors" title="Editar"><Pencil size={16} /></button>
-                    <button onClick={() => onDelete(r)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir"><Trash2 size={16} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
-
-const SubscriptionList: React.FC<{ subs: Subscription[]; clientName: (id?: string) => string; productName: (id?: string) => string | null; onEdit: (s: Subscription) => void; onDelete: (s: Subscription) => void } & SortProps> = ({ subs, clientName, productName, onEdit, onDelete, sortField, sortDir, onSort }) => {
-  if (subs.length === 0) return <EmptyState icon={<Repeat size={48} />} text="Nenhuma assinatura ainda." />;
-  const cycleLabel = (c?: string) => CYCLES.find(x => x.value === c)?.label || c || '—';
-  const sp = { sortField, sortDir, onSort };
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 text-gray-500 text-left uppercase text-xs tracking-wider">
-              <SortTh label="Cliente / Descrição" field="client" {...sp} />
-              <SortTh label="Produto" field="product" {...sp} />
-              <SortTh label="Valor" field="value" {...sp} />
-              <th className="px-6 py-4 font-semibold">Ciclo</th>
-              <SortTh label="Próx. vencimento" field="next_due_date" {...sp} />
-              <th className="px-6 py-4 font-semibold text-center">Status</th>
-              <th className="px-6 py-4 font-semibold text-center">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {subs.map(s => (
-              <tr key={s.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-6 py-4">
-                  <div className="font-semibold text-gray-800">{clientName(s.client_id)}</div>
-                  <div className="text-gray-400 text-xs mt-0.5 max-w-md truncate">{s.description}</div>
-                </td>
-                <td className="px-6 py-4">
-                  {s.split_products?.length
-                    ? <ProductChips items={s.split_products.map(sp => ({ name: productName(sp.product_id), value: (s.value || 0) * sp.pct / 100 }))} />
-                    : productName(s.product_id)
-                      ? <span className="inline-block text-xs bg-mcsystem-50 text-mcsystem-700 px-2 py-1 rounded-md">{productName(s.product_id)}</span>
-                      : <span className="text-gray-300 text-xs">—</span>}
-                </td>
-                <td className="px-6 py-4 font-medium text-gray-700">{formatBRL(s.value)}</td>
-                <td className="px-6 py-4 text-gray-600">{cycleLabel(s.cycle)}</td>
-                <td className="px-6 py-4 text-gray-600">{s.next_due_date}</td>
-                <td className="px-6 py-4 text-center">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full text-green-700 bg-green-50">
-                    {s.status || 'ACTIVE'}
-                  </span>
-                </td>
-                <td className="px-6 py-4">
-                  <div className="flex items-center justify-center gap-1">
-                    <button onClick={() => onEdit(s)} className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded-lg transition-colors" title="Editar"><Pencil size={16} /></button>
-                    <button onClick={() => onDelete(s)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir"><Trash2 size={16} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                    {isSub && isOpen && (
+                      <tr>
+                        <td colSpan={7} className="bg-gray-50/70 px-6 py-4">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-gray-400 uppercase tracking-wider text-left">
+                                <th className="py-2 font-semibold">Vencimento</th>
+                                <th className="py-2 font-semibold">Descrição</th>
+                                <th className="py-2 font-semibold">Produto</th>
+                                <th className="py-2 font-semibold text-right">Valor</th>
+                                <th className="py-2 font-semibold text-center">Status</th>
+                                <th className="py-2 font-semibold text-center">Ações</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200/70">
+                              {row.charges.map(c => (
+                                <tr key={c.id}>
+                                  <td className={`py-2 whitespace-nowrap ${(c.status as string) !== 'Pago' && (c.dueDate || '') < today ? 'text-red-600 font-medium' : 'text-gray-600'}`}>{c.dueDate}</td>
+                                  <td className="py-2 text-gray-500 max-w-xs truncate">{c.description}</td>
+                                  <td className="py-2">
+                                    {chips(c.split_revenue?.length
+                                      ? c.split_revenue.map(x => ({ id: x.product_id, value: x.amount }))
+                                      : [{ id: c.product_id, value: c.amount || 0 }])}
+                                  </td>
+                                  <td className="py-2 text-right font-medium text-gray-700 whitespace-nowrap">{formatBRL(c.amount)}</td>
+                                  <td className="py-2 text-center">{statusBadge(c.status as string)}</td>
+                                  <td className="py-2">
+                                    <div className="flex items-center justify-center gap-1">
+                                      {c.asaas_invoice_url && (
+                                        <a href={c.asaas_invoice_url} target="_blank" rel="noreferrer" title="Abrir fatura"
+                                           className="p-1.5 text-gray-400 hover:text-mcsystem-600 rounded-md">
+                                          <ExternalLink size={14} />
+                                        </a>
+                                      )}
+                                      <button onClick={() => onEditCharge(c)} className="p-1.5 text-gray-400 hover:text-mcsystem-600 rounded-md" title="Editar cobrança"><Pencil size={14} /></button>
+                                      <button onClick={() => onDeleteCharge(c)} className="p-1.5 text-gray-400 hover:text-red-600 rounded-md" title="Excluir cobrança"><Trash2 size={14} /></button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };
@@ -621,6 +744,9 @@ const ChargeModal: React.FC<{
   return (
     <ModalShell title="Nova Cobrança" icon={<FileText size={20} className="text-mcsystem-500" />} onClose={onClose}>
       <div className="p-6 space-y-4">
+        <div className="bg-mcsystem-50 border border-mcsystem-100 text-mcsystem-800 text-xs rounded-lg px-3 py-2">
+          Cobrança única, sem recorrência. Se o cliente paga todo mês, crie uma <b>assinatura</b>.
+        </div>
         <div>
           <label className={labelCls}>Cliente *</label>
           <select value={clientId} onChange={e => setClientId(e.target.value)} className={inputCls}>
@@ -769,7 +895,7 @@ const SubscriptionModal: React.FC<{
           <div>
             <label className={labelCls}>Ciclo</label>
             <select value={cycle} onChange={e => setCycle(e.target.value)} className={inputCls}>
-              {CYCLES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              {CYCLE_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
           </div>
         </div>
@@ -1086,7 +1212,7 @@ const SubscriptionEditModal: React.FC<{ sub: Subscription; products: Product[]; 
           <div>
             <label className={labelCls}>Ciclo</label>
             <select value={cycle} onChange={e => setCycle(e.target.value)} className={inputCls}>
-              {CYCLES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              {CYCLE_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
           </div>
         </div>

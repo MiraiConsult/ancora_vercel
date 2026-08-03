@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Company, User, NoteColor, FinancialRecord, TransactionType, TransactionStatus, RevenueType, Bank, GeneralNote, Product, Subscription } from '../types';
-import { Search, Plus, Pencil, Trash2, X, Save, User as UserIcon, ChevronDown, StickyNote, TrendingUp, LayoutDashboard, CheckSquare, HelpCircle, LayoutGrid, LayoutList, Square, Copy, ArrowUpDown } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, X, Save, User as UserIcon, ChevronDown, StickyNote, TrendingUp, LayoutDashboard, CheckSquare, HelpCircle, LayoutGrid, LayoutList, Square, Copy, ArrowUpDown, Bell } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import { ClientNotificationsModal } from './ClientNotificationsModal';
 
 interface CompaniesModuleProps {
   companies: Company[];
@@ -95,6 +96,7 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
   // Details View State
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [activeTab, setActiveTab] = useState<CompanyTab>('OVERVIEW');
+  const [notifyCompany, setNotifyCompany] = useState<Company | null>(null);
   
   // --- LOCAL EDIT STATES ---
   
@@ -615,6 +617,14 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
 
   return (
     <div className="space-y-6 relative h-full">
+      {notifyCompany && (
+        <ClientNotificationsModal
+          clientId={notifyCompany.id}
+          clientName={notifyCompany.name}
+          onClose={() => setNotifyCompany(null)}
+        />
+      )}
+
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800">Carteira de Clientes</h2>
         <div className="flex items-center gap-2">
@@ -885,9 +895,18 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
                                 <div className="h-12 w-12 bg-mcsystem-900 rounded-xl flex items-center justify-center text-white font-bold text-lg mr-4 shadow-lg">{selectedCompany.name.substring(0, 2).toUpperCase()}</div>
                                 <div><h2 className="text-xl font-bold text-gray-800 leading-tight">{selectedCompany.name}</h2><p className="text-sm text-gray-400 font-medium">{selectedCompany.cnpj}</p></div>
                             </div>
-                            <button onClick={() => setSelectedCompany(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-200 transition-colors">
-                                <X size={24} />
-                            </button>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => setNotifyCompany(selectedCompany)}
+                                    title="Como cobrar este cliente — e-mail, SMS, WhatsApp ou nenhum aviso"
+                                    className="text-gray-400 hover:text-mcsystem-600 p-2 rounded-full hover:bg-mcsystem-50 transition-colors"
+                                >
+                                    <Bell size={20} />
+                                </button>
+                                <button onClick={() => setSelectedCompany(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-200 transition-colors">
+                                    <X size={24} />
+                                </button>
+                            </div>
                        </div>
                        <div className="flex space-x-6 overflow-x-auto scrollbar-hide -mb-px">
                            {[

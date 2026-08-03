@@ -8,11 +8,12 @@ import { supabase } from '../lib/supabaseClient';
 import {
   FileText, Repeat, Plus, X, Save, Search, ExternalLink, Loader2,
   CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown,
-  Pencil, Trash2, CalendarClock, ChevronDown, ChevronRight, Wallet, UserPlus, QrCode,
+  Pencil, Trash2, CalendarClock, ChevronDown, ChevronRight, Wallet, UserPlus, QrCode, Receipt,
 } from 'lucide-react';
 import { ReceivablesAgenda } from './ReceivablesAgenda';
 import { BillingProjection } from './BillingProjection';
 import { ChargeShareModal } from './ChargeShareModal';
+import { InvoiceModal } from './InvoiceModal';
 import { CYCLE_OPTIONS, cycleLabel } from '../lib/cycles';
 
 interface BillingModuleProps {
@@ -98,6 +99,11 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   const [editCharge, setEditCharge] = useState<FinancialRecord | null>(null);
   const [editSub, setEditSub] = useState<Subscription | null>(null);
   const [shareCharge, setShareCharge] = useState<FinancialRecord | null>(null);
+  const [invoiceFor, setInvoiceFor] = useState<
+    | { kind: 'subscription'; sub: Subscription }
+    | { kind: 'charge'; charge: FinancialRecord }
+    | null
+  >(null);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -390,6 +396,8 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
             onEditCharge={setEditCharge}
             onDeleteCharge={handleDeleteCharge}
             onShareCharge={setShareCharge}
+            onInvoiceSub={s => setInvoiceFor({ kind: 'subscription', sub: s })}
+            onInvoiceCharge={c => setInvoiceFor({ kind: 'charge', charge: c })}
             {...sortProps}
           />
         </>
@@ -400,6 +408,26 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
           charge={shareCharge}
           clientName={clientName(shareCharge.companyId)}
           onClose={() => setShareCharge(null)}
+        />
+      )}
+
+      {invoiceFor && (
+        <InvoiceModal
+          target={invoiceFor.kind === 'subscription'
+            ? {
+                kind: 'subscription',
+                subscriptionId: invoiceFor.sub.asaas_id || '',
+                value: invoiceFor.sub.value || 0,
+                description: invoiceFor.sub.description || '',
+              }
+            : {
+                kind: 'charge',
+                paymentId: invoiceFor.charge.asaas_payment_id || '',
+                value: invoiceFor.charge.amount || 0,
+                description: invoiceFor.charge.description || '',
+              }}
+          clientName={clientName(invoiceFor.kind === 'subscription' ? invoiceFor.sub.client_id : invoiceFor.charge.companyId)}
+          onClose={() => setInvoiceFor(null)}
         />
       )}
 
@@ -446,7 +474,9 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
             setSubmitting(true);
             try {
               const res = await asaasCreateCharge(form);
-              if (res?.record) setFinanceRecords(prev => [res.record as FinancialRecord, ...prev]);
+              // Parcelado volta com todas as parcelas — entram todas no financeiro.
+              const created = (res?.records as FinancialRecord[]) || (res?.record ? [res.record as FinancialRecord] : []);
+              if (created.length) setFinanceRecords(prev => [...created, ...prev]);
               setModal(null);
               if (res?.payment?.invoiceUrl) {
                 window.open(res.payment.invoiceUrl, '_blank');
@@ -514,12 +544,15 @@ interface BillingListProps extends SortProps {
   onDeleteSub: (s: Subscription) => void;
   onEditCharge: (r: FinancialRecord) => void;
   onShareCharge: (r: FinancialRecord) => void;
+  onInvoiceSub: (s: Subscription) => void;
+  onInvoiceCharge: (r: FinancialRecord) => void;
   onDeleteCharge: (r: FinancialRecord) => void;
 }
 
 const BillingList: React.FC<BillingListProps> = ({
   rows, totals, expanded, onToggle, productName, statusBadge,
-  onEditSub, onDeleteSub, onEditCharge, onDeleteCharge, onShareCharge, sortField, sortDir, onSort,
+  onEditSub, onDeleteSub, onEditCharge, onDeleteCharge, onShareCharge, onInvoiceSub, onInvoiceCharge,
+  sortField, sortDir, onSort,
 }) => {
   const sp = { sortField, sortDir, onSort };
   const today = todayISO();
@@ -639,6 +672,19 @@ const BillingList: React.FC<BillingListProps> = ({
                               <QrCode size={16} />
                             </button>
                           )}
+                          {isSub
+                            ? s!.asaas_id && (
+                              <button onClick={() => onInvoiceSub(s!)} title="Nota fiscal automática desta assinatura"
+                                      className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded-lg transition-colors">
+                                <Receipt size={16} />
+                              </button>
+                            )
+                            : r!.asaas_payment_id && (
+                              <button onClick={() => onInvoiceCharge(r!)} title="Emitir nota fiscal desta cobrança"
+                                      className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded-lg transition-colors">
+                                <Receipt size={16} />
+                              </button>
+                            )}
                           <button
                             onClick={() => (isSub ? onEditSub(s!) : onEditCharge(r!))}
                             className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded-lg transition-colors"
@@ -969,6 +1015,126 @@ const todayPlus = (days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
+/**
+ * Multa, juros e desconto que o Asaas aplica sozinho. Fica recolhido porque a
+ * maioria das cobranças sai no padrão — quem precisa, abre.
+ */
+type Terms = {
+  fineValue: number; fineType: 'PERCENTAGE' | 'FIXED';
+  interestValue: number;
+  discountValue: number; discountType: 'PERCENTAGE' | 'FIXED'; discountDeadline: number;
+};
+
+const emptyTerms: Terms = {
+  fineValue: 0, fineType: 'PERCENTAGE',
+  interestValue: 0,
+  discountValue: 0, discountType: 'PERCENTAGE', discountDeadline: 0,
+};
+
+const termsPayload = (t: Terms) => ({
+  fineValue: t.fineValue || undefined,
+  fineType: t.fineValue ? t.fineType : undefined,
+  interestValue: t.interestValue || undefined,
+  discountValue: t.discountValue || undefined,
+  discountType: t.discountValue ? t.discountType : undefined,
+  discountDeadline: t.discountValue ? t.discountDeadline : undefined,
+});
+
+const ChargeTermsFields: React.FC<{ terms: Terms; onChange: (t: Terms) => void }> = ({ terms, onChange }) => {
+  const active = terms.fineValue > 0 || terms.interestValue > 0 || terms.discountValue > 0;
+  const [open, setOpen] = useState(active);
+  const patch = (p: Partial<Terms>) => onChange({ ...terms, ...p });
+  const unit = (type: 'PERCENTAGE' | 'FIXED') => (type === 'PERCENTAGE' ? '%' : 'R$');
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-3 py-2.5 flex items-center justify-between text-sm hover:bg-gray-50 transition-colors"
+      >
+        <span className="font-medium text-gray-700 flex items-center gap-2">
+          {open ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
+          Multa, juros e desconto
+        </span>
+        <span className="text-xs text-gray-400">
+          {active
+            ? [
+                terms.fineValue ? `multa ${terms.fineValue}${unit(terms.fineType)}` : null,
+                terms.interestValue ? `juros ${terms.interestValue}%/mês` : null,
+                terms.discountValue ? `desc. ${terms.discountValue}${unit(terms.discountType)}` : null,
+              ].filter(Boolean).join(' · ')
+            : 'padrão da conta Asaas'}
+        </span>
+      </button>
+
+      {open && (
+        <div className="p-3 pt-0 space-y-3 border-t border-gray-100">
+          <div className="grid grid-cols-2 gap-3 pt-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Multa por atraso</label>
+              <div className="flex gap-2">
+                <input
+                  type="number" step="0.01" min="0" value={terms.fineValue || ''}
+                  onChange={e => patch({ fineValue: parseFloat(e.target.value) || 0 })}
+                  placeholder="0" className={`${inputCls} flex-1`}
+                />
+                <select value={terms.fineType} onChange={e => patch({ fineType: e.target.value as any })} className={`${inputCls} w-20`}>
+                  <option value="PERCENTAGE">%</option>
+                  <option value="FIXED">R$</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Juros ao mês (%)</label>
+              <input
+                type="number" step="0.01" min="0" value={terms.interestValue || ''}
+                onChange={e => patch({ interestValue: parseFloat(e.target.value) || 0 })}
+                placeholder="0" className={inputCls}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Desconto por antecipação</label>
+              <div className="flex gap-2">
+                <input
+                  type="number" step="0.01" min="0" value={terms.discountValue || ''}
+                  onChange={e => patch({ discountValue: parseFloat(e.target.value) || 0 })}
+                  placeholder="0" className={`${inputCls} flex-1`}
+                />
+                <select value={terms.discountType} onChange={e => patch({ discountType: e.target.value as any })} className={`${inputCls} w-20`}>
+                  <option value="PERCENTAGE">%</option>
+                  <option value="FIXED">R$</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Válido até</label>
+              <select
+                value={terms.discountDeadline}
+                onChange={e => patch({ discountDeadline: Number(e.target.value) })}
+                disabled={!terms.discountValue}
+                className={`${inputCls} disabled:bg-gray-100 disabled:text-gray-400`}
+              >
+                <option value={0}>o vencimento</option>
+                {[1, 3, 5, 7, 10, 15, 30].map(d => (
+                  <option key={d} value={d}>{d} dia{d > 1 ? 's' : ''} antes</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-gray-400">
+            Em branco, vale o que estiver configurado na conta Asaas.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ChargeModal: React.FC<{
   companies: Company[]; products: Product[]; revenueTypes: RevenueType[];
   submitting: boolean; onClose: () => void; onSubmit: (form: any) => void;
@@ -981,6 +1147,8 @@ const ChargeModal: React.FC<{
   const [description, setDescription] = useState('');
   const [billingType, setBillingType] = useState('UNDEFINED');
   const [revenueTypeId, setRevenueTypeId] = useState('');
+  const [installments, setInstallments] = useState(1);
+  const [terms, setTerms] = useState<Terms>(emptyTerms);
 
   const onProduct = (id: string) => {
     setProductId(id);
@@ -995,7 +1163,12 @@ const ChargeModal: React.FC<{
     if (!clientId) return alert('Selecione o cliente.');
     if (!value || value <= 0) return alert('Informe um valor válido.');
     if (!dueDate) return alert('Informe o vencimento.');
-    onSubmit({ clientId, productId: productId || undefined, value, dueDate, description, billingType, revenueTypeId: revenueTypeId || undefined });
+    onSubmit({
+      clientId, productId: productId || undefined, value, dueDate, description, billingType,
+      revenueTypeId: revenueTypeId || undefined,
+      installmentCount: installments > 1 ? installments : undefined,
+      ...termsPayload(terms),
+    });
   };
 
   return (
@@ -1048,6 +1221,26 @@ const ChargeModal: React.FC<{
             </select>
           </div>
         </div>
+
+        <div>
+          <label className={labelCls}>Parcelamento</label>
+          <div className="flex items-center gap-3">
+            <select value={installments} onChange={e => setInstallments(Number(e.target.value))} className={`${inputCls} w-40`}>
+              <option value={1}>À vista</option>
+              {Array.from({ length: 23 }, (_, i) => i + 2).map(n => (
+                <option key={n} value={n}>{n}x</option>
+              ))}
+            </select>
+            {installments > 1 && (
+              <span className="text-xs text-gray-500">
+                {installments}× de <b className="text-gray-700">{formatBRL((Number(value) || 0) / installments)}</b> —
+                gera {installments} cobranças, uma por mês
+              </span>
+            )}
+          </div>
+        </div>
+
+        <ChargeTermsFields terms={terms} onChange={setTerms} />
       </div>
       <ModalFooter submitting={submitting} onClose={onClose} onSubmit={submit} label="Gerar cobrança" />
     </ModalShell>
@@ -1068,6 +1261,7 @@ const SubscriptionModal: React.FC<{
   const [billingType, setBillingType] = useState('UNDEFINED');
   const [multi, setMulti] = useState(false);
   const [splitRows, setSplitRows] = useState<SplitRow[]>([]);
+  const [terms, setTerms] = useState<Terms>(emptyTerms);
 
   const onProduct = (id: string) => {
     setProductId(id);
@@ -1092,6 +1286,7 @@ const SubscriptionModal: React.FC<{
       productId: (multi ? dominantProduct(splitRows) : productId) || undefined,
       splitProducts: multi ? rowsToPct(splitRows) : undefined,
       value, cycle, nextDueDate, description, billingType,
+      ...termsPayload(terms),
     });
   };
 
@@ -1160,6 +1355,8 @@ const SubscriptionModal: React.FC<{
           <label className={labelCls}>Descrição</label>
           <input type="text" value={description} onChange={e => setDescription(e.target.value)} className={inputCls} placeholder="Ex: Plano mensal" />
         </div>
+
+        <ChargeTermsFields terms={terms} onChange={setTerms} />
       </div>
       <ModalFooter submitting={submitting} onClose={onClose} onSubmit={submit} label="Criar assinatura" />
     </ModalShell>

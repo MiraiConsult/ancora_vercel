@@ -32,7 +32,20 @@ async function invoke(action: string, params: Record<string, any> = {}) {
   return data;
 }
 
-export interface CreateChargeParams {
+/**
+ * Multa, juros e desconto aplicados pelo próprio Asaas. Percentual é o padrão;
+ * FIXED vira valor em R$. Só vale o que vier preenchido.
+ */
+export interface ChargeTerms {
+  fineValue?: number;          // multa por atraso
+  fineType?: 'PERCENTAGE' | 'FIXED';
+  interestValue?: number;      // juros ao mês, em %
+  discountValue?: number;      // desconto por antecipação
+  discountType?: 'PERCENTAGE' | 'FIXED';
+  discountDeadline?: number;   // até N dias antes do vencimento (0 = até o vencimento)
+}
+
+export interface CreateChargeParams extends ChargeTerms {
   clientId: string;
   value: number;
   dueDate: string;         // YYYY-MM-DD
@@ -40,9 +53,11 @@ export interface CreateChargeParams {
   billingType?: string;    // UNDEFINED | BOLETO | PIX | CREDIT_CARD
   revenueTypeId?: string;
   productId?: string;
+  /** Acima de 1, o Asaas divide o valor total em N cobranças. */
+  installmentCount?: number;
 }
 
-export interface CreateSubscriptionParams {
+export interface CreateSubscriptionParams extends ChargeTerms {
   clientId: string;
   value: number;
   nextDueDate: string;     // YYYY-MM-DD
@@ -128,6 +143,105 @@ export const asaasCreateTransfer = (params: { recordId: string }) =>
 
 export const asaasDeleteSubscription = (params: { rowId: string; subscriptionId?: string }) =>
   invoke('delete_subscription', params);
+
+/** Impostos da nota — o Asaas exige o objeto inteiro, mesmo zerado. */
+export interface InvoiceTaxes {
+  retainIss: boolean;
+  iss: number;
+  cofins: number;
+  csll: number;
+  inss: number;
+  ir: number;
+  pis: number;
+}
+
+export interface MunicipalService { id: string; description: string; issTax: number | null }
+
+export interface FiscalStatus {
+  configured: boolean;
+  info: {
+    email: string | null;
+    municipalInscription: string | null;
+    simplesNacional: boolean;
+    specialTaxRegime: string | null;
+    serviceListItem: string | null;
+    certificateSent: boolean;
+    accessTokenSent: boolean;
+  } | null;
+  services: MunicipalService[];
+}
+
+export const asaasFiscalStatus = () => invoke('fiscal_status') as Promise<FiscalStatus>;
+
+export const asaasScheduleInvoice = (params: {
+  paymentId?: string;
+  clientId?: string;
+  serviceDescription: string;
+  observations?: string;
+  value: number;
+  deductions?: number;
+  effectiveDate: string;
+  municipalServiceId?: string;
+  municipalServiceCode?: string;
+  taxes: InvoiceTaxes;
+  updatePayment?: boolean;
+}) => invoke('schedule_invoice', params);
+
+/** Quando a nota sai, dentro do ciclo da assinatura. */
+export type InvoicePeriod =
+  | 'ON_PAYMENT_CONFIRMATION' | 'ON_PAYMENT_DUE_DATE' | 'BEFORE_PAYMENT_DUE_DATE'
+  | 'ON_DUE_DATE_MONTH' | 'ON_NEXT_MONTH';
+
+export interface SubscriptionInvoiceSettings {
+  municipalServiceId?: string;
+  municipalServiceCode?: string;
+  municipalServiceName?: string;
+  updatePayment?: boolean;
+  deductions?: number;
+  effectiveDatePeriod: InvoicePeriod;
+  receivedOnly?: boolean;
+  daysBeforeDueDate?: number;
+  observations?: string;
+  taxes: InvoiceTaxes;
+}
+
+export const asaasSubscriptionInvoiceSettings = (params: {
+  subscriptionId: string;
+  settings?: SubscriptionInvoiceSettings;
+  remove?: boolean;
+}) => invoke('subscription_invoice_settings', params) as Promise<{ settings: any }>;
+
+/**
+ * Notificação no Asaas é por cliente e por evento, nunca por cobrança.
+ * scheduleOffset só vale para o aviso de vencimento (dias de antecedência).
+ */
+export interface CustomerNotification {
+  id: string;
+  event: string;
+  enabled: boolean;
+  emailEnabledForProvider: boolean;
+  smsEnabledForProvider: boolean;
+  emailEnabledForCustomer: boolean;
+  smsEnabledForCustomer: boolean;
+  phoneCallEnabledForCustomer: boolean;
+  whatsappEnabledForCustomer: boolean;
+  scheduleOffset: number;
+}
+
+export interface CustomerNotificationSettings {
+  linked: boolean;
+  notificationDisabled: boolean;
+  notifications: CustomerNotification[];
+}
+
+export const asaasCustomerNotifications = (clientId: string) =>
+  invoke('customer_notifications', { clientId }) as Promise<CustomerNotificationSettings>;
+
+export const asaasUpdateCustomerNotifications = (params: {
+  clientId: string;
+  notificationDisabled?: boolean;
+  notifications?: CustomerNotification[];
+}) => invoke('update_customer_notifications', params);
 
 /** Formas de mandar a cobrança na mão — o que o Asaas devolve por cobrança. */
 export interface ChargeShareInfo {

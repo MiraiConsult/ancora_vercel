@@ -63,6 +63,29 @@ function applySplit(
   return parts;
 }
 
+/**
+ * Multa, juros e desconto — as condições que o Asaas aplica sozinho na cobrança.
+ * Só entram no payload quando têm valor: mandar zero configura "sem multa"
+ * explicitamente e sobrescreve o padrão da conta.
+ */
+function chargeTerms(p: Record<string, any>) {
+  const terms: Record<string, unknown> = {};
+  if (Number(p.fineValue) > 0) {
+    terms.fine = { value: Number(p.fineValue), type: p.fineType || 'PERCENTAGE' };
+  }
+  if (Number(p.interestValue) > 0) {
+    terms.interest = { value: Number(p.interestValue) };
+  }
+  if (Number(p.discountValue) > 0) {
+    terms.discount = {
+      value: Number(p.discountValue),
+      dueDateLimitDays: Math.max(0, Math.floor(Number(p.discountDeadline) || 0)),
+      type: p.discountType || 'PERCENTAGE',
+    };
+  }
+  return terms;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -164,35 +187,61 @@ Deno.serve(async (req: Request) => {
 
       case 'create_charge': {
         const { client, customerId } = await ensureCustomer(params.clientId);
-        const payment = await asaas('/payments', 'POST', {
+        const installments = Math.max(1, Math.floor(Number(params.installmentCount) || 1));
+        const value = Number(params.value);
+
+        const payload: Record<string, unknown> = {
           customer: customerId,
           billingType: params.billingType || 'UNDEFINED',
-          value: Number(params.value),
           dueDate: params.dueDate,
           description: params.description || '',
           externalReference: params.clientId,
-        });
+          ...chargeTerms(params),
+        };
+        // Parcelado: o Asaas recebe o total e o número de parcelas, e divide.
+        if (installments > 1) {
+          payload.installmentCount = installments;
+          payload.totalValue = value;
+        } else {
+          payload.value = value;
+        }
 
-        const record = {
-          id: `f${Date.now()}`,
+        const payment = await asaas('/payments', 'POST', payload);
+
+        // Parcelamento gera N cobranças lá; o financeiro precisa das N, senão o
+        // previsto fica só com a primeira parcela.
+        let charges: any[] = [payment];
+        if (installments > 1 && payment.installment) {
+          const list = await asaas(`/payments?installment=${payment.installment}&limit=100`, 'GET');
+          if (list?.data?.length) {
+            charges = list.data.sort((a: any, b: any) => String(a.dueDate).localeCompare(String(b.dueDate)));
+          }
+        }
+
+        const baseDescription = params.description || `Cobrança — ${client.name}`;
+        const stamp = Date.now();
+        const seriesId = installments > 1 ? `i${stamp}` : null;
+        const records = charges.map((p: any, i: number) => ({
+          id: `f${stamp}-${i}`,
           tenant_id: client.tenant_id,
-          description: params.description || `Cobrança — ${client.name}`,
-          amount: Number(params.value),
+          description: installments > 1 ? `${baseDescription} (${i + 1}/${charges.length})` : baseDescription,
+          amount: Number(p.value),
           type: 'Receita',
           status: 'Pendente',
-          dueDate: params.dueDate,
-          competenceDate: params.dueDate,
+          dueDate: p.dueDate,
+          competenceDate: p.dueDate,
           category: 'Cobrança Asaas',
           companyId: params.clientId,
           revenueTypeId: params.revenueTypeId || null,
           product_id: params.productId || null,
-          asaas_payment_id: payment.id,
-          asaas_invoice_url: payment.invoiceUrl,
-        };
-        const { error: insErr } = await supabase.from('financial_records').insert(record);
+          seriesId,
+          asaas_payment_id: p.id,
+          asaas_invoice_url: p.invoiceUrl,
+        }));
+        const { error: insErr } = await supabase.from('financial_records').insert(records);
         if (insErr) throw new Error('Cobrança criada no Asaas, mas falhou ao gravar o lançamento: ' + insErr.message);
 
-        result = { payment, record };
+        result = { payment, record: records[0], records };
         break;
       }
 
@@ -205,6 +254,7 @@ Deno.serve(async (req: Request) => {
           nextDueDate: params.nextDueDate,
           cycle: params.cycle || 'MONTHLY',
           description: params.description || '',
+          ...chargeTerms(params),
         });
 
         const row = {
@@ -249,6 +299,138 @@ Deno.serve(async (req: Request) => {
             email: c.email || null,
           })),
         };
+        break;
+      }
+
+      case 'fiscal_status': {
+        // A emissão depende da configuração fiscal municipal feita na conta
+        // Asaas (certificado/credenciais da prefeitura). Sem ela, nada emite —
+        // então a tela pergunta antes de oferecer.
+        const optional = async (path: string) => {
+          try { return await asaas(path, 'GET'); } catch { return null; }
+        };
+        const [info, services] = await Promise.all([
+          optional('/fiscalInfo'),
+          optional('/fiscalInfo/services?limit=100'),
+        ]);
+        result = {
+          configured: !!(info && (info.municipalInscription || info.serviceListItem || info.certificateSent || info.accessTokenSent)),
+          info: info
+            ? {
+                email: info.email || null,
+                municipalInscription: info.municipalInscription || null,
+                simplesNacional: !!info.simplesNacional,
+                specialTaxRegime: info.specialTaxRegime || null,
+                serviceListItem: info.serviceListItem || null,
+                certificateSent: !!info.certificateSent,
+                accessTokenSent: !!info.accessTokenSent,
+              }
+            : null,
+          services: (services?.data || []).map((s: any) => ({
+            id: s.id, description: s.description, issTax: s.issTax ?? null,
+          })),
+        };
+        break;
+      }
+
+      case 'schedule_invoice': {
+        // Nota avulsa: amarrada a uma cobrança quando existe, senão ao cliente.
+        const payload: Record<string, unknown> = {
+          serviceDescription: params.serviceDescription || '',
+          observations: params.observations || '',
+          value: Number(params.value),
+          deductions: Number(params.deductions) || 0,
+          effectiveDate: params.effectiveDate,
+          taxes: params.taxes,
+        };
+        if (params.paymentId) payload.payment = params.paymentId;
+        else if (params.clientId) {
+          const { customerId } = await ensureCustomer(params.clientId);
+          payload.customer = customerId;
+        } else {
+          throw new Error('Informe a cobrança ou o cliente da nota.');
+        }
+        if (params.municipalServiceId) payload.municipalServiceId = params.municipalServiceId;
+        else if (params.municipalServiceCode) payload.municipalServiceCode = params.municipalServiceCode;
+        else throw new Error('Informe o serviço municipal da nota.');
+        if (params.updatePayment !== undefined) payload.updatePayment = !!params.updatePayment;
+
+        result = { invoice: await asaas('/invoices', 'POST', payload) };
+        break;
+      }
+
+      case 'subscription_invoice_settings': {
+        // Configuração de NF automática: vale para toda cobrança que a
+        // assinatura gerar daqui pra frente.
+        const subId = String(params.subscriptionId || '');
+        if (!subId) throw new Error('Assinatura sem vínculo no Asaas.');
+
+        if (params.remove) {
+          await asaas(`/subscriptions/${subId}/invoiceSettings`, 'DELETE');
+          result = { settings: null };
+        } else if (params.settings) {
+          result = { settings: await asaas(`/subscriptions/${subId}/invoiceSettings`, 'POST', params.settings) };
+        } else {
+          // Sem configuração, o Asaas responde erro — aqui isso é só "não tem".
+          let current: any = null;
+          try { current = await asaas(`/subscriptions/${subId}/invoiceSettings`, 'GET'); } catch { current = null; }
+          result = { settings: current };
+        }
+        break;
+      }
+
+      case 'customer_notifications': {
+        // Notificação no Asaas é por cliente, não por cobrança — é aqui que se
+        // escolhe e-mail, SMS, WhatsApp ou ligação, evento a evento.
+        const { data: client } = await supabase.from('clients')
+          .select('id, asaas_customer_id').eq('id', params.clientId).single();
+        if (!client) throw new Error('Cliente não encontrado.');
+        if (!client.asaas_customer_id) {
+          // Não força a criação no Asaas só para ler configuração.
+          result = { linked: false, notificationDisabled: false, notifications: [] };
+          break;
+        }
+        const [customer, list] = await Promise.all([
+          asaas(`/customers/${client.asaas_customer_id}`, 'GET'),
+          asaas(`/customers/${client.asaas_customer_id}/notifications`, 'GET'),
+        ]);
+        result = {
+          linked: true,
+          notificationDisabled: !!customer.notificationDisabled,
+          notifications: (list.data || []).map((n: any) => ({
+            id: n.id,
+            event: n.event,
+            enabled: !!n.enabled,
+            emailEnabledForProvider: !!n.emailEnabledForProvider,
+            smsEnabledForProvider: !!n.smsEnabledForProvider,
+            emailEnabledForCustomer: !!n.emailEnabledForCustomer,
+            smsEnabledForCustomer: !!n.smsEnabledForCustomer,
+            phoneCallEnabledForCustomer: !!n.phoneCallEnabledForCustomer,
+            whatsappEnabledForCustomer: !!n.whatsappEnabledForCustomer,
+            scheduleOffset: n.scheduleOffset ?? 0,
+          })),
+        };
+        break;
+      }
+
+      case 'update_customer_notifications': {
+        const { data: client } = await supabase.from('clients')
+          .select('id, asaas_customer_id').eq('id', params.clientId).single();
+        if (!client?.asaas_customer_id) throw new Error('Cliente ainda não está no Asaas.');
+
+        if (params.notificationDisabled !== undefined) {
+          await asaas(`/customers/${client.asaas_customer_id}`, 'PUT', {
+            notificationDisabled: !!params.notificationDisabled,
+          });
+        }
+        const list = (params.notifications as any[]) || [];
+        if (list.length) {
+          await asaas('/notifications/batch', 'PUT', {
+            customer: client.asaas_customer_id,
+            notifications: list,
+          });
+        }
+        result = { updated: true };
         break;
       }
 

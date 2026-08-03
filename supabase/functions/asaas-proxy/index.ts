@@ -252,6 +252,41 @@ Deno.serve(async (req: Request) => {
         break;
       }
 
+      case 'payment_share_info': {
+        // Tudo que dá para mandar na mão para o cliente: link da fatura, PDF do
+        // boleto, linha digitável e PIX copia-e-cola.
+        // Cada parte é opcional de propósito — cobrança só de cartão não tem
+        // boleto, cobrança já paga não tem mais QR de PIX — e a falta de uma não
+        // pode derrubar as outras.
+        const paymentId = String(params.paymentId || '');
+        if (!paymentId) throw new Error('Cobrança sem vínculo no Asaas.');
+
+        const payment = await asaas(`/payments/${paymentId}`, 'GET');
+        const optional = async (path: string) => {
+          try { return await asaas(path, 'GET'); } catch { return null; }
+        };
+        const [slip, pix] = await Promise.all([
+          optional(`/payments/${paymentId}/identificationField`),
+          optional(`/payments/${paymentId}/pixQrCode`),
+        ]);
+
+        result = {
+          info: {
+            status: payment.status || null,
+            value: payment.value ?? null,
+            dueDate: payment.dueDate || null,
+            billingType: payment.billingType || null,
+            invoiceUrl: payment.invoiceUrl || null,
+            bankSlipUrl: payment.bankSlipUrl || null,
+            identificationField: slip?.identificationField || null,
+            barCode: slip?.barCode || null,
+            pixPayload: pix?.payload || null,
+            pixQrCode: pix?.encodedImage || null,
+          },
+        };
+        break;
+      }
+
       case 'update_charge': {
         // params: paymentId, recordId, value?, dueDate?, description?, billingType?, productId?
         const asaasPayload: Record<string, unknown> = {};

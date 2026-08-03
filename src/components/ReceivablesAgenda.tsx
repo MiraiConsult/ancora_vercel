@@ -3,8 +3,9 @@ import { FinancialRecord, Company, Product } from '../types';
 import { asaasCustomerContacts, AsaasContact } from '../services/asaasService';
 import {
   AlertTriangle, CalendarClock, CheckCircle2, ExternalLink, MessageCircle, Loader2,
-  Search, Copy, Check, Phone, ChevronDown,
+  Search, Copy, Check, Phone, ChevronDown, QrCode,
 } from 'lucide-react';
+import { ChargeShareModal } from './ChargeShareModal';
 
 interface ReceivablesAgendaProps {
   records: FinancialRecord[];
@@ -62,6 +63,7 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
   const [search, setSearch] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [horizon, setHorizon] = useState(30);
+  const [shareCharge, setShareCharge] = useState<FinancialRecord | null>(null);
 
   const companyById = useMemo(() => new Map(companies.map(c => [c.id, c])), [companies]);
   const clientName = (id?: string) => companyById.get(id || '')?.name || 'Sem cliente';
@@ -168,6 +170,12 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
               className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-[#25D366]/10 text-[#0f8a43] hover:bg-[#25D366]/20 transition-colors">
               <MessageCircle size={14} /> Cobrar
             </button>
+            {r.asaas_payment_id && (
+              <button onClick={() => setShareCharge(r)} title="Boleto, PIX e link para mandar ao cliente"
+                className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
+                <QrCode size={15} />
+              </button>
+            )}
             <button onClick={() => copyMessage(r)} title="Copiar mensagem"
               className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
               {copiedId === r.id ? <Check size={15} className="text-green-600" /> : <Copy size={15} />}
@@ -186,6 +194,15 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
 
   return (
     <div className="space-y-6">
+      {shareCharge && (
+        <ChargeShareModal
+          charge={shareCharge}
+          clientName={clientName(shareCharge.companyId)}
+          waPhone={waPhone(contactFor(shareCharge.companyId)?.phone)}
+          onClose={() => setShareCharge(null)}
+        />
+      )}
+
       {/* Indicadores */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Stat label="Em atraso" value={brl(sum(overdue))} hint={`${overdue.length} cobrança(s)`} tone="critical" />

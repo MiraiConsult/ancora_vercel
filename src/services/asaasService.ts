@@ -129,6 +129,26 @@ export const asaasCreateTransfer = (params: { recordId: string }) =>
 export const asaasDeleteSubscription = (params: { rowId: string; subscriptionId?: string }) =>
   invoke('delete_subscription', params);
 
+/** Formas de mandar a cobrança na mão — o que o Asaas devolve por cobrança. */
+export interface ChargeShareInfo {
+  status: string | null;
+  value: number | null;
+  dueDate: string | null;
+  billingType: string | null;
+  invoiceUrl: string | null;
+  bankSlipUrl: string | null;
+  identificationField: string | null;
+  barCode: string | null;
+  pixPayload: string | null;
+  /** PNG do QR Code em base64 (sem o prefixo data:). */
+  pixQrCode: string | null;
+}
+
+export const asaasPaymentShareInfo = async (paymentId: string): Promise<ChargeShareInfo> => {
+  const data = await invoke('payment_share_info', { paymentId });
+  return data.info as ChargeShareInfo;
+};
+
 export interface AsaasContact { id: string; name: string; phone: string | null; email: string | null }
 
 /** Telefone/e-mail dos clientes, direto do Asaas (para cobrança via WhatsApp) */

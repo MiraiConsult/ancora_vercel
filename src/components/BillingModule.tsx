@@ -8,10 +8,11 @@ import { supabase } from '../lib/supabaseClient';
 import {
   FileText, Repeat, Plus, X, Save, Search, ExternalLink, Loader2,
   CheckCircle2, Clock, AlertCircle, DollarSign, Zap, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown,
-  Pencil, Trash2, CalendarClock, ChevronDown, ChevronRight, Wallet, UserPlus,
+  Pencil, Trash2, CalendarClock, ChevronDown, ChevronRight, Wallet, UserPlus, QrCode,
 } from 'lucide-react';
 import { ReceivablesAgenda } from './ReceivablesAgenda';
 import { BillingProjection } from './BillingProjection';
+import { ChargeShareModal } from './ChargeShareModal';
 import { CYCLE_OPTIONS, cycleLabel } from '../lib/cycles';
 
 interface BillingModuleProps {
@@ -96,6 +97,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
 
   const [editCharge, setEditCharge] = useState<FinancialRecord | null>(null);
   const [editSub, setEditSub] = useState<Subscription | null>(null);
+  const [shareCharge, setShareCharge] = useState<FinancialRecord | null>(null);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -387,9 +389,18 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
             onDeleteSub={handleDeleteSub}
             onEditCharge={setEditCharge}
             onDeleteCharge={handleDeleteCharge}
+            onShareCharge={setShareCharge}
             {...sortProps}
           />
         </>
+      )}
+
+      {shareCharge && (
+        <ChargeShareModal
+          charge={shareCharge}
+          clientName={clientName(shareCharge.companyId)}
+          onClose={() => setShareCharge(null)}
+        />
       )}
 
       {editCharge && (
@@ -502,12 +513,13 @@ interface BillingListProps extends SortProps {
   onEditSub: (s: Subscription) => void;
   onDeleteSub: (s: Subscription) => void;
   onEditCharge: (r: FinancialRecord) => void;
+  onShareCharge: (r: FinancialRecord) => void;
   onDeleteCharge: (r: FinancialRecord) => void;
 }
 
 const BillingList: React.FC<BillingListProps> = ({
   rows, totals, expanded, onToggle, productName, statusBadge,
-  onEditSub, onDeleteSub, onEditCharge, onDeleteCharge, sortField, sortDir, onSort,
+  onEditSub, onDeleteSub, onEditCharge, onDeleteCharge, onShareCharge, sortField, sortDir, onSort,
 }) => {
   const sp = { sortField, sortDir, onSort };
   const today = todayISO();
@@ -621,6 +633,12 @@ const BillingList: React.FC<BillingListProps> = ({
                               <ExternalLink size={16} />
                             </a>
                           )}
+                          {!isSub && r!.asaas_payment_id && row.status !== 'Pago' && (
+                            <button onClick={() => onShareCharge(r!)} title="Boleto, PIX e link para mandar ao cliente"
+                                    className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded-lg transition-colors">
+                              <QrCode size={16} />
+                            </button>
+                          )}
                           <button
                             onClick={() => (isSub ? onEditSub(s!) : onEditCharge(r!))}
                             className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded-lg transition-colors"
@@ -672,6 +690,12 @@ const BillingList: React.FC<BillingListProps> = ({
                                            className="p-1.5 text-gray-400 hover:text-mcsystem-600 rounded-md">
                                           <ExternalLink size={14} />
                                         </a>
+                                      )}
+                                      {c.asaas_payment_id && (c.status as string) !== 'Pago' && (
+                                        <button onClick={() => onShareCharge(c)} title="Boleto, PIX e link para mandar ao cliente"
+                                                className="p-1.5 text-gray-400 hover:text-mcsystem-600 rounded-md">
+                                          <QrCode size={14} />
+                                        </button>
                                       )}
                                       <button onClick={() => onEditCharge(c)} className="p-1.5 text-gray-400 hover:text-mcsystem-600 rounded-md" title="Editar cobrança"><Pencil size={14} /></button>
                                       <button onClick={() => onDeleteCharge(c)} className="p-1.5 text-gray-400 hover:text-red-600 rounded-md" title="Excluir cobrança"><Trash2 size={14} /></button>

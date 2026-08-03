@@ -1349,6 +1349,11 @@ const newRecords: FinancialRecord[] = [];
             ...newRecord,
             description: baseDescription,
             amount: calculatedAmount,
+            // O sinal é a fonte única da verdade: positivo entra, negativo sai.
+            // O type deixa de ser escolhido à parte para não poder discordar do
+            // sinal — havia lançamento contado como receita numa tela e como
+            // despesa em outra.
+            type: calculatedAmount >= 0 ? TransactionType.INCOME : TransactionType.EXPENSE,
             dueDate: finalDueDate,
             competenceDate: editingTransactionId
                 ? newRecord.competenceDate
@@ -1703,6 +1708,9 @@ const newRecords: FinancialRecord[] = [];
           const filtered = validRecords.filter(r => {
               const d = r.dueDate;
               if (!d) return false;
+              // Aporte, empréstimo e transferência entram no caixa, não no
+              // resultado — ficam fora de receita, despesa, margem e DRE.
+              if (r.non_operating) return false;
               const [y, mo] = d.split('-');
               return parseInt(y) === period.year && period.months.includes(parseInt(mo));
           });
@@ -2564,7 +2572,23 @@ const newRecords: FinancialRecord[] = [];
                             <div className="space-y-6">
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Descrição</label><input required type="text" placeholder="Ex: Venda de Consultoria" value={newRecord.description} onChange={e => setNewRecord({...newRecord, description: e.target.value})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-mcsystem-500 outline-none"/></div>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Valor (R$)</label><input required type="number" step="0.01" placeholder="0,00" value={newRecord.amount || ''} onChange={e => setNewRecord({...newRecord, amount: Number(e.target.value)})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/><p className="text-[10px] text-gray-400 mt-1">Positivo = entrada · Negativo = saída</p></div>
+                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Valor (R$)</label><input required type="number" step="0.01" placeholder="0,00" value={newRecord.amount || ''} onChange={e => setNewRecord({...newRecord, amount: Number(e.target.value)})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/><p className="text-[10px] text-gray-400 mt-1">Positivo = entrada · Negativo = saída</p>
+                                    {(newRecord.amount || 0) > 0 && (
+                                      <label className="flex items-start gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={!!newRecord.non_operating}
+                                          onChange={e => setNewRecord({ ...newRecord, non_operating: e.target.checked })}
+                                          className="mt-0.5 rounded border-gray-300 text-mcsystem-600 focus:ring-mcsystem-500"
+                                        />
+                                        <span>
+                                          Não é receita
+                                          <span className="block text-[10px] text-gray-400">
+                                            Aporte, empréstimo ou transferência: entra no caixa, fica fora do DRE e do faturamento.
+                                          </span>
+                                        </span>
+                                      </label>
+                                    )}</div>
                                     <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Status</label><select value={newRecord.status} onChange={e => setNewRecord({...newRecord, status: e.target.value as any})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white"><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.PAID}>Pago</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select></div>
                                 </div>
 

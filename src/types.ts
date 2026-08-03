@@ -85,6 +85,12 @@ export interface FinancialRecord {
   revenueTypeId?: string;
   bankId?: string;
   needsValidation?: boolean;
+  /**
+   * Entrada/saída que não é operacional: aporte de sócio, empréstimo,
+   * transferência. Conta no caixa e no saldo, fica fora de receita, DRE e
+   * indicadores de faturamento.
+   */
+  non_operating?: boolean;
   dealId?: string; // Legado — mantido para compatibilidade com registros existentes
   seriesId?: string;
   split_revenue?: { revenue_type_id?: string; product_id?: string; amount: number; }[];

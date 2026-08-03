@@ -143,6 +143,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
     return records
       .filter(r => {
         if (r.needsValidation) return false;
+        // Aporte e afins entram no caixa, mas não são cobrança de ninguém.
+        if (r.non_operating) return false;
 
         if (flow === 'INCOME' && r.type !== TransactionType.INCOME) return false;
         if (flow === 'EXPENSE' && r.type !== TransactionType.EXPENSE) return false;

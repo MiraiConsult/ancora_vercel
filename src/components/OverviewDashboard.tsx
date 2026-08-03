@@ -79,7 +79,11 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
   const productName = (id?: string | null) => products.find(p => p.id === id)?.name || null;
   const companyName = (id?: string) => companies.find(c => c.id === id)?.name || 'Sem cliente';
 
-  const validRecords = useMemo(() => records.filter(r => !r.needsValidation), [records]);
+  // Aporte, empréstimo e transferência são caixa, não faturamento — fora daqui.
+  const validRecords = useMemo(
+    () => records.filter(r => !r.needsValidation && !r.non_operating),
+    [records],
+  );
 
   const availableYears = useMemo(() => {
     const years = new Set<number>();

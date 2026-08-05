@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { FinancialRecord, TransactionType, TransactionStatus, ChartOfAccount, RevenueType, Bank, Company, User, FinancialRecordSplit, Product } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, AreaChart, Area, Line, PieChart, Pie, ComposedChart, LineChart, ReferenceLine } from 'recharts';
-import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as PieIcon, DollarSign, Plus, X, Save, List, Hash, Tag, Search, Pencil, Trash2, Landmark, Tags, Grid3X3, CalendarRange, FileCheck, Filter, Upload, Download, ChevronDown, TrendingUp, Wallet, ArrowRightLeft, LayoutDashboard, ChevronRight, Eye, EyeOff, Calendar, ArrowUpRight, ArrowDownRight, Minus, Settings2, Check, Copy, RefreshCw, BarChart3, TrendingDown, Sparkles, CreditCard, Clock, CalendarClock, Lock, CheckSquare, Square, CheckCircle2, Calculator, Split, Building, Edit3, Table, BookTemplate, BookOpen, ArrowUp, ArrowDown, ArrowUpDown, Users, Package } from 'lucide-react';
+import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as PieIcon, DollarSign, Plus, X, Save, List, Hash, Tag, Search, Pencil, Trash2, Landmark, Tags, Grid3X3, CalendarRange, FileCheck, Filter, Upload, Download, ChevronDown, TrendingUp, Wallet, ArrowRightLeft, LayoutDashboard, ChevronRight, Eye, EyeOff, Calendar, ArrowUpRight, ArrowDownRight, Minus, Settings2, Check, Copy, RefreshCw, BarChart3, TrendingDown, Sparkles, CreditCard, Clock, CalendarClock, Lock, CheckSquare, Square, CheckCircle2, Calculator, Split, Building, Edit3, Table, BookTemplate, BookOpen, ArrowUp, ArrowDown, ArrowUpDown, Users, Package, Barcode } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { generateFinancialInsight } from '../services/geminiService';
 import { supabase } from '../lib/supabaseClient';
 import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
+import { PayBillModal } from './PayBillModal';
+import { isAsaasEnabled } from '../config';
 
 interface FinanceDashboardProps {
   records: FinancialRecord[];
@@ -173,6 +175,10 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   const [reconFilterStatus, setReconFilterStatus] = useState<TransactionStatus | 'ALL'>('ALL');
   const [reconFilterBank, setReconFilterBank] = useState<string>('ALL');
   const [reconSearch, setReconSearch] = useState('');
+  // A Validação virou um filtro daqui, em vez de tela própria: o lançamento
+  // pendente some do DRE e do Dashboard, então precisa ser fácil de achar.
+  const [reconOnlyPending, setReconOnlyPending] = useState(false);
+  const [billTarget, setBillTarget] = useState<FinancialRecord | null>(null);
   const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
 
   // Sorting State for Reconciliation
@@ -2125,7 +2131,8 @@ const newRecords: FinancialRecord[] = [];
   };
 
   const renderUnifiedTransactions = () => {
-      let filtered = validRecords.filter(r => {
+      const base = reconOnlyPending ? pendingValidationRecords : validRecords;
+      let filtered = base.filter(r => {
           const matchesType = reconFilterType === 'ALL' || r.type === reconFilterType;
           const matchesStatus = reconFilterStatus === 'ALL' || r.status === reconFilterStatus;
           const matchesBank = reconFilterBank === 'ALL' || r.bankId === reconFilterBank;
@@ -2193,6 +2200,23 @@ const newRecords: FinancialRecord[] = [];
       const allSelected = filtered.length > 0 && selectedRecordIds.size === filtered.length;
       return (
           <div className="space-y-4 animate-in fade-in">
+              {reconOnlyPending && (
+                <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg flex items-start gap-3">
+                  <AlertCircle className="text-yellow-600 flex-shrink-0 mt-0.5" size={20} />
+                  <div className="flex-1">
+                    <h4 className="font-bold text-yellow-800 text-sm">Pendentes de validação</h4>
+                    <p className="text-sm text-yellow-700 mt-1">
+                      Foram importados ou gerados automaticamente e <b>ficam fora do DRE, do Fluxo de Caixa e do Dashboard</b> até
+                      serem validados. Confira a rubrica de cada um, selecione e clique em Validar.
+                    </p>
+                  </div>
+                  <button onClick={() => { setReconOnlyPending(false); setSelectedRecordIds(new Set()); }}
+                    className="text-yellow-700 hover:text-yellow-900 text-sm font-medium whitespace-nowrap">
+                    Ver todos
+                  </button>
+                </div>
+              )}
+
               {/* Evolução do caixa — contexto de saldo acima dos lançamentos */}
               <div className="bg-white rounded-lg border border-gray-100 shadow-sm overflow-hidden">
                   <button
@@ -2213,7 +2237,7 @@ const newRecords: FinancialRecord[] = [];
                   )}
               </div>
 
-              <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-lg border border-gray-100 shadow-sm transition-all">{selectedRecordIds.size > 0 ? (<div className="flex items-center justify-between w-full animate-in slide-in-from-top-2"><div className="flex items-center space-x-4"><div className="bg-mcsystem-500 text-white px-3 py-1.5 rounded-md text-sm font-bold flex items-center shadow-sm"><CheckSquare size={16} className="mr-2"/> {selectedRecordIds.size} Selecionados</div><button onClick={() => setSelectedRecordIds(new Set())} className="text-gray-500 hover:text-gray-700 text-sm flex items-center"><X size={14} className="mr-1"/> Cancelar</button></div><div className="flex items-center space-x-2"><button onClick={() => handleBulkStatusChange(TransactionStatus.PAID)} className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><CheckCircle2 size={14} className="mr-1"/> Marcar Pago</button><button onClick={() => handleBulkStatusChange(TransactionStatus.PENDING)} className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Clock size={14} className="mr-1"/> Marcar Pendente</button><div className="h-4 w-px bg-gray-300 mx-2"></div><button onClick={handleBulkDuplicate} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Copy size={14} className="mr-1"/> Duplicar</button><button onClick={handleBulkDelete} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Trash2 size={14} className="mr-1"/> Excluir</button></div></div>) : (<><div className="flex gap-4 items-center flex-1"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input type="text" placeholder="Buscar lançamentos..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={reconSearch} onChange={e => setReconSearch(e.target.value)} /></div><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterType} onChange={e => setReconFilterType(e.target.value as any)}><option value="ALL">Todas Movimentações</option><option value={TransactionType.INCOME}>Receitas</option><option value={TransactionType.EXPENSE}>Despesas</option></select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterBank} onChange={e => setReconFilterBank(e.target.value as any)}><option value="ALL">Todos os Bancos</option>{banks.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}</select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterStatus} onChange={e => setReconFilterStatus(e.target.value as any)}><option value="ALL">Todos Status</option><option value={TransactionStatus.PAID}>Realizado / Pago</option><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select></div><button onClick={() => { resetTransactionForm(); setIsModalOpen(true); }} className="bg-mcsystem-500 hover:bg-mcsystem-400 text-white px-4 py-2 rounded-lg font-bold flex items-center shadow-sm whitespace-nowrap"><Plus size={18} className="mr-2" /> Novo Lançamento</button></>)}</div>
+              <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-lg border border-gray-100 shadow-sm transition-all">{selectedRecordIds.size > 0 ? (<div className="flex items-center justify-between w-full animate-in slide-in-from-top-2"><div className="flex items-center space-x-4"><div className="bg-mcsystem-500 text-white px-3 py-1.5 rounded-md text-sm font-bold flex items-center shadow-sm"><CheckSquare size={16} className="mr-2"/> {selectedRecordIds.size} Selecionados</div><button onClick={() => setSelectedRecordIds(new Set())} className="text-gray-500 hover:text-gray-700 text-sm flex items-center"><X size={14} className="mr-1"/> Cancelar</button></div><div className="flex items-center space-x-2">{reconOnlyPending && (<button onClick={handleBulkValidate} className="bg-yellow-400 text-yellow-950 hover:bg-yellow-300 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center border border-yellow-500"><CheckCircle2 size={14} className="mr-1"/> Validar</button>)}<button onClick={() => handleBulkStatusChange(TransactionStatus.PAID)} className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><CheckCircle2 size={14} className="mr-1"/> Marcar Pago</button><button onClick={() => handleBulkStatusChange(TransactionStatus.PENDING)} className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Clock size={14} className="mr-1"/> Marcar Pendente</button><div className="h-4 w-px bg-gray-300 mx-2"></div><button onClick={handleBulkDuplicate} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Copy size={14} className="mr-1"/> Duplicar</button><button onClick={handleBulkDelete} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Trash2 size={14} className="mr-1"/> Excluir</button></div></div>) : (<><div className="flex gap-4 items-center flex-1"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input type="text" placeholder="Buscar lançamentos..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={reconSearch} onChange={e => setReconSearch(e.target.value)} /></div><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterType} onChange={e => setReconFilterType(e.target.value as any)}><option value="ALL">Todas Movimentações</option><option value={TransactionType.INCOME}>Receitas</option><option value={TransactionType.EXPENSE}>Despesas</option></select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterBank} onChange={e => setReconFilterBank(e.target.value as any)}><option value="ALL">Todos os Bancos</option>{banks.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}</select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterStatus} onChange={e => setReconFilterStatus(e.target.value as any)}><option value="ALL">Todos Status</option><option value={TransactionStatus.PAID}>Realizado / Pago</option><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select>{(pendingValidationRecords.length > 0 || reconOnlyPending) && (<button onClick={() => { setReconOnlyPending(v => !v); setSelectedRecordIds(new Set()); }} title="Lançamentos importados que ainda não entram no DRE nem no Dashboard" className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${reconOnlyPending ? 'bg-yellow-400 border-yellow-400 text-yellow-950' : 'bg-white border-yellow-200 text-yellow-700 hover:bg-yellow-50'}`}><AlertCircle size={15} /> A validar{pendingValidationRecords.length > 0 && <span className={`text-[10px] font-bold px-1.5 rounded-full ${reconOnlyPending ? 'bg-yellow-950 text-yellow-100' : 'bg-yellow-400 text-yellow-950'}`}>{pendingValidationRecords.length}</span>}</button>)}</div><button onClick={() => { resetTransactionForm(); setIsModalOpen(true); }} className="bg-mcsystem-500 hover:bg-mcsystem-400 text-white px-4 py-2 rounded-lg font-bold flex items-center shadow-sm whitespace-nowrap"><Plus size={18} className="mr-2" /> Novo Lançamento</button></>)}</div>
               <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
                   <table className="w-full text-left text-sm text-gray-600">
                       <thead className="bg-gray-50 text-gray-700 font-bold border-b border-gray-200 uppercase text-xs tracking-wider">
@@ -2245,7 +2269,7 @@ const newRecords: FinancialRecord[] = [];
                                   {/* Saída mantém o sinal: sem ele, entrada e saída ficariam idênticas fora a cor. */}
                                   <td className="p-4 text-right"><div className="flex items-center justify-end gap-2"><span className={`font-bold whitespace-nowrap ${isPositiveFlow ? 'text-green-600' : 'text-red-500'}`}>{isPositiveFlow ? '' : '− '}R$ {Math.abs(realValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div></td>
                                   <td className={`p-4 text-right font-semibold whitespace-nowrap ${saldo < 0 ? 'text-red-600' : 'text-gray-700'}`}>R$ {saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                  <td className="p-4 text-center"><div className="flex justify-center space-x-2"><button onClick={(e) => handleEditTransaction(e, r)} className="flex items-center px-2.5 py-1 bg-mcsystem-50 text-mcsystem-600 rounded text-xs font-medium hover:bg-mcsystem-100 transition-colors"><Pencil size={12} className="mr-1"/> Editar</button><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(e, r.id); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors relative z-10"><Trash2 size={16} className="pointer-events-none" /></button></div></td>
+                                  <td className="p-4 text-center"><div className="flex justify-center space-x-2">{r.amount < 0 && r.status !== TransactionStatus.PAID && !r.asaas_bill_id && !r.asaas_transfer_id && isAsaasEnabled(currentUser?.tenant_id) && (<button type="button" onClick={(e) => { e.stopPropagation(); setBillTarget(r); }} title="Pagar boleto pelo saldo do Asaas" className="flex items-center px-2.5 py-1 bg-green-50 text-green-700 rounded text-xs font-medium hover:bg-green-100 transition-colors"><Barcode size={12} className="mr-1"/> Pagar</button>)}{r.asaas_bill_id && (<span title="Boleto enviado ao Asaas" className="flex items-center px-2.5 py-1 bg-blue-50 text-blue-700 rounded text-xs font-medium"><Barcode size={12} className="mr-1"/> No Asaas</span>)}<button onClick={(e) => handleEditTransaction(e, r)} className="flex items-center px-2.5 py-1 bg-mcsystem-50 text-mcsystem-600 rounded text-xs font-medium hover:bg-mcsystem-100 transition-colors"><Pencil size={12} className="mr-1"/> Editar</button><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(e, r.id); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors relative z-10"><Trash2 size={16} className="pointer-events-none" /></button></div></td>
                               </tr>
                           )})}
                           {filtered.length === 0 && <tr><td colSpan={9} className="p-8 text-center text-gray-400">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
@@ -2526,6 +2550,17 @@ const newRecords: FinancialRecord[] = [];
         {activeTab === 'CASHFLOW' && renderHierarchicalReport('CASHFLOW')}
         {activeTab === 'COA' && renderCOA()}
         {activeTab === 'VALIDATION' && renderTransactionTable(undefined, true)}
+
+        {billTarget && (
+          <PayBillModal
+            record={billTarget}
+            onClose={() => setBillTarget(null)}
+            onPaid={(billId) => {
+              setRecords(list => list.map(x => x.id === billTarget.id ? { ...x, asaas_bill_id: billId } : x));
+              setBillTarget(null);
+            }}
+          />
+        )}
 
         {isDrillDownOpen && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[80] p-4 backdrop-blur-sm"><div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col animate-in zoom-in-95 duration-200"><div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center rounded-t-xl"><h3 className="font-bold text-gray-800 flex items-center"><List size={18} className="mr-2 text-mcsystem-500" /> Detalhes: {drillDownTitle}</h3><button onClick={() => setIsDrillDownOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button></div><div className="flex-1 overflow-y-auto p-4 bg-gray-50/50">{renderTransactionTable(drillDownRecords)}</div></div></div>)}
         

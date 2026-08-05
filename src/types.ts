@@ -129,6 +129,8 @@ export interface Subscription {
   cycle?: string;          // MONTHLY, WEEKLY, YEARLY... (Asaas)
   billing_type?: string;   // UNDEFINED, BOLETO, PIX, CREDIT_CARD
   next_due_date?: string;
+  end_date?: string;
+  max_payments?: number;
   status?: string;         // ACTIVE, INACTIVE, EXPIRED
   created_at?: string;
 }

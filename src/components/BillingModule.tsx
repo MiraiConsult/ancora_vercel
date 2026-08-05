@@ -14,7 +14,7 @@ import { ReceivablesAgenda } from './ReceivablesAgenda';
 import { BillingProjection } from './BillingProjection';
 import { ChargeShareModal } from './ChargeShareModal';
 import { InvoiceModal } from './InvoiceModal';
-import { CYCLE_OPTIONS, cycleLabel } from '../lib/cycles';
+import { CYCLE_OPTIONS, cycleLabel, cycleStep } from '../lib/cycles';
 
 interface BillingModuleProps {
   companies: Company[];
@@ -642,6 +642,9 @@ const BillingList: React.FC<BillingListProps> = ({
                         <span className={`inline-block text-xs px-2 py-1 rounded-md whitespace-nowrap ${isSub ? 'bg-mcsystem-50 text-mcsystem-700 font-medium' : 'bg-gray-100 text-gray-500'}`}>
                           {row.cycle}
                         </span>
+                        {isSub && s!.max_payments && (
+                          <span className="block text-[11px] text-gray-400 mt-0.5">{s!.max_payments}x</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-gray-600 whitespace-nowrap">{row.date || '—'}</td>
                       <td className="px-6 py-4 text-center">
@@ -1262,6 +1265,17 @@ const SubscriptionModal: React.FC<{
   const [multi, setMulti] = useState(false);
   const [splitRows, setSplitRows] = useState<SplitRow[]>([]);
   const [terms, setTerms] = useState<Terms>(emptyTerms);
+  const [maxPayments, setMaxPayments] = useState<number | ''>('');
+
+  const computeEndDate = (start: string, cy: string, count: number): string => {
+    const d = new Date(start + 'T00:00:00');
+    const step = cycleStep(cy);
+    for (let i = 0; i < count - 1; i++) {
+      if (step.days) d.setDate(d.getDate() + step.days);
+      else d.setMonth(d.getMonth() + step.months);
+    }
+    return d.toISOString().slice(0, 10);
+  };
 
   const onProduct = (id: string) => {
     setProductId(id);
@@ -1281,11 +1295,16 @@ const SubscriptionModal: React.FC<{
     if (multi && (splitSum !== Math.round(value * 100) / 100 || !splitRows.every(r => r.product_id) || !splitRows.length)) {
       return alert('O rateio precisa fechar com o valor da assinatura e todos os produtos precisam estar preenchidos.');
     }
+    const endDate = maxPayments && maxPayments > 0
+      ? computeEndDate(nextDueDate, cycle, maxPayments)
+      : undefined;
     onSubmit({
       clientId,
       productId: (multi ? dominantProduct(splitRows) : productId) || undefined,
       splitProducts: multi ? rowsToPct(splitRows) : undefined,
       value, cycle, nextDueDate, description, billingType,
+      endDate,
+      maxPayments: maxPayments || undefined,
       ...termsPayload(terms),
     });
   };
@@ -1348,6 +1367,24 @@ const SubscriptionModal: React.FC<{
             <select value={billingType} onChange={e => setBillingType(e.target.value)} className={inputCls}>
               {BILLING_TYPES.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
             </select>
+          </div>
+        </div>
+
+        <div>
+          <label className={labelCls}>Quantidade de cobranças (opcional)</label>
+          <div className="flex items-center gap-3">
+            <input
+              type="number" min="1" max="120" step="1"
+              value={maxPayments}
+              onChange={e => setMaxPayments(e.target.value ? parseInt(e.target.value) : '')}
+              className={`${inputCls} w-24`}
+              placeholder="∞"
+            />
+            <span className="text-sm text-gray-500">
+              {maxPayments && maxPayments > 0 && nextDueDate
+                ? `Última cobrança em ${new Date(computeEndDate(nextDueDate, cycle, maxPayments) + 'T00:00:00').toLocaleDateString('pt-BR')}`
+                : 'Deixe vazio para cobrar indefinidamente'}
+            </span>
           </div>
         </div>
 
@@ -1566,6 +1603,7 @@ const SubscriptionEditModal: React.FC<{ sub: Subscription; products: Product[]; 
   const [description, setDescription] = useState(sub.description || '');
   const [saving, setSaving] = useState(false);
   const [multi, setMulti] = useState((sub.split_products?.length || 0) > 0);
+  const [maxPayments, setMaxPayments] = useState<number | ''>(sub.max_payments || '');
   // O rateio é guardado em %, mas editado em R$ sobre o valor atual da assinatura.
   const [splitRows, setSplitRows] = useState<SplitRow[]>(
     (sub.split_products || []).map(s => ({
@@ -1587,18 +1625,32 @@ const SubscriptionEditModal: React.FC<{ sub: Subscription; products: Product[]; 
     try {
       const splitProducts = multi ? rowsToPct(splitRows) : null;
       const finalProduct = multi ? dominantProduct(splitRows) : (productId || null);
+      const editComputeEnd = (start: string, cy: string, count: number): string => {
+        const d = new Date(start + 'T00:00:00');
+        const step = cycleStep(cy);
+        for (let i = 0; i < count - 1; i++) {
+          if (step.days) d.setDate(d.getDate() + step.days);
+          else d.setMonth(d.getMonth() + step.months);
+        }
+        return d.toISOString().slice(0, 10);
+      };
+      const endDate = maxPayments && maxPayments > 0 && nextDueDate
+        ? editComputeEnd(nextDueDate, cycle, maxPayments)
+        : (maxPayments === '' && sub.max_payments ? null : undefined);
       const res: any = await asaasUpdateSubscription({
         rowId: sub.id, subscriptionId: sub.asaas_id,
         value, nextDueDate, cycle, description,
         productId: finalProduct,
         splitProducts,
-        // Trava contra o sync horário, que reclassifica pela descrição.
         productManual: true,
-      });
+        ...(endDate !== undefined ? { endDate: endDate || undefined, maxPayments: maxPayments || undefined } : {}),
+      } as any);
       onSaved({
         id: sub.id, product_id: (finalProduct || null) as any,
         split_products: (splitProducts || null) as any,
         value: Number(value), next_due_date: nextDueDate, cycle, description,
+        max_payments: maxPayments || undefined,
+        end_date: typeof endDate === 'string' ? endDate : undefined,
       });
       const n = res?.chargesUpdated || 0;
       if (multi && n > 0) alert(`Rateio aplicado a ${n} cobrança(s) desta assinatura.`);
@@ -1661,7 +1713,30 @@ const SubscriptionEditModal: React.FC<{ sub: Subscription; products: Product[]; 
             <label className={labelCls}>Próx. vencimento</label>
             <input type="date" value={nextDueDate} onChange={e => setNextDueDate(e.target.value)} className={inputCls} />
           </div>
+          <div>
+            <label className={labelCls}>Qtd. cobranças</label>
+            <input
+              type="number" min="1" max="120" step="1"
+              value={maxPayments}
+              onChange={e => setMaxPayments(e.target.value ? parseInt(e.target.value) : '')}
+              className={inputCls}
+              placeholder="∞"
+            />
+          </div>
         </div>
+        {maxPayments && maxPayments > 0 && nextDueDate && (
+          <p className="text-xs text-gray-500 -mt-2">
+            Última cobrança em {(() => {
+              const d = new Date(nextDueDate + 'T00:00:00');
+              const step = cycleStep(cycle);
+              for (let i = 0; i < (maxPayments as number) - 1; i++) {
+                if (step.days) d.setDate(d.getDate() + step.days);
+                else d.setMonth(d.getMonth() + step.months);
+              }
+              return d.toLocaleDateString('pt-BR');
+            })()}
+          </p>
+        )}
         <div>
           <label className={labelCls}>Descrição</label>
           <input type="text" value={description} onChange={e => setDescription(e.target.value)} className={inputCls} />

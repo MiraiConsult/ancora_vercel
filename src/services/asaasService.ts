@@ -67,6 +67,8 @@ export interface CreateSubscriptionParams extends ChargeTerms {
   productId?: string;
   /** Rateio em % quando a assinatura vende mais de um produto. */
   splitProducts?: { product_id: string; pct: number }[];
+  endDate?: string;
+  maxPayments?: number;
 }
 
 export const asaasSyncCustomer = (clientId: string) =>

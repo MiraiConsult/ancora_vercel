@@ -308,6 +308,7 @@ Deno.serve(async (req: Request) => {
       cycle: s.cycle || 'MONTHLY',
       billing_type: s.billingType || 'UNDEFINED',
       next_due_date: s.nextDueDate || null,
+      end_date: s.endDate || null,
       status: s.status || 'ACTIVE',
       };
     });

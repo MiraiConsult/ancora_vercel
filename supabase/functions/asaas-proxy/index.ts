@@ -247,7 +247,7 @@ Deno.serve(async (req: Request) => {
 
       case 'create_subscription': {
         const { client, customerId } = await ensureCustomer(params.clientId);
-        const sub = await asaas('/subscriptions', 'POST', {
+        const asaasBody: Record<string, unknown> = {
           customer: customerId,
           billingType: params.billingType || 'UNDEFINED',
           value: Number(params.value),
@@ -255,14 +255,15 @@ Deno.serve(async (req: Request) => {
           cycle: params.cycle || 'MONTHLY',
           description: params.description || '',
           ...chargeTerms(params),
-        });
+        };
+        if (params.endDate) asaasBody.endDate = params.endDate;
+        const sub = await asaas('/subscriptions', 'POST', asaasBody);
 
-        const row = {
+        const row: Record<string, unknown> = {
           id: `s${Date.now()}`,
           tenant_id: client.tenant_id,
           client_id: params.clientId,
           product_id: params.productId || null,
-          // Assinatura que vende mais de um produto: rateio em % (soma 100).
           split_products: (params.splitProducts as any[])?.length ? params.splitProducts : null,
           product_manual: !!params.productId || !!(params.splitProducts as any[])?.length,
           asaas_id: sub.id,
@@ -273,6 +274,8 @@ Deno.serve(async (req: Request) => {
           next_due_date: params.nextDueDate,
           status: 'ACTIVE',
         };
+        if (params.endDate) row.end_date = params.endDate;
+        if (params.maxPayments) row.max_payments = Number(params.maxPayments);
         const { error: insErr } = await supabase.from('subscriptions').insert(row);
         if (insErr) throw new Error('Assinatura criada no Asaas, mas falhou ao gravar: ' + insErr.message);
 
@@ -510,13 +513,14 @@ Deno.serve(async (req: Request) => {
       }
 
       case 'update_subscription': {
-        // params: subscriptionId, rowId, value?, nextDueDate?, cycle?, description?, billingType?, productId?
+        // params: subscriptionId, rowId, value?, nextDueDate?, cycle?, description?, billingType?, productId?, endDate?, maxPayments?
         const asaasPayload: Record<string, unknown> = {};
         if (params.value != null) asaasPayload.value = Number(params.value);
         if (params.nextDueDate) asaasPayload.nextDueDate = params.nextDueDate;
         if (params.cycle) asaasPayload.cycle = params.cycle;
         if (params.description != null) asaasPayload.description = params.description;
         if (params.billingType) asaasPayload.billingType = params.billingType;
+        if (params.endDate !== undefined) asaasPayload.endDate = params.endDate || null;
 
         let subscription: any = null;
         if (Object.keys(asaasPayload).length && params.subscriptionId) {
@@ -529,6 +533,8 @@ Deno.serve(async (req: Request) => {
         if (params.cycle) localUpdate.cycle = params.cycle;
         if (params.description != null) localUpdate.description = params.description;
         if (params.billingType) localUpdate.billing_type = params.billingType;
+        if (params.endDate !== undefined) localUpdate.end_date = params.endDate || null;
+        if (params.maxPayments !== undefined) localUpdate.max_payments = params.maxPayments || null;
         if (params.productId !== undefined) localUpdate.product_id = params.productId || null;
         const splitProducts = (params.splitProducts as { product_id: string; pct: number }[] | null | undefined);
         if (splitProducts !== undefined) {

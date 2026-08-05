@@ -8,6 +8,7 @@ import { OverviewDashboard } from './components/OverviewDashboard';
 import { ContractsModule } from './components/ContractsModule';
 import { PayablesAgenda } from './components/PayablesAgenda';
 import { RegistrationsModule } from './components/RegistrationsModule';
+import { SuppliersModule } from './components/SuppliersModule';
 import type { MainTab } from './components/FinanceDashboard';
 
 // Páginas do menu que abrem o módulo financeiro numa aba específica
@@ -49,7 +50,7 @@ import { AlertsModule } from './components/AlertsModule';
 import { DataExportModule } from './components/DataExportModule';
 import { TenantSelector } from './components/TenantSelector';
 import { AuthCallback } from './components/AuthCallback';
-import { User, RevenueType, Bank, Company, FinancialRecord, Tenant, SystemNotification, ChartOfAccount, GeneralNote, Product, Subscription } from './types';
+import { User, RevenueType, Bank, Company, FinancialRecord, Tenant, SystemNotification, ChartOfAccount, GeneralNote, Product, Subscription, Supplier } from './types';
 import { ShieldAlert, Bell, Wifi, WifiOff, AlertTriangle, HelpCircle, X, Database, Building2 } from 'lucide-react';
 import { supabase, supabaseUrl, supabaseKey } from './lib/supabaseClient'; // Import credentials
 import { isAsaasEnabled } from './config';
@@ -118,6 +119,7 @@ const App: React.FC = () => {
   const [financeRecords, setFinanceRecords] = useState<FinancialRecord[]>([]);
   const [generalNotes, setGeneralNotes] = useState<GeneralNote[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
 
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
@@ -332,12 +334,13 @@ const App: React.FC = () => {
         queryWithTenant('general_notes'),
         queryWithTenant('products'),
         queryWithTenant('subscriptions'),
+        queryWithTenant('suppliers'),
       ]);
 
       const [
           companiesRes, financeRes, banksRes, revenueTypesRes,
           notificationsRes, profilesRes, coaRes, orgRes,
-          generalNotesRes, productsRes, subscriptionsRes
+          generalNotesRes, productsRes, subscriptionsRes, suppliersRes
       ] = responses;
 
       const checkError = (res: any, name: string) => {
@@ -355,6 +358,7 @@ const App: React.FC = () => {
       setGeneralNotes(checkError(generalNotesRes, 'general_notes'));
       setProducts(checkError(productsRes, 'products'));
       setSubscriptions(checkError(subscriptionsRes, 'subscriptions'));
+      setSuppliers(checkError(suppliersRes, 'suppliers'));
 
       // Para super admin, orgRes.data é um objeto (single), não array
       if (orgRes.data) {
@@ -640,6 +644,9 @@ const handleAddUser = async (newUser: User) => {
                   onOpenHelp={openHelp}
                 />
               ) : <AccessDenied />,
+              SUPPLIERS: hasPermission('companies')
+                ? <SuppliersModule suppliers={suppliers} setSuppliers={setSuppliers} />
+                : <AccessDenied />,
               PRODUCTS: hasPermission('products')
                 ? <ProductsModule products={products} setProducts={setProducts} currentUser={user} />
                 : <AccessDenied />,
@@ -682,6 +689,8 @@ const handleAddUser = async (newUser: User) => {
       case 'payables':
         return hasPermission('finance') ? (
           <PayablesAgenda
+            suppliers={suppliers}
+            setSuppliers={setSuppliers}
             records={financeRecords}
             setRecords={setFinanceRecords}
             companies={companies}

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Users, Package, Tags, Building } from 'lucide-react';
+import { Users, Package, Tags, Building, Truck } from 'lucide-react';
 import { User } from '../types';
 
-export type RegistrationTab = 'CLIENTS' | 'PRODUCTS' | 'COA' | 'BANKS';
+export type RegistrationTab = 'CLIENTS' | 'SUPPLIERS' | 'PRODUCTS' | 'COA' | 'BANKS';
 
 interface RegistrationsModuleProps {
   currentUser: User;
@@ -12,6 +12,7 @@ interface RegistrationsModuleProps {
 
 const TABS: { id: RegistrationTab; label: string; icon: React.ElementType; perm: string }[] = [
   { id: 'CLIENTS', label: 'Clientes', icon: Users, perm: 'companies' },
+  { id: 'SUPPLIERS', label: 'Fornecedores', icon: Truck, perm: 'companies' },
   { id: 'PRODUCTS', label: 'Produtos', icon: Package, perm: 'products' },
   { id: 'COA', label: 'Plano de Contas', icon: Tags, perm: 'finance' },
   { id: 'BANKS', label: 'Contas Bancárias', icon: Building, perm: 'lists' },

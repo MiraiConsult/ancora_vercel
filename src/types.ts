@@ -32,6 +32,46 @@ export interface GeneralNote extends CompanyNote {
   companyName?: string;
 }
 
+/** Empresa que o usuário pode acessar — a ativa vem do JWT. */
+export interface TenantOption {
+  id: string;
+  name: string;
+  role: string;
+}
+
+/**
+ * Fornecedor: cadastro próprio, separado de clientes, porque carrega o destino
+ * de pagamento (PIX ou conta) usado na hora de pagar uma despesa.
+ */
+export interface Supplier {
+  id: string;
+  tenant_id?: string;
+  name: string;
+  doc_type?: 'CPF' | 'CNPJ';
+  document?: string;
+  email?: string;
+  phone?: string;
+  pix_key?: string;
+  pix_key_type?: 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'EVP';
+  bank_code?: string;
+  bank_agency?: string;
+  bank_account?: string;
+  bank_account_digit?: string;
+  bank_account_type?: string;
+  bank_owner_name?: string;
+  bank_owner_document?: string;
+  zip?: string;
+  address?: string;
+  address_number?: string;
+  complement?: string;
+  district?: string;
+  city?: string;
+  state?: string;
+  notes?: string;
+  status?: string;
+  created_at?: string;
+}
+
 export interface Company {
   id: string;
   tenant_id: string;
@@ -102,6 +142,8 @@ export interface FinancialRecord {
   asaas_transfer_id?: string;
   /** Boleto/tributo pago pela conta Asaas (Pague Contas). */
   asaas_bill_id?: string;
+  /** Fornecedor da despesa — de onde vem a chave PIX/conta na hora de pagar. */
+  supplier_id?: string;
   // Integração Asaas
   asaas_payment_id?: string;
   asaas_invoice_url?: string;

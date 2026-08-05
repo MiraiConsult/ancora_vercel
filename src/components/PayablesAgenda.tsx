@@ -1,15 +1,16 @@
 import React, { useMemo, useState } from 'react';
-import { FinancialRecord, Company, ChartOfAccount, Bank, TransactionStatus, TransactionType, User } from '../types';
+import { FinancialRecord, Company, ChartOfAccount, Bank, Supplier, TransactionStatus, TransactionType, User } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import {
   AlertTriangle, CalendarClock, CheckCircle2, Search, ChevronDown, Loader2, Wallet, Landmark,
   Copy, Check, Send, Barcode, X, Plus,
 } from 'lucide-react';
 import {
-  PayRecordModal, PaymentMethodFields, emptyPayForm, payFormReady, submitPayment,
+  PayRecordModal, PaymentMethodFields, applySupplier, emptyPayForm, payFormReady, submitPayment,
   type PayForm,
 } from './PayRecordModal';
 import { isAsaasEnabled } from '../config';
+import { SupplierModal } from './SupplierForm';
 
 interface PayablesAgendaProps {
   records: FinancialRecord[];
@@ -18,6 +19,8 @@ interface PayablesAgendaProps {
   chartOfAccounts: ChartOfAccount[];
   banks: Bank[];
   currentUser: User;
+  suppliers: Supplier[];
+  setSuppliers: React.Dispatch<React.SetStateAction<Supplier[]>>;
 }
 
 const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Math.abs(v) || 0);
@@ -33,7 +36,7 @@ const daysBetween = (iso: string) => {
   return Math.round((d.getTime() - t.getTime()) / 86400000);
 };
 
-export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setRecords, companies, chartOfAccounts, banks, currentUser }) => {
+export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setRecords, companies, chartOfAccounts, banks, currentUser, suppliers, setSuppliers }) => {
   const [search, setSearch] = useState('');
   const [horizon, setHorizon] = useState(30);
   const [payingId, setPayingId] = useState<string | null>(null);
@@ -43,6 +46,7 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
   const companyName = (id?: string) => companies.find(c => c.id === id)?.name || null;
   const rubricName = (id?: string) => chartOfAccounts.find(c => c.id === id)?.rubricName || null;
   const bankName = (id?: string) => banks.find(b => b.id === id)?.name || null;
+  const supplierName = (id?: string) => suppliers.find(x => x.id === id)?.name || null;
 
   const open = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -51,8 +55,9 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
       .filter(r => !q
         || (r.description || '').toLowerCase().includes(q)
         || (companyName(r.companyId) || '').toLowerCase().includes(q)
+        || (supplierName(r.supplier_id) || '').toLowerCase().includes(q)
         || (rubricName(r.rubricId) || r.category || '').toLowerCase().includes(q));
-  }, [records, search, companies, chartOfAccounts]);
+  }, [records, search, companies, chartOfAccounts, suppliers]);
 
   const today = todayISO();
   const overdue = useMemo(() => open.filter(r => r.dueDate < today).sort((a, b) => a.dueDate.localeCompare(b.dueDate)), [open, today]);
@@ -128,7 +133,8 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
             {cat && <span className="text-[11px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{cat}</span>}
           </div>
           <div className="text-xs text-gray-400 truncate mt-0.5 flex items-center gap-2">
-            {companyName(r.companyId) && <span>{companyName(r.companyId)}</span>}
+            {supplierName(r.supplier_id) && <span>{supplierName(r.supplier_id)}</span>}
+            {!r.supplier_id && companyName(r.companyId) && <span>{companyName(r.companyId)}</span>}
             {bank && <span className="inline-flex items-center gap-1"><Landmark size={10} /> {bank}</span>}
           </div>
           <PaymentAccountLine account={r.payment_account} />
@@ -257,6 +263,8 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
 
       {newOpen && (
         <NewPayableModal
+          suppliers={suppliers}
+          setSuppliers={setSuppliers}
           companies={companies}
           chartOfAccounts={chartOfAccounts}
           banks={banks}
@@ -278,18 +286,23 @@ const NewPayableModal: React.FC<{
   chartOfAccounts: ChartOfAccount[];
   banks: Bank[];
   currentUser: User;
+  suppliers: Supplier[];
+  setSuppliers: React.Dispatch<React.SetStateAction<Supplier[]>>;
   onClose: () => void;
   onCreated: (record: FinancialRecord) => void;
-}> = ({ companies, chartOfAccounts, banks, currentUser, onClose, onCreated }) => {
+}> = ({ companies, chartOfAccounts, banks, currentUser, suppliers, setSuppliers, onClose, onCreated }) => {
   const [description, setDescription] = useState('');
   const [value, setValue] = useState<number | ''>('');
   const [dueDate, setDueDate] = useState(todayISO());
   const [rubricId, setRubricId] = useState('');
-  const [companyId, setCompanyId] = useState('');
+  const [supplierId, setSupplierId] = useState('');
   const [bankId, setBankId] = useState('');
+  const [newSupplier, setNewSupplier] = useState(false);
   const [mode, setMode] = useState<'REGISTER' | 'PAY'>('REGISTER');
   const [payForm, setPayForm] = useState<PayForm>(() => emptyPayForm());
   const [saving, setSaving] = useState(false);
+
+  const supplier = suppliers.find(x => x.id === supplierId);
 
   // Rubricas de despesa: a classificação 1 é receita.
   const expenseRubrics = chartOfAccounts
@@ -322,7 +335,7 @@ const NewPayableModal: React.FC<{
         competenceDate: dueDate,
         category: rubric?.rubricName || 'A CLASSIFICAR',
         rubricId: rubricId || undefined,
-        companyId: companyId || undefined,
+        supplier_id: supplierId || undefined,
         bankId: bankId || undefined,
       } as FinancialRecord;
 
@@ -398,9 +411,21 @@ const NewPayableModal: React.FC<{
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={label}>Fornecedor</label>
-              <select value={companyId} onChange={e => setCompanyId(e.target.value)} className={field}>
+              <select
+                value={supplierId}
+                onChange={e => {
+                  if (e.target.value === '__new__') { setNewSupplier(true); return; }
+                  setSupplierId(e.target.value);
+                  // Escolher o fornecedor já traz o destino de pagamento dele.
+                  const sp = suppliers.find(x => x.id === e.target.value);
+                  if (sp) setPayForm(f => applySupplier(f, sp));
+                }}
+                className={field}
+              >
                 <option value="">Nenhum</option>
-                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {[...suppliers].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+                  .map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
+                <option value="__new__">+ Cadastrar novo fornecedor...</option>
               </select>
             </div>
             <div>
@@ -429,6 +454,11 @@ const NewPayableModal: React.FC<{
 
           {mode === 'PAY' && (
             <div className="bg-gray-50 rounded-xl p-4">
+              {supplier && (supplier.pix_key || supplier.bank_code) && (
+                <p className="text-xs text-mcsystem-700 bg-mcsystem-50 border border-mcsystem-200 rounded-lg px-3 py-2 mb-3">
+                  Dados de <b>{supplier.name}</b> já preenchidos. Confira antes de pagar.
+                </p>
+              )}
               <PaymentMethodFields
                 form={payForm} onChange={setPayForm}
                 overdue={overdue} amount={amount}
@@ -448,6 +478,19 @@ const NewPayableModal: React.FC<{
           </button>
         </div>
       </div>
+
+      {newSupplier && (
+        <SupplierModal
+          compact
+          onClose={() => setNewSupplier(false)}
+          onSaved={(sp) => {
+            setSuppliers(l => [...l, sp]);
+            setSupplierId(sp.id);
+            setPayForm(f => applySupplier(f, sp));
+            setNewSupplier(false);
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { User } from '../types';
 import { isAsaasEnabled } from '../config';
+import { CompanySwitcher } from './CompanySwitcher';
 
 interface SidebarProps {
   currentPage: string;
@@ -146,6 +147,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
       </nav>
 
       <div className="p-4 border-t border-mcsystem-800 bg-mcsystem-900 mt-auto">
+         <div className="mb-3">
+           <CompanySwitcher currentTenantId={currentUser.tenant_id} collapsed={isCollapsed} />
+         </div>
          <div className={`flex items-center rounded-lg bg-mcsystem-800/30 border border-mcsystem-800 backdrop-blur-sm transition-all duration-300 ${isCollapsed ? 'p-2 justify-center' : 'px-3 py-3'}`}>
             <div className={`h-9 w-9 bg-gradient-to-br from-mcsystem-500 to-blue-600 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-lg ring-2 ring-mcsystem-900 flex-shrink-0 ${isCollapsed ? '' : 'mr-3'}`}>
                 {currentUser.avatar || 'US'}

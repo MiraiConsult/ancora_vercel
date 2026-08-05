@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FinancialRecord } from '../types';
+import { FinancialRecord, Supplier } from '../types';
 import { Barcode, X, Loader2, QrCode, KeyRound, Landmark } from 'lucide-react';
 import { asaasPayBill, asaasCreateTransfer } from '../services/asaasService';
 
@@ -60,6 +60,29 @@ export const emptyPayForm = (record?: FinancialRecord): PayForm => {
       ownerName: record?.payment_account?.holder || '', cpfCnpj: '', bankAccountType: 'CONTA_CORRENTE',
     },
   };
+};
+
+/**
+ * Preenche o formulário com o destino cadastrado no fornecedor. Prefere PIX,
+ * que é instantâneo e sem tarifa; cai na conta quando é o que existe. O que o
+ * usuário já digitou no boleto/copia-e-cola não é tocado.
+ */
+export const applySupplier = (f: PayForm, s: Supplier): PayForm => {
+  const bank = {
+    ...f.bank,
+    bankCode: s.bank_code || f.bank.bankCode,
+    agency: s.bank_agency || f.bank.agency,
+    account: s.bank_account || f.bank.account,
+    accountDigit: s.bank_account_digit || f.bank.accountDigit,
+    ownerName: s.bank_owner_name || s.name || f.bank.ownerName,
+    cpfCnpj: s.bank_owner_document || s.document || f.bank.cpfCnpj,
+    bankAccountType: s.bank_account_type || f.bank.bankAccountType,
+  };
+  if (s.pix_key) {
+    return { ...f, method: 'PIX_KEY', pixKey: s.pix_key, pixKeyType: s.pix_key_type || guessKeyType(s.pix_key), bank };
+  }
+  if (s.bank_code) return { ...f, method: 'TED', bank };
+  return { ...f, bank };
 };
 
 export const payFormReady = (f: PayForm): boolean =>
@@ -253,11 +276,15 @@ export const PaymentMethodFields: React.FC<{
 /** Paga um lançamento de despesa já existente pelo saldo do Asaas. */
 export const PayRecordModal: React.FC<{
   record: FinancialRecord;
+  /** Fornecedor do lançamento, quando houver: entra já preenchido. */
+  supplier?: Supplier;
   onClose: () => void;
   /** Recebe o que mudou no lançamento (id do boleto ou da transferência). */
   onPaid: (patch: Partial<FinancialRecord>) => void;
-}> = ({ record, onClose, onPaid }) => {
-  const [form, setForm] = useState<PayForm>(() => emptyPayForm(record));
+}> = ({ record, supplier, onClose, onPaid }) => {
+  const [form, setForm] = useState<PayForm>(
+    () => supplier ? applySupplier(emptyPayForm(record), supplier) : emptyPayForm(record),
+  );
   const [sending, setSending] = useState(false);
   const overdue = !!record.dueDate && record.dueDate < todayISO();
 
@@ -291,6 +318,7 @@ export const PayRecordModal: React.FC<{
           <div className="bg-gray-50 rounded-xl px-4 py-3 text-sm">
             <p className="font-semibold text-gray-900">{record.description || 'Despesa'}</p>
             <p className="text-gray-500 mt-0.5">{brl(record.amount)} · vence {fmtDate(record.dueDate)}</p>
+            {supplier && <p className="text-gray-500 mt-0.5">Fornecedor: {supplier.name}</p>}
           </div>
 
           <PaymentMethodFields form={form} onChange={setForm} overdue={overdue} amount={record.amount} autoFocus />

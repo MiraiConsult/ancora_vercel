@@ -100,6 +100,8 @@ export interface FinancialRecord {
   payment_account?: PaymentAccount;
   /** Transferência do Asaas gerada por este lançamento (pagamento por PIX). */
   asaas_transfer_id?: string;
+  /** Boleto/tributo pago pela conta Asaas (Pague Contas). */
+  asaas_bill_id?: string;
   // Integração Asaas
   asaas_payment_id?: string;
   asaas_invoice_url?: string;

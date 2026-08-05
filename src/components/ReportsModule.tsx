@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { FinancialRecord, Company, Product, TransactionType, TransactionStatus } from '../types';
+import { FinancialRecord, Company, Product, ChartOfAccount, TransactionType, TransactionStatus } from '../types';
 import * as XLSX from 'xlsx';
+import { PayablesReport } from './PayablesReport';
 import {
   Search, Download, AlertTriangle, CalendarClock, CheckCircle2, Layers,
   X, ChevronDown, Users, FileBarChart,
@@ -10,8 +11,10 @@ interface ReportsModuleProps {
   records: FinancialRecord[];
   companies: Company[];
   products: Product[];
+  chartOfAccounts: ChartOfAccount[];
 }
 
+type Section = 'RECEIVABLES' | 'PAYABLES';
 type View = 'OVERDUE' | 'UPCOMING' | 'PAID' | 'ALL';
 type Flow = 'INCOME' | 'EXPENSE' | 'BOTH';
 
@@ -98,7 +101,8 @@ const MultiPicker: React.FC<{
   );
 };
 
-export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies, products }) => {
+export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies, products, chartOfAccounts }) => {
+  const [section, setSection] = useState<Section>('RECEIVABLES');
   const [view, setView] = useState<View>('OVERDUE');
   const [flow, setFlow] = useState<Flow>('INCOME');
   const [from, setFrom] = useState('');
@@ -233,17 +237,53 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
   };
   const hasFilters = !!(from || to || selProducts || selClients || search);
 
+  const pageHeader = (
+    <div className="bg-white p-6 rounded-2xl border border-gray-200/80 flex items-start gap-4">
+      <div className="bg-gray-900 p-3 rounded-xl text-white"><FileBarChart size={26} /></div>
+      <div>
+        <h2 className="text-xl font-bold text-gray-900">Relatórios</h2>
+        <p className="text-sm text-gray-500 mt-0.5">
+          {section === 'PAYABLES'
+            ? 'Quanto se deve, agrupado por rubrica, fornecedor ou mês.'
+            : 'Quem está em atraso, o que vence adiante e o que já foi pago — com filtros de período e produto.'}
+        </p>
+      </div>
+    </div>
+  );
+
+  const sectionTabs = (
+    <div className="border-b border-gray-200">
+      <nav className="flex gap-1 -mb-px">
+        {([['RECEIVABLES', 'Recebimentos'], ['PAYABLES', 'Contas a Pagar']] as const).map(([key, label]) => (
+          <button
+            key={key} onClick={() => setSection(key)}
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+              section === key
+                ? 'border-mcsystem-500 text-mcsystem-700'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+
+  if (section === 'PAYABLES') {
+    return (
+      <div className="space-y-5 animate-in fade-in duration-300">
+        {pageHeader}
+        {sectionTabs}
+        <PayablesReport records={records} companies={companies} chartOfAccounts={chartOfAccounts} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5 animate-in fade-in duration-300">
-      <div className="bg-white p-6 rounded-2xl border border-gray-200/80 flex items-start gap-4">
-        <div className="bg-gray-900 p-3 rounded-xl text-white"><FileBarChart size={26} /></div>
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">Relatórios</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Quem está em atraso, o que vence adiante e o que já foi pago — com filtros de período e produto.
-          </p>
-        </div>
-      </div>
+      {pageHeader}
+      {sectionTabs}
 
       {/* Visões */}
       <div className="flex flex-wrap gap-2">

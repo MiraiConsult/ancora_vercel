@@ -12,6 +12,9 @@ interface ListsModuleProps {
   products: Product[];
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
   currentUser: User;
+  /** Aberto de dentro da página de Cadastros: as abas são de lá, não daqui. */
+  hideTabs?: boolean;
+  initialList?: ListType;
 }
 
 type ListType = 'PRODUCTS' | 'BANKS';
@@ -20,9 +23,11 @@ export const ListsModule: React.FC<ListsModuleProps> = ({
     revenueTypes, setRevenueTypes,
     banks, setBanks,
     products, setProducts,
-    currentUser
+    currentUser,
+    hideTabs = false,
+    initialList = 'PRODUCTS',
 }) => {
-  const [activeList, setActiveList] = useState<ListType>('PRODUCTS');
+  const [activeList, setActiveList] = useState<ListType>(initialList);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -225,10 +230,10 @@ export const ListsModule: React.FC<ListsModuleProps> = ({
   return (
     <div className="space-y-6">
       <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv" className="hidden" />
-      <h2 className="text-2xl font-bold text-gray-800">Listas e Cadastros Auxiliares</h2>
+      {!hideTabs && <h2 className="text-2xl font-bold text-gray-800">Listas e Cadastros Auxiliares</h2>}
 
       <div className="flex flex-col lg:flex-row gap-6">
-            {/* Sidebar Tabs */}
+            {!hideTabs && (
             <div className="lg:w-64 flex flex-col space-y-2">
                 <button onClick={() => setActiveList('PRODUCTS')} className={`p-3 rounded-lg text-left flex items-center font-medium ${activeList === 'PRODUCTS' ? 'bg-mcsystem-500 text-white shadow-md' : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200'}`}>
                     <Package size={18} className="mr-3" /> Produtos
@@ -237,6 +242,7 @@ export const ListsModule: React.FC<ListsModuleProps> = ({
                     <Building size={18} className="mr-3" /> Contas Bancárias
                 </button>
             </div>
+            )}
 
             {/* Content Area */}
             {activeList === 'PRODUCTS' ? (

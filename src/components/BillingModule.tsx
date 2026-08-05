@@ -41,6 +41,45 @@ const formatBRL = (v: number) =>
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+const addDaysISO = (iso: string, days: number) => {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+/** Anda meses preservando o dia — 31/jan + 1 mês vira 28/fev, como no Asaas. */
+const addMonthsISO = (iso: string, months: number) => {
+  const d = new Date(iso + 'T00:00:00Z');
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, lastDay));
+  return d.toISOString().slice(0, 10);
+};
+
+/**
+ * O Asaas só emite a cobrança perto do vencimento, então a assinatura mostra
+ * duas ou três e parece que acaba ali. Aqui as que faltam são projetadas a
+ * partir do próximo vencimento: até a última quando há prazo definido, senão
+ * um ano à frente.
+ */
+const projectSchedule = (
+  sub: Subscription,
+  issued: FinancialRecord[],
+): { dueDate: string; amount: number }[] => {
+  if ((sub.status || 'ACTIVE').toUpperCase() !== 'ACTIVE' || !sub.next_due_date) return [];
+  const step = cycleStep(sub.cycle);
+  const stop = sub.end_date?.slice(0, 10) || addMonthsISO(todayISO(), 12);
+  const taken = new Set(issued.map(c => (c.dueDate || '').slice(0, 7)));
+  const out: { dueDate: string; amount: number }[] = [];
+  let d = sub.next_due_date.slice(0, 10);
+  for (let i = 0; i < 240 && d <= stop; i++) {
+    if (!taken.has(d.slice(0, 7))) out.push({ dueDate: d, amount: sub.value || 0 });
+    d = step.days ? addDaysISO(d, step.days) : addMonthsISO(d, step.months!);
+  }
+  return out;
+};
+
 /**
  * Cobrança avulsa é exceção: quase tudo aqui nasce de uma assinatura. Por isso a
  * lista é uma só — a assinatura é a linha, e as cobranças que ela gerou ficam
@@ -54,6 +93,8 @@ interface BillingRow {
   sub?: Subscription;
   charge?: FinancialRecord;
   charges: FinancialRecord[];
+  /** Cobranças que a assinatura ainda vai gerar (o Asaas só emite perto do vencimento). */
+  projected: { dueDate: string; amount: number }[];
   client: string;
   description: string;
   productLabel: string;
@@ -208,6 +249,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         kind: 'sub',
         sub: s,
         charges: list,
+        projected: projectSchedule(s, list),
         client: clientName(s.client_id),
         description: s.description || '',
         productLabel: productLabelOf(s.split_products?.length
@@ -231,6 +273,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         kind: 'charge',
         charge: r,
         charges: [],
+        projected: [],
         client: clientName(r.companyId),
         description: r.description || '',
         productLabel: productLabelOf(r.split_revenue?.length
@@ -357,7 +400,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         <ReceivablesAgenda records={financeRecords} companies={companies} products={products} />
       ) : (
         <>
-          <BillingProjection charges={charges} subscriptions={subscriptions} products={products} />
+          <BillingProjection charges={charges} subscriptions={subscriptions} products={products} companies={companies} />
 
           <div className="flex flex-col md:flex-row gap-3">
             <div className="relative flex-1">
@@ -608,7 +651,7 @@ const BillingList: React.FC<BillingListProps> = ({
                     <tr className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4">
                         <div className="flex items-start gap-2">
-                          {isSub && row.charges.length > 0 ? (
+                          {isSub && (row.charges.length > 0 || row.projected.length > 0) ? (
                             <button
                               onClick={() => onToggle(row.id)}
                               className="mt-0.5 text-gray-400 hover:text-mcsystem-600"
@@ -620,9 +663,11 @@ const BillingList: React.FC<BillingListProps> = ({
                           <div className="min-w-0">
                             <div className="font-semibold text-gray-800">{row.client}</div>
                             <div className="text-gray-400 text-xs mt-0.5 max-w-md truncate">{row.description}</div>
-                            {isSub && row.charges.length > 0 && (
+                            {isSub && (row.charges.length > 0 || row.projected.length > 0) && (
                               <div className="text-[11px] text-gray-400 mt-1">
-                                {row.charges.length} cobrança(s) · {formatBRL(row.paid)} recebidos
+                                {row.charges.length} emitida(s)
+                                {row.projected.length > 0 && ` · ${row.projected.length} a emitir`}
+                                {row.paid > 0 && ` · ${formatBRL(row.paid)} recebidos`}
                               </div>
                             )}
                           </div>
@@ -752,8 +797,32 @@ const BillingList: React.FC<BillingListProps> = ({
                                   </td>
                                 </tr>
                               ))}
+                              {row.projected.map(p => (
+                                <tr key={`p:${p.dueDate}`} className="text-gray-400">
+                                  <td className="py-2 whitespace-nowrap">{p.dueDate}</td>
+                                  <td className="py-2 max-w-xs truncate italic">{row.description || 'Renovação'}</td>
+                                  <td className="py-2">{chips(s!.split_products?.length
+                                    ? s!.split_products.map(x => ({ id: x.product_id, value: p.amount * x.pct / 100 }))
+                                    : [{ id: s!.product_id, value: p.amount }])}</td>
+                                  <td className="py-2 text-right whitespace-nowrap">{formatBRL(p.amount)}</td>
+                                  <td className="py-2 text-center">
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">
+                                      <CalendarClock size={11} /> A emitir
+                                    </span>
+                                  </td>
+                                  <td className="py-2 text-center text-[11px] text-gray-300">—</td>
+                                </tr>
+                              ))}
                             </tbody>
                           </table>
+                          {row.projected.length > 0 && (
+                            <p className="mt-2 text-[11px] text-gray-400">
+                              {s!.end_date
+                                ? `Assinatura com prazo: última cobrança em ${s!.end_date}.`
+                                : 'Projeção de 12 meses — a assinatura não tem prazo definido.'}
+                              {' '}O Asaas emite cada cobrança poucos dias antes do vencimento.
+                            </p>
+                          )}
                         </td>
                       </tr>
                     )}

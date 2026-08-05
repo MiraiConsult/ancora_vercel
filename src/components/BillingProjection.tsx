@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { FinancialRecord, Product, Subscription } from '../types';
+import { Company, FinancialRecord, Product, Subscription } from '../types';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine,
 } from 'recharts';
-import { ChevronDown, ChevronRight, TrendingUp } from 'lucide-react';
+import { ChevronDown, ChevronRight, TrendingUp, X, Users } from 'lucide-react';
 import { cycleStep, monthlyFactor } from '../lib/cycles';
 
 interface BillingProjectionProps {
@@ -11,7 +11,11 @@ interface BillingProjectionProps {
   charges: FinancialRecord[];
   subscriptions: Subscription[];
   products: Product[];
+  companies: Company[];
 }
+
+/** Uma parcela de receita atribuída a produto, mês e cliente — base do drill-down. */
+type Contrib = { pid: string; mk: string; cid: string; field: keyof Cell; amount: number };
 
 const MONTH_ABBR = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 const NO_PRODUCT = 'Sem produto';
@@ -81,14 +85,21 @@ const splitSubscription = (s: Subscription) =>
  * futuro somando as cobranças já emitidas com as renovações projetadas das
  * assinaturas ativas (sem contar duas vezes o mês que já tem cobrança gerada).
  */
-export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, subscriptions, products }) => {
+export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, subscriptions, products, companies }) => {
   const [open, setOpen] = useState(true);
-  const [back, setBack] = useState(6);
+  // Janela curta por padrão: 13 colunas obrigavam a rolar de lado para ler
+  // qualquer coisa. O histórico longo continua a um clique.
+  const [back, setBack] = useState(3);
   const [fwd, setFwd] = useState(6);
+  /** A matriz produto × mês é o bloco mais pesado — fica sob demanda. */
+  const [showMatrix, setShowMatrix] = useState(true);
+  /** Produto (e mês, quando vem de uma célula) aberto no drill-down. */
+  const [drill, setDrill] = useState<{ pid: string; name: string; mk?: string } | null>(null);
 
   const today = todayISO();
   const curMonth = today.slice(0, 7);
   const productName = (id?: string) => products.find(p => p.id === id)?.name || NO_PRODUCT;
+  const clientName = (id?: string) => companies.find(c => c.id === id)?.name || 'Sem cliente';
 
   const data = useMemo(() => {
     const months = Array.from({ length: back + fwd + 1 }, (_, i) => shiftMonth(curMonth, i - back));
@@ -96,12 +107,14 @@ export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, s
     const last = months[months.length - 1];
 
     const byProduct = new Map<string, Map<string, Cell>>();
-    const bump = (pid: string, mk: string, field: keyof Cell, value: number) => {
+    const contribs: Contrib[] = [];
+    const bump = (pid: string, mk: string, field: keyof Cell, value: number, cid: string) => {
       if (!value) return;
       if (!byProduct.has(pid)) byProduct.set(pid, new Map());
       const row = byProduct.get(pid)!;
       if (!row.has(mk)) row.set(mk, emptyCell());
       row.get(mk)![field] += value;
+      contribs.push({ pid, mk, cid, field, amount: value });
     };
 
     // Cobranças já emitidas. Guarda quantas existem por assinatura/mês para a
@@ -119,7 +132,7 @@ export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, s
       const field: keyof Cell = (r.status as string) === 'Pago'
         ? 'recebido'
         : (r.dueDate <= today ? 'aberto' : 'previsto');
-      for (const s of splitCharge(r)) bump(s.pid, mk, field, s.amount);
+      for (const s of splitCharge(r)) bump(s.pid, mk, field, s.amount, r.companyId || '');
     }
 
     // Renovações futuras das assinaturas ativas. O passado nunca é projetado —
@@ -129,14 +142,18 @@ export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, s
       const step = cycleStep(sub.cycle);
       const pending = new Map(issued.get(sub.asaas_id || '') || []);
       const slices = splitSubscription(sub);
+      // Assinatura com prazo (3x, 12x...) para de gerar receita na última
+      // cobrança. Sem isso ela apareceria rendendo até o fim da janela.
+      const stop = sub.end_date?.slice(0, 10) || null;
       let d = sub.next_due_date?.slice(0, 10) || today;
       for (let i = 0; i < 400; i++) {
+        if (stop && d > stop) break;
         const mk = d.slice(0, 7);
         if (mk > last) break;
         if (mk >= curMonth) {
           const already = pending.get(mk) || 0;
           if (already > 0) pending.set(mk, already - 1);
-          else for (const s of slices) bump(s.pid, mk, 'previsto', s.amount);
+          else for (const s of slices) bump(s.pid, mk, 'previsto', s.amount, sub.client_id || '');
         }
         d = step.days ? addDays(d, step.days) : addMonths(d, step.months!);
       }
@@ -175,10 +192,26 @@ export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, s
       .filter(mk => mk > curMonth)
       .reduce((sum, mk) => sum + cellTotal(columnTotals[months.indexOf(mk)]), 0);
 
-    return { months, rows, columnTotals, grand, chart, mrr, futureTotal };
+    return { months, rows, columnTotals, grand, chart, mrr, futureTotal, contribs };
   }, [charges, subscriptions, products, back, fwd, curMonth, today]);
 
   const { months, rows, columnTotals, grand, chart } = data;
+
+  /** Clientes por trás de um produto (opcionalmente de um mês só). */
+  const drillRows = useMemo(() => {
+    if (!drill) return [];
+    const byClient = new Map<string, Cell>();
+    for (const c of data.contribs) {
+      if (c.pid !== drill.pid) continue;
+      if (drill.mk && c.mk !== drill.mk) continue;
+      if (!byClient.has(c.cid)) byClient.set(c.cid, emptyCell());
+      byClient.get(c.cid)![c.field] += c.amount;
+    }
+    return Array.from(byClient.entries())
+      .map(([cid, cell]) => ({ cid, name: clientName(cid), cell }))
+      .filter(r => cellTotal(r.cell) > 0.005)
+      .sort((a, b) => cellTotal(b.cell) - cellTotal(a.cell));
+  }, [drill, data.contribs, companies]);
   const pastCols = back + 1; // meses fechados + o mês corrente
 
   const cellText = (c?: Cell) => {
@@ -235,7 +268,13 @@ export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, s
             >
               {[3, 6, 12].map(n => <option key={n} value={n}>{n} meses à frente</option>)}
             </select>
-            <span className="text-xs text-gray-400">Valores por data de vencimento.</span>
+            <button
+              onClick={() => setShowMatrix(v => !v)}
+              className={`px-2.5 py-1.5 rounded-lg border text-sm transition-colors ${showMatrix ? 'border-mcsystem-200 bg-mcsystem-50 text-mcsystem-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              {showMatrix ? 'Ocultar detalhe por produto' : 'Detalhar por produto'}
+            </button>
+            <span className="text-xs text-gray-400">Valores por data de vencimento. Clique num produto para ver os clientes.</span>
           </div>
 
           {/* Gráfico */}
@@ -260,7 +299,7 @@ export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, s
           </div>
 
           {/* Matriz produto × mês */}
-          {rows.length === 0 ? (
+          {!showMatrix ? null : rows.length === 0 ? (
             <div className="px-6 py-10 text-center text-sm text-gray-400">
               Sem cobranças ou assinaturas nesta janela.
             </div>
@@ -288,12 +327,32 @@ export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, s
                 <tbody className="divide-y divide-gray-100">
                   {rows.map(r => (
                     <tr key={r.pid || '__none__'} className="hover:bg-gray-50/70 transition-colors">
-                      <td className="px-5 py-2.5 font-medium text-gray-800 sticky left-0 bg-white z-10 whitespace-nowrap">{r.name}</td>
-                      {months.map((mk, i) => (
+                      <td className="px-5 py-2.5 font-medium sticky left-0 bg-white z-10 whitespace-nowrap">
+                        <button
+                          onClick={() => setDrill({ pid: r.pid, name: r.name })}
+                          className="text-gray-800 hover:text-mcsystem-600 hover:underline text-left"
+                          title="Ver os clientes deste produto"
+                        >
+                          {r.name}
+                        </button>
+                      </td>
+                      {months.map((mk, i) => {
+                        const cell = r.cells.get(mk);
+                        const has = cell && cellTotal(cell) >= 0.005;
+                        return (
                         <td key={mk} className={`px-3 py-2.5 text-right tabular-nums ${i === pastCols - 1 || i === pastCols ? 'border-l border-gray-100' : ''} ${mk === curMonth ? 'bg-mcsystem-50/40' : ''}`}>
-                          {cellText(r.cells.get(mk))}
+                          {has ? (
+                            <button
+                              onClick={() => setDrill({ pid: r.pid, name: r.name, mk })}
+                              className="hover:underline"
+                              title={`Ver os clientes de ${r.name} em ${monthLabel(mk)}`}
+                            >
+                              {cellText(cell)}
+                            </button>
+                          ) : cellText(cell)}
                         </td>
-                      ))}
+                        );
+                      })}
                       <td className="px-5 py-2.5 text-right font-semibold text-gray-800 tabular-nums border-l border-gray-100">
                         {brl0(cellTotal(r.total))}
                       </td>
@@ -319,7 +378,62 @@ export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, s
             <Dot color={TONE.recebido} label="Recebido" />
             <Dot color={TONE.aberto} label="Em aberto (vencido)" />
             <Dot color={TONE.previsto} label="Previsto (a vencer + renovações)" />
-            <span className="text-gray-400">A projeção repete o ciclo de cada assinatura ativa a partir do próximo vencimento.</span>
+            <span className="text-gray-400">A projeção repete o ciclo de cada assinatura ativa a partir do próximo vencimento, e para na última cobrança de quem tem prazo definido.</span>
+          </div>
+        </div>
+      )}
+
+      {drill && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[90] p-4" onClick={() => setDrill(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center rounded-t-2xl">
+              <div className="min-w-0">
+                <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                  <Users size={17} className="text-mcsystem-500" />{drill.name}
+                </h3>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {drill.mk ? `Clientes em ${monthLabel(drill.mk)}` : `Clientes na janela de ${back + fwd + 1} meses`}
+                </p>
+              </div>
+              <button onClick={() => setDrill(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-200"><X size={20} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {drillRows.length === 0 ? (
+                <p className="px-6 py-10 text-center text-sm text-gray-400">Nenhum cliente neste recorte.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500 uppercase text-[11px] tracking-wider sticky top-0">
+                    <tr>
+                      <th className="px-6 py-2.5 text-left font-semibold">Cliente</th>
+                      <th className="px-3 py-2.5 text-right font-semibold">Recebido</th>
+                      <th className="px-3 py-2.5 text-right font-semibold">Em aberto</th>
+                      <th className="px-3 py-2.5 text-right font-semibold">Previsto</th>
+                      <th className="px-6 py-2.5 text-right font-semibold">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {drillRows.map(r => (
+                      <tr key={r.cid || '__none__'} className="hover:bg-gray-50/70">
+                        <td className="px-6 py-2.5 font-medium text-gray-800">{r.name}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: r.cell.recebido ? TONE.recebido : INK.muted }}>{r.cell.recebido ? brl0(r.cell.recebido) : '—'}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: r.cell.aberto ? TONE.aberto : INK.muted }}>{r.cell.aberto ? brl0(r.cell.aberto) : '—'}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: r.cell.previsto ? TONE.previsto : INK.muted }}>{r.cell.previsto ? brl0(r.cell.previsto) : '—'}</td>
+                        <td className="px-6 py-2.5 text-right font-semibold text-gray-800 tabular-nums">{brl0(cellTotal(r.cell))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50 font-semibold text-gray-800 sticky bottom-0">
+                    <tr>
+                      <td className="px-6 py-3">{drillRows.length} cliente(s)</td>
+                      <td className="px-3 py-3 text-right tabular-nums">{brl0(drillRows.reduce((s, r) => s + r.cell.recebido, 0))}</td>
+                      <td className="px-3 py-3 text-right tabular-nums">{brl0(drillRows.reduce((s, r) => s + r.cell.aberto, 0))}</td>
+                      <td className="px-3 py-3 text-right tabular-nums">{brl0(drillRows.reduce((s, r) => s + r.cell.previsto, 0))}</td>
+                      <td className="px-6 py-3 text-right tabular-nums">{brl0(drillRows.reduce((s, r) => s + cellTotal(r.cell), 0))}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       )}

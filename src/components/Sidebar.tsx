@@ -2,8 +2,8 @@
 
 import React from 'react';
 import {
-  Users, UserCog, LogOut, List, Bell, Database, ChevronsLeft, Package, Zap,
-  LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Landmark, Tags, FileCheck, FileSignature, Wallet,
+  UserCog, LogOut, Bell, Database, ChevronsLeft, Zap,
+  LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Tags, FileSignature, Wallet,
   FileBarChart,
 } from 'lucide-react';
 import { User } from '../types';
@@ -39,7 +39,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
         ...(isAsaasEnabled(currentUser.tenant_id) ? [{ id: 'billing', label: 'Cobranças', icon: Zap, perm: 'billing' }] : []),
         { id: 'payables', label: 'Contas a Pagar', icon: Wallet, perm: 'finance', badge: overduePayablesCount },
         { id: 'contracts', label: 'Contratos', icon: FileSignature, perm: 'contracts' },
-        { id: 'validation', label: 'Validação', icon: FileCheck, perm: 'finance', badge: pendingValidationCount },
       ],
     },
     {
@@ -53,10 +52,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
     {
       section: 'Cadastros',
       items: [
-        { id: 'companies', label: 'Clientes', icon: Users, perm: 'companies' },
-        { id: 'products', label: 'Produtos', icon: Package, perm: 'products' },
-        { id: 'coa', label: 'Plano de Contas', icon: Tags, perm: 'finance' },
-        { id: 'lists', label: 'Contas Bancárias', icon: List, perm: 'lists' },
+        // Clientes, Produtos, Plano de Contas e Contas Bancárias moram numa
+        // página só, em abas — eram quatro itens de menu para telas que o
+        // usuário percorre em sequência.
+        { id: 'registrations', label: 'Cadastros', icon: Tags, perms: ['companies', 'products', 'lists', 'finance'] },
       ],
     },
     {
@@ -72,6 +71,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
   const canSee = (item: any) => {
     if (isAdmin) return true;
     if (item.adminOnly) return false;
+    // Item que agrupa várias telas aparece com qualquer uma das permissões.
+    if (item.perms) return item.perms.some((p: string) => currentUser.permissions?.[p] === true);
     return currentUser.permissions?.[item.perm] === true;
   };
 

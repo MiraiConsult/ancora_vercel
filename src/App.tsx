@@ -7,6 +7,7 @@ import { BillingModule } from './components/BillingModule';
 import { OverviewDashboard } from './components/OverviewDashboard';
 import { ContractsModule } from './components/ContractsModule';
 import { PayablesAgenda } from './components/PayablesAgenda';
+import { RegistrationsModule } from './components/RegistrationsModule';
 import type { MainTab } from './components/FinanceDashboard';
 
 // Páginas do menu que abrem o módulo financeiro numa aba específica
@@ -17,7 +18,6 @@ const FINANCE_TABS: Record<string, MainTab> = {
   cashflow: 'CASHFLOW',
   'cash-evolution': 'CASH_EVOLUTION',
   coa: 'COA',
-  validation: 'VALIDATION',
 };
 
 const PAGE_TITLES: Record<string, string> = {
@@ -27,7 +27,6 @@ const PAGE_TITLES: Record<string, string> = {
   billing: 'Cobranças',
   payables: 'Contas a Pagar',
   contracts: 'Contratos',
-  validation: 'Validação',
   reports: 'Relatórios',
   dre: 'DRE Gerencial',
   cashflow: 'Fluxo de Caixa',
@@ -36,6 +35,7 @@ const PAGE_TITLES: Record<string, string> = {
   products: 'Produtos',
   coa: 'Plano de Contas',
   lists: 'Cadastros Auxiliares',
+  registrations: 'Cadastros',
   alerts: 'Alertas',
   database: 'Exportar Dados',
   settings: 'Configurações',
@@ -564,7 +564,6 @@ const handleAddUser = async (newUser: User) => {
       case 'cashflow':
       case 'cash-evolution':
       case 'coa':
-      case 'validation':
         return hasPermission('finance') ? (
           <FinanceDashboard
             key={currentPage}
@@ -587,7 +586,7 @@ const handleAddUser = async (newUser: User) => {
 
       case 'reports':
         return hasPermission('finance') ? (
-          <ReportsModule records={financeRecords} companies={companies} products={products} />
+          <ReportsModule records={financeRecords} companies={companies} products={products} chartOfAccounts={chartOfAccounts} />
         ) : <AccessDenied />;
 
       case 'companies':
@@ -617,6 +616,68 @@ const handleAddUser = async (newUser: User) => {
             currentUser={user}
           />
         ) : <AccessDenied />;
+
+      // Os quatro cadastros numa página só, em abas.
+      case 'registrations':
+        return (
+          <RegistrationsModule
+            currentUser={user}
+            panels={{
+              CLIENTS: hasPermission('companies') ? (
+                <CompaniesModule
+                  companies={companies}
+                  setCompanies={setCompanies}
+                  financeRecords={financeRecords}
+                  setFinanceRecords={setFinanceRecords}
+                  generalNotes={generalNotes}
+                  setGeneralNotes={setGeneralNotes}
+                  revenueTypes={revenueTypes}
+                  banks={banks}
+                  allUsers={allUsers}
+                  currentUser={user}
+                  products={products}
+                  subscriptions={subscriptions}
+                  onOpenHelp={openHelp}
+                />
+              ) : <AccessDenied />,
+              PRODUCTS: hasPermission('products')
+                ? <ProductsModule products={products} setProducts={setProducts} currentUser={user} />
+                : <AccessDenied />,
+              COA: hasPermission('finance') ? (
+                <FinanceDashboard
+                  key="coa"
+                  initialTab="COA"
+                  hideTabs
+                  records={financeRecords}
+                  setRecords={setFinanceRecords}
+                  revenueTypes={revenueTypes}
+                  setRevenueTypes={setRevenueTypes}
+                  banks={banks}
+                  setBanks={setBanks}
+                  chartOfAccounts={chartOfAccounts}
+                  setChartOfAccounts={setChartOfAccounts}
+                  companies={companies}
+                  setCompanies={setCompanies}
+                  products={products}
+                  currentUser={user}
+                />
+              ) : <AccessDenied />,
+              BANKS: hasPermission('lists') ? (
+                <ListsModule
+                  hideTabs
+                  initialList="BANKS"
+                  revenueTypes={revenueTypes}
+                  setRevenueTypes={setRevenueTypes}
+                  banks={banks}
+                  setBanks={setBanks}
+                  products={products}
+                  setProducts={setProducts}
+                  currentUser={user}
+                />
+              ) : <AccessDenied />,
+            }}
+          />
+        );
 
       case 'payables':
         return hasPermission('finance') ? (

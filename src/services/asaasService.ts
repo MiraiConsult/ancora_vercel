@@ -146,6 +146,21 @@ export const asaasCreateTransfer = (params: { recordId: string }) =>
 export const asaasDeleteSubscription = (params: { rowId: string; subscriptionId?: string }) =>
   invoke('delete_subscription', params);
 
+/**
+ * Paga um boleto/tributo pela conta Asaas a partir da linha digitável.
+ * O saldo sai do Asaas; a baixa do lançamento vem pelo sync/webhook.
+ */
+export const asaasPayBill = (params: {
+  recordId: string;
+  identificationField: string;
+  scheduleDate?: string;
+  description?: string;
+  value?: number;
+  dueDate?: string;
+}) => invoke('pay_bill', params) as Promise<{
+  bill: { id: string; status: string; value: number; dueDate?: string; scheduleDate?: string; companyName?: string };
+}>;
+
 /** Impostos da nota — o Asaas exige o objeto inteiro, mesmo zerado. */
 export interface InvoiceTaxes {
   retainIss: boolean;

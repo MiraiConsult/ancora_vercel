@@ -630,6 +630,45 @@ Deno.serve(async (req: Request) => {
         break;
       }
 
+      /**
+       * Pagamento de boleto/tributo pela conta Asaas (Pague Contas).
+       * O dinheiro sai do saldo do Asaas — por isso o lançamento é conferido
+       * antes, e o asaas_bill_id é gravado na hora para o sync não abrir uma
+       * segunda despesa para a mesma conta.
+       */
+      case 'pay_bill': {
+        const line = digits(params.identificationField);
+        if (line.length < 44) throw new Error('Linha digitável inválida — confira os números do boleto.');
+
+        const { data: rec, error: recErr } = await supabase
+          .from('financial_records').select('*').eq('id', params.recordId).single();
+        if (recErr || !rec) throw new Error('Lançamento não encontrado.');
+        if (rec.type !== 'Despesa') throw new Error('Só é possível pagar lançamentos de despesa.');
+        if (rec.status === 'Pago') throw new Error('Este lançamento já está pago.');
+        if (rec.asaas_bill_id) throw new Error('Este lançamento já tem um pagamento no Asaas.');
+        if (rec.asaas_transfer_id) throw new Error('Este lançamento já foi pago por PIX.');
+
+        const payload: Record<string, unknown> = {
+          identificationField: line,
+          externalReference: rec.id,
+          description: (params.description || rec.description || 'Pagamento').slice(0, 120),
+        };
+        // Conta vencida o Asaas não agenda — manda pagar na hora.
+        if (params.scheduleDate) payload.scheduleDate = params.scheduleDate;
+        // Boleto sem valor/vencimento no código de barras (concessionária, tributo).
+        if (params.value) payload.value = Number(params.value);
+        if (params.dueDate) payload.dueDate = params.dueDate;
+
+        const bill = await asaas('/bill', 'POST', payload);
+
+        const { error: upErr } = await supabase.from('financial_records')
+          .update({ asaas_bill_id: bill.id }).eq('id', rec.id);
+        if (upErr) throw new Error('Conta enviada ao Asaas, mas falhou ao vincular ao lançamento: ' + upErr.message);
+
+        result = { bill };
+        break;
+      }
+
       case 'delete_subscription': {
         if (params.subscriptionId) await asaas(`/subscriptions/${params.subscriptionId}`, 'DELETE');
         const { error } = await supabase.from('subscriptions').delete().eq('id', params.rowId);

@@ -45,12 +45,31 @@ Deno.serve(async (req: Request) => {
       payload: body,
     });
 
-    if (!ref) {
-      return reply('REFUSED', 'Transferência sem externalReference — não foi originada pelo sistema.');
-    }
+    // PIX copia-e-cola não passa por /transfers e o endpoint não aceita
+    // externalReference — a transação chega aqui sem referência nenhuma. Nesse
+    // caso a intenção é achada por valor + payload, entre as que ainda estão
+    // esperando e foram pedidas há poucos minutos. Continua valendo a regra:
+    // sem pedido registrado pelo sistema, nada é aprovado.
+    let intent: any = null;
 
-    const { data: intent } = await admin
-      .from('payment_intents').select('*').eq('id', ref).maybeSingle();
+    if (ref) {
+      const { data } = await admin.from('payment_intents').select('*').eq('id', ref).maybeSingle();
+      intent = data;
+    } else {
+      const qrPayload = String(transfer?.qrCode?.payload ?? transfer?.payload ?? '').trim();
+      const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const { data } = await admin.from('payment_intents')
+        .select('*')
+        .eq('method', 'PIX_QR')
+        .eq('status', 'AWAITING_APPROVAL')
+        .gte('created_at', since)
+        .order('created_at', { ascending: false });
+      intent = (data || []).find((i: any) => {
+        const sameValue = Math.round(Number(i.value) * 100) === Math.round(Number(transfer?.value) * 100);
+        const wanted = String(i.destination?.payload || '').trim();
+        return sameValue && (!qrPayload || !wanted || qrPayload === wanted);
+      }) || null;
+    }
 
     if (!intent) {
       return reply('REFUSED', 'Nenhuma solicitação de pagamento corresponde a esta transferência.');
@@ -61,15 +80,39 @@ Deno.serve(async (req: Request) => {
 
     // Valor e destino têm que bater exatamente com o que foi pedido no sistema.
     const sameValue = Math.round(Number(intent.value) * 100) === Math.round(Number(transfer?.value) * 100);
-    const key = transfer?.pixAddressKey ?? transfer?.bankAccount?.pixAddressKey ?? '';
-    const sameKey = String(key).trim() === String(intent.pix_key || '').trim()
-      // CPF/CNPJ e telefone podem voltar formatados de outro jeito.
-      || (digits(key) !== '' && digits(key) === digits(intent.pix_key));
+    const method = String(intent.method || 'PIX_KEY').toUpperCase();
+    const dest = intent.destination || {};
 
-    if (!sameValue || !sameKey) {
+    let sameDest = false;
+    let destWhy = 'Destino divergente do pedido.';
+    if (method === 'TED') {
+      // Conta bancária: banco, agência, conta e documento do titular.
+      const ba = transfer?.bankAccount ?? {};
+      sameDest = digits(ba?.bank?.code ?? ba?.bankCode) === digits(dest.bankCode)
+        && digits(ba?.agency) === digits(dest.agency)
+        && digits(ba?.account) === digits(dest.account)
+        && digits(ba?.cpfCnpj) === digits(dest.cpfCnpj);
+      destWhy = 'Conta bancária de destino divergente do pedido.';
+    } else if (method === 'PIX_QR') {
+      const got = String(transfer?.qrCode?.payload ?? transfer?.payload ?? '').trim();
+      const wanted = String(dest.payload || '').trim();
+      // Asaas nem sempre devolve o payload na validação; o casamento por valor
+      // + janela de tempo já foi feito acima.
+      sameDest = !got || !wanted || got === wanted;
+      destWhy = 'Código PIX de destino divergente do pedido.';
+    } else {
+      const key = transfer?.pixAddressKey ?? transfer?.bankAccount?.pixAddressKey ?? '';
+      const wanted = dest.pixKey ?? intent.pix_key;
+      sameDest = String(key).trim() === String(wanted || '').trim()
+        // CPF/CNPJ e telefone podem voltar formatados de outro jeito.
+        || (digits(key) !== '' && digits(key) === digits(wanted));
+      destWhy = 'Chave PIX de destino divergente do pedido.';
+    }
+
+    if (!sameValue || !sameDest) {
       const why = !sameValue
         ? `Valor divergente (pedido ${intent.value}, recebido ${transfer?.value}).`
-        : 'Chave PIX de destino divergente do pedido.';
+        : destWhy;
       await admin.from('payment_intents')
         .update({ status: 'REFUSED', refuse_reason: why, decided_at: new Date().toISOString() })
         .eq('id', intent.id);

@@ -140,7 +140,25 @@ export const asaasUpdateSubscription = (params: {
  * cadastrada nele. A transferência ainda passa pela validação de saque do
  * Asaas antes do dinheiro sair — ver a função asaas-transfer-approval.
  */
-export const asaasCreateTransfer = (params: { recordId: string }) =>
+export interface TransferParams {
+  recordId: string;
+  /** PIX_KEY (padrão) | PIX_QR | TED */
+  method?: 'PIX_KEY' | 'PIX_QR' | 'TED';
+  scheduleDate?: string;
+  description?: string;
+  /** PIX_KEY: chave do favorecido (cai na do lançamento quando omitida). */
+  pixKey?: string;
+  pixKeyType?: string;
+  /** PIX_QR: o copia-e-cola. */
+  payload?: string;
+  /** TED: conta do favorecido. */
+  bankAccount?: {
+    bankCode: string; agency: string; account: string; accountDigit?: string;
+    ownerName: string; cpfCnpj: string; bankAccountType?: string;
+  };
+}
+
+export const asaasCreateTransfer = (params: TransferParams) =>
   invoke('create_transfer', params) as Promise<{ transfer: { id: string; status: string; value: number }; intentId: string }>;
 
 export const asaasDeleteSubscription = (params: { rowId: string; subscriptionId?: string }) =>

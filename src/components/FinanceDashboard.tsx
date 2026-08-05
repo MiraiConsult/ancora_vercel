@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 import { generateFinancialInsight } from '../services/geminiService';
 import { supabase } from '../lib/supabaseClient';
 import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
-import { PayBillModal } from './PayBillModal';
+import { PayRecordModal } from './PayRecordModal';
 import { isAsaasEnabled } from '../config';
 
 interface FinanceDashboardProps {
@@ -2567,12 +2567,11 @@ const newRecords: FinancialRecord[] = [];
         {activeTab === 'VALIDATION' && renderTransactionTable(undefined, true)}
 
         {billTarget && (
-          <PayBillModal
+          <PayRecordModal
             record={billTarget}
             onClose={() => setBillTarget(null)}
-            onPaid={(billId) => {
-              setRecords(list => list.map(x => x.id === billTarget.id ? { ...x, asaas_bill_id: billId } : x));
-              setBillTarget(null);
+            onPaid={(patch) => {
+              setRecords(list => list.map(x => x.id === billTarget.id ? { ...x, ...patch } : x));
             }}
           />
         )}

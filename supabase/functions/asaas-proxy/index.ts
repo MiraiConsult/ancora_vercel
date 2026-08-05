@@ -571,33 +571,100 @@ Deno.serve(async (req: Request) => {
         break;
       }
 
+      /**
+       * Saque a partir de um lançamento de despesa: PIX por chave, PIX
+       * copia-e-cola ou TED. A intenção é gravada ANTES de chamar o Asaas — a
+       * validação de saque chega ~5s depois da criação e precisa ter contra o
+       * que conferir. Sem intenção correspondente, o saque morre lá.
+       *
+       * method: PIX_KEY (padrão, mantém o comportamento antigo) | PIX_QR | TED
+       */
       case 'create_transfer': {
-        // Pagamento por PIX a partir de um lançamento de despesa.
-        // A intenção é gravada ANTES de chamar o Asaas: a validação de saque
-        // chega ~5s depois da criação e precisa ter contra o que conferir.
         const { data: rec, error: recErr } = await supabase
           .from('financial_records').select('*').eq('id', params.recordId).single();
         if (recErr || !rec) throw new Error('Lançamento não encontrado.');
         if (rec.type !== 'Despesa') throw new Error('Só é possível pagar lançamentos de despesa.');
         if (rec.status === 'Pago') throw new Error('Este lançamento já está pago.');
         if (rec.asaas_transfer_id) throw new Error('Já existe uma transferência para este lançamento.');
+        if (rec.asaas_bill_id) throw new Error('Este lançamento já foi enviado como boleto.');
 
+        const method = String(params.method || 'PIX_KEY').toUpperCase();
         const acc = rec.payment_account || {};
-        if (acc.type !== 'PIX' || !acc.pixKey) {
-          throw new Error('Cadastre uma chave PIX no lançamento antes de pagar.');
-        }
         const value = Math.abs(Number(rec.amount) || 0);
         if (!value) throw new Error('Valor do lançamento inválido.');
 
         const intentId = `pi_${crypto.randomUUID()}`;
+        const description = (params.description || rec.description || 'Pagamento').slice(0, 120);
+
+        // Monta o destino conforme o meio, e guarda na intenção exatamente o
+        // que a função de aprovação vai conferir depois.
+        let pixKey: string | null = null;
+        let pixKeyType: string | null = null;
+        let destination: Record<string, unknown> | null = null;
+        let payload: Record<string, unknown>;
+
+        if (method === 'PIX_QR') {
+          const code = String(params.payload || '').trim();
+          if (!code) throw new Error('Cole o PIX copia-e-cola.');
+          destination = { payload: code };
+          payload = {
+            qrCode: { payload: code },
+            value,
+            description,
+            ...(params.scheduleDate ? { scheduleDate: params.scheduleDate } : {}),
+          };
+        } else if (method === 'TED') {
+          const b = params.bankAccount || {};
+          const bankCode = digits(b.bankCode);
+          const agency = digits(b.agency);
+          const account = digits(b.account);
+          const ownerDoc = digits(b.cpfCnpj);
+          if (!bankCode || !agency || !account || !b.ownerName || !ownerDoc) {
+            throw new Error('Informe banco, agência, conta, titular e CPF/CNPJ do favorecido.');
+          }
+          destination = { bankCode, agency, account, accountDigit: digits(b.accountDigit), cpfCnpj: ownerDoc };
+          payload = {
+            value,
+            bankAccount: {
+              bank: { code: bankCode },
+              ownerName: String(b.ownerName).trim(),
+              cpfCnpj: ownerDoc,
+              agency,
+              account,
+              accountDigit: digits(b.accountDigit) || undefined,
+              bankAccountType: b.bankAccountType || 'CONTA_CORRENTE',
+            },
+            operationType: 'TED',
+            description,
+            externalReference: intentId,
+            ...(params.scheduleDate ? { scheduleDate: params.scheduleDate } : {}),
+          };
+        } else {
+          // PIX por chave: a do lançamento, ou a informada na hora do pagamento.
+          pixKey = String(params.pixKey || acc.pixKey || '').trim();
+          pixKeyType = params.pixKeyType || acc.pixKeyType || null;
+          if (!pixKey) throw new Error('Informe a chave PIX do favorecido.');
+          destination = { pixKey };
+          payload = {
+            value,
+            pixAddressKey: pixKey,
+            pixAddressKeyType: pixKeyType || undefined,
+            description,
+            externalReference: intentId,
+            ...(params.scheduleDate ? { scheduleDate: params.scheduleDate } : {}),
+          };
+        }
+
         const { error: intErr } = await supabase.from('payment_intents').insert({
           id: intentId,
           tenant_id: rec.tenant_id,
           record_id: rec.id,
           value,
-          pix_key: acc.pixKey,
-          pix_key_type: acc.pixKeyType || null,
-          holder: acc.holder || null,
+          method,
+          destination,
+          pix_key: pixKey,
+          pix_key_type: pixKeyType,
+          holder: params.holder || acc.holder || null,
           description: rec.description || null,
           status: 'AWAITING_APPROVAL',
         });
@@ -605,13 +672,10 @@ Deno.serve(async (req: Request) => {
 
         let transfer: any;
         try {
-          transfer = await asaas('/transfers', 'POST', {
-            value,
-            pixAddressKey: acc.pixKey,
-            pixAddressKeyType: acc.pixKeyType || undefined,
-            description: (rec.description || 'Pagamento').slice(0, 120),
-            externalReference: intentId,
-          });
+          // O copia-e-cola não passa por /transfers: é uma transação PIX.
+          transfer = method === 'PIX_QR'
+            ? await asaas('/pix/qrCodes/pay', 'POST', payload)
+            : await asaas('/transfers', 'POST', payload);
         } catch (e) {
           // Sem transferência criada a intenção não pode ficar viva: ela é o que
           // autoriza um saque na validação.

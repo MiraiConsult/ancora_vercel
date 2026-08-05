@@ -51,6 +51,8 @@ export interface Supplier {
   document?: string;
   email?: string;
   phone?: string;
+  /** Como este fornecedor costuma ser pago. Decide o meio no modal de pagar. */
+  payment_method?: 'PIX' | 'BOLETO' | 'TED';
   pix_key?: string;
   pix_key_type?: 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'EVP';
   bank_code?: string;

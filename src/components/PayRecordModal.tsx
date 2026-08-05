@@ -63,9 +63,9 @@ export const emptyPayForm = (record?: FinancialRecord): PayForm => {
 };
 
 /**
- * Preenche o formulário com o destino cadastrado no fornecedor. Prefere PIX,
- * que é instantâneo e sem tarifa; cai na conta quando é o que existe. O que o
- * usuário já digitou no boleto/copia-e-cola não é tocado.
+ * Preenche o formulário com o destino cadastrado no fornecedor, e abre no meio
+ * que ele escolheu no cadastro. O que o usuário já digitou no boleto ou no
+ * copia-e-cola não é tocado.
  */
 export const applySupplier = (f: PayForm, s: Supplier): PayForm => {
   const bank = {
@@ -78,11 +78,17 @@ export const applySupplier = (f: PayForm, s: Supplier): PayForm => {
     cpfCnpj: s.bank_owner_document || s.document || f.bank.cpfCnpj,
     bankAccountType: s.bank_account_type || f.bank.bankAccountType,
   };
-  if (s.pix_key) {
-    return { ...f, method: 'PIX_KEY', pixKey: s.pix_key, pixKeyType: s.pix_key_type || guessKeyType(s.pix_key), bank };
+  const withPix = { ...f, bank, pixKey: s.pix_key || f.pixKey, pixKeyType: s.pix_key ? (s.pix_key_type || guessKeyType(s.pix_key)) : f.pixKeyType };
+  switch (s.payment_method) {
+    case 'BOLETO': return { ...withPix, method: 'BOLETO' };
+    case 'TED': return { ...withPix, method: 'TED' };
+    case 'PIX': return { ...withPix, method: 'PIX_KEY' };
+    default:
+      // Cadastro antigo, sem forma definida: decide pelo que existe.
+      if (s.pix_key) return { ...withPix, method: 'PIX_KEY' };
+      if (s.bank_code) return { ...withPix, method: 'TED' };
+      return withPix;
   }
-  if (s.bank_code) return { ...f, method: 'TED', bank };
-  return { ...f, bank };
 };
 
 export const payFormReady = (f: PayForm): boolean =>

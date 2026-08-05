@@ -1,7 +1,13 @@
 import React, { useState } from 'react';
 import { Supplier } from '../types';
 import { supabase } from '../lib/supabaseClient';
-import { Loader2, Save, X, Truck } from 'lucide-react';
+import { Loader2, Save, X, Truck, KeyRound, Barcode, Landmark } from 'lucide-react';
+
+const PAY_METHODS: { key: 'PIX' | 'BOLETO' | 'TED'; label: string; icon: React.ElementType }[] = [
+  { key: 'PIX', label: 'PIX', icon: KeyRound },
+  { key: 'BOLETO', label: 'Boleto', icon: Barcode },
+  { key: 'TED', label: 'Transferência', icon: Landmark },
+];
 
 const digits = (s?: string) => (s || '').replace(/\D/g, '');
 
@@ -30,13 +36,20 @@ export const SupplierForm: React.FC<{
   compact?: boolean;
 }> = ({ supplier, onSaved, onCancel, compact = false }) => {
   const [f, setF] = useState<Supplier>(() => supplier || {
-    id: '', name: '', doc_type: 'CNPJ', bank_account_type: 'CONTA_CORRENTE', status: 'Active',
+    id: '', name: '', doc_type: 'CNPJ', payment_method: 'PIX', bank_account_type: 'CONTA_CORRENTE', status: 'Active',
   } as Supplier);
   const [saving, setSaving] = useState(false);
   const set = (patch: Partial<Supplier>) => setF({ ...f, ...patch });
 
   const save = async () => {
     if (!f.name?.trim()) return alert('Informe o nome do fornecedor.');
+    const method = f.payment_method || 'PIX';
+    if (method === 'PIX' && !f.pix_key?.trim()) {
+      return alert('Informe a chave PIX, ou troque a forma de pagamento.');
+    }
+    if (method === 'TED' && !(f.bank_code && f.bank_agency && f.bank_account)) {
+      return alert('Informe banco, agência e conta, ou troque a forma de pagamento.');
+    }
     setSaving(true);
     try {
       const row: Supplier = {
@@ -103,60 +116,88 @@ export const SupplierForm: React.FC<{
       </div>
 
       <div className="border-t border-gray-100 pt-4">
-        <p className="text-sm font-semibold text-gray-700 mb-3">Dados de pagamento</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="md:col-span-2">
-            <label className={label}>Chave PIX</label>
-            <input value={f.pix_key || ''} onChange={e => set({ pix_key: e.target.value, pix_key_type: undefined })}
-              placeholder="CPF, CNPJ, e-mail, telefone ou aleatória" className={field} />
-          </div>
-          <div>
-            <label className={label}>Tipo do PIX</label>
-            <select value={f.pix_key_type || (f.pix_key ? guessPixType(f.pix_key) : '')}
-              onChange={e => set({ pix_key_type: e.target.value as any })} className={field}>
-              <option value="">—</option>
-              {['CPF', 'CNPJ', 'EMAIL', 'PHONE', 'EVP'].map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
+        <p className="text-sm font-semibold text-gray-700 mb-3">Forma de pagamento</p>
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          {PAY_METHODS.map(m => {
+            const Icon = m.icon;
+            const on = (f.payment_method || 'PIX') === m.key;
+            return (
+              <button key={m.key} type="button" onClick={() => set({ payment_method: m.key })}
+                className={`px-3 py-2.5 rounded-lg border text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
+                  on ? 'bg-mcsystem-50 border-mcsystem-300 text-mcsystem-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}>
+                <Icon size={15} />{m.label}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3">
-          <div>
-            <label className={label}>Banco</label>
-            <input value={f.bank_code || ''} onChange={e => set({ bank_code: e.target.value })} placeholder="237" className={field} />
+        {(f.payment_method || 'PIX') === 'PIX' && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="md:col-span-2">
+              <label className={label}>Chave PIX *</label>
+              <input value={f.pix_key || ''} onChange={e => set({ pix_key: e.target.value, pix_key_type: undefined })}
+                placeholder="CPF, CNPJ, e-mail, telefone ou aleatória" className={field} />
+            </div>
+            <div>
+              <label className={label}>Tipo da chave</label>
+              <select value={f.pix_key_type || (f.pix_key ? guessPixType(f.pix_key) : '')}
+                onChange={e => set({ pix_key_type: e.target.value as any })} className={field}>
+                <option value="">—</option>
+                {['CPF', 'CNPJ', 'EMAIL', 'PHONE', 'EVP'].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
           </div>
-          <div>
-            <label className={label}>Agência</label>
-            <input value={f.bank_agency || ''} onChange={e => set({ bank_agency: e.target.value })} className={field} />
-          </div>
-          <div>
-            <label className={label}>Conta</label>
-            <input value={f.bank_account || ''} onChange={e => set({ bank_account: e.target.value })} className={field} />
-          </div>
-          <div>
-            <label className={label}>Dígito</label>
-            <input value={f.bank_account_digit || ''} onChange={e => set({ bank_account_digit: e.target.value })} className={field} />
-          </div>
-          <div>
-            <label className={label}>Tipo</label>
-            <select value={f.bank_account_type || 'CONTA_CORRENTE'} onChange={e => set({ bank_account_type: e.target.value })} className={field}>
-              <option value="CONTA_CORRENTE">Corrente</option>
-              <option value="CONTA_POUPANCA">Poupança</option>
-            </select>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-          <div>
-            <label className={label}>Titular da conta</label>
-            <input value={f.bank_owner_name || ''} onChange={e => set({ bank_owner_name: e.target.value })}
-              placeholder="Em branco, usa o nome do fornecedor" className={field} />
-          </div>
-          <div>
-            <label className={label}>CPF/CNPJ do titular</label>
-            <input value={f.bank_owner_document || ''} onChange={e => set({ bank_owner_document: e.target.value })}
-              placeholder="Em branco, usa o documento acima" className={field} />
-          </div>
-        </div>
+        )}
+
+        {f.payment_method === 'BOLETO' && (
+          <p className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
+            Boleto não tem dado fixo para guardar — a linha digitável muda a cada conta.
+            Na hora de pagar, o sistema já abre no boleto e pede o código daquela conta.
+          </p>
+        )}
+
+        {f.payment_method === 'TED' && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div>
+                <label className={label}>Banco *</label>
+                <input value={f.bank_code || ''} onChange={e => set({ bank_code: e.target.value })} placeholder="237" className={field} />
+              </div>
+              <div>
+                <label className={label}>Agência *</label>
+                <input value={f.bank_agency || ''} onChange={e => set({ bank_agency: e.target.value })} className={field} />
+              </div>
+              <div>
+                <label className={label}>Conta *</label>
+                <input value={f.bank_account || ''} onChange={e => set({ bank_account: e.target.value })} className={field} />
+              </div>
+              <div>
+                <label className={label}>Dígito</label>
+                <input value={f.bank_account_digit || ''} onChange={e => set({ bank_account_digit: e.target.value })} className={field} />
+              </div>
+              <div>
+                <label className={label}>Tipo</label>
+                <select value={f.bank_account_type || 'CONTA_CORRENTE'} onChange={e => set({ bank_account_type: e.target.value })} className={field}>
+                  <option value="CONTA_CORRENTE">Corrente</option>
+                  <option value="CONTA_POUPANCA">Poupança</option>
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+              <div>
+                <label className={label}>Titular da conta</label>
+                <input value={f.bank_owner_name || ''} onChange={e => set({ bank_owner_name: e.target.value })}
+                  placeholder="Em branco, usa o nome do fornecedor" className={field} />
+              </div>
+              <div>
+                <label className={label}>CPF/CNPJ do titular</label>
+                <input value={f.bank_owner_document || ''} onChange={e => set({ bank_owner_document: e.target.value })}
+                  placeholder="Em branco, usa o documento acima" className={field} />
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {!compact && (

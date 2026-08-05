@@ -108,20 +108,24 @@ export const SuppliersModule: React.FC<SuppliersModuleProps> = ({ suppliers, set
                       {!s.email && !s.phone && <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-xs">
-                      {s.pix_key && (
+                      <span className="inline-block text-[10px] font-bold uppercase tracking-wider text-mcsystem-600 mb-1">
+                        {s.payment_method === 'BOLETO' ? 'Boleto' : s.payment_method === 'TED' ? 'Transferência' : 'PIX'}
+                      </span>
+                      {s.payment_method !== 'BOLETO' && s.pix_key && (
                         <div className="flex items-center gap-1.5 text-gray-600">
                           <KeyRound size={11} className="text-mcsystem-500" />
                           <span className="font-mono truncate max-w-[200px]" title={s.pix_key}>{s.pix_key}</span>
                           <span className="text-gray-400">{s.pix_key_type}</span>
                         </div>
                       )}
-                      {s.bank_code && (
+                      {s.payment_method !== 'BOLETO' && s.bank_code && (
                         <div className="flex items-center gap-1.5 text-gray-600 mt-0.5">
                           <Landmark size={11} className="text-gray-400" />
                           {s.bank_code} · Ag. {s.bank_agency} · C/C {s.bank_account}{s.bank_account_digit ? `-${s.bank_account_digit}` : ''}
                         </div>
                       )}
-                      {!s.pix_key && !s.bank_code && <span className="text-gray-300">Sem dados de pagamento</span>}
+                      {s.payment_method === 'BOLETO' && <div className="text-gray-400">Linha digitável informada a cada conta</div>}
+                      {s.payment_method !== 'BOLETO' && !s.pix_key && !s.bank_code && <span className="text-gray-300">Sem dados de pagamento</span>}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${

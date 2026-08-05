@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Tenant } from '../types';
 import { Building, Save, HelpCircle, Users, Plus, X, Shield, Lock, Trash2, Edit, Upload, Image as ImageIcon } from 'lucide-react';
+import { TenantAccessPanel } from './TenantAccessPanel';
 
 /**
  * Converte a logo para data URI. Guardar embutido (e não uma URL remota) faz o
@@ -284,6 +285,8 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({ tenant, users, o
           ))}
         </div>
       </div>
+
+      <TenantAccessPanel currentUser={currentUser} tenantName={tenant?.name} />
 
       {/* User Management Modal */}
       {isUserModalOpen && (

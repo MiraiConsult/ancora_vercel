@@ -5,8 +5,10 @@ import {
   AlertTriangle, CalendarClock, CheckCircle2, Search, ChevronDown, Loader2, Wallet, Landmark,
   Copy, Check, Send, Barcode, X, Plus,
 } from 'lucide-react';
-import { asaasPayBill } from '../services/asaasService';
-import { PayRecordModal } from './PayRecordModal';
+import {
+  PayRecordModal, PaymentMethodFields, emptyPayForm, payFormReady, submitPayment,
+  type PayForm,
+} from './PayRecordModal';
 import { isAsaasEnabled } from '../config';
 
 interface PayablesAgendaProps {
@@ -285,9 +287,8 @@ const NewPayableModal: React.FC<{
   const [rubricId, setRubricId] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [bankId, setBankId] = useState('');
-  const [mode, setMode] = useState<'REGISTER' | 'BOLETO'>('REGISTER');
-  const [line, setLine] = useState('');
-  const [schedule, setSchedule] = useState('');
+  const [mode, setMode] = useState<'REGISTER' | 'PAY'>('REGISTER');
+  const [payForm, setPayForm] = useState<PayForm>(() => emptyPayForm());
   const [saving, setSaving] = useState(false);
 
   // Rubricas de despesa: a classificação 1 é receita.
@@ -295,7 +296,6 @@ const NewPayableModal: React.FC<{
     .filter(c => c.classificationCode !== '1')
     .sort((a, b) => (a.rubricName || '').localeCompare(b.rubricName || '', 'pt-BR'));
 
-  const digitsOnly = line.replace(/\D/g, '');
   const overdue = dueDate < todayISO();
   const amount = Number(value) || 0;
 
@@ -303,8 +303,8 @@ const NewPayableModal: React.FC<{
     if (!description.trim()) return alert('Informe a descrição da conta.');
     if (amount <= 0) return alert('Informe um valor maior que zero.');
     if (!dueDate) return alert('Informe o vencimento.');
-    if (mode === 'BOLETO' && digitsOnly.length < 44) {
-      return alert('A linha digitável tem 47 ou 48 números. Confira o que foi digitado.');
+    if (mode === 'PAY' && !payFormReady(payForm)) {
+      return alert('Preencha os dados do pagamento antes de continuar.');
     }
 
     setSaving(true);
@@ -330,25 +330,17 @@ const NewPayableModal: React.FC<{
       if (error) throw new Error(error.message);
 
       // Pagamento só depois da conta existir: o Asaas precisa do recordId para
-      // amarrar o bill ao lançamento.
-      if (mode === 'BOLETO') {
+      // amarrar o pagamento ao lançamento.
+      if (mode === 'PAY') {
         try {
-          const { bill } = await asaasPayBill({
-            recordId: record.id,
-            identificationField: digitsOnly,
-            scheduleDate: schedule || undefined,
-            description: record.description,
-          });
-          onCreated({ ...record, asaas_bill_id: bill.id });
-          alert(
-            `Conta cadastrada e boleto enviado ao Asaas.\n\nValor do boleto: ${brl(bill.value)}\nSituação: ${bill.status}\n\n` +
-            'A baixa do lançamento acontece quando o Asaas confirmar o pagamento.',
-          );
+          const { patch, message } = await submitPayment(record.id, payForm, record.description);
+          onCreated({ ...record, ...patch });
+          alert(`Conta cadastrada.\n\n${message}`);
           return;
         } catch (e: any) {
           // A conta já está gravada — não some por causa do pagamento.
           onCreated(record);
-          alert(`Conta cadastrada, mas o pagamento falhou: ${e.message}\n\nUse o botão "Pagar boleto" na linha dela para tentar de novo.`);
+          alert(`Conta cadastrada, mas o pagamento falhou: ${e.message}\n\nUse o botão "Pagar" na linha dela para tentar de novo.`);
           return;
         }
       }
@@ -423,45 +415,27 @@ const NewPayableModal: React.FC<{
           <div className="border-t border-gray-100 pt-4">
             <label className={label}>O que fazer agora</label>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setMode('REGISTER')}
+              <button type="button" onClick={() => setMode('REGISTER')}
                 className={`px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors ${mode === 'REGISTER' ? 'bg-mcsystem-50 border-mcsystem-300 text-mcsystem-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                 Só registrar
               </button>
-              <button onClick={() => setMode('BOLETO')} disabled={!isAsaasEnabled(currentUser.tenant_id)}
+              <button type="button" onClick={() => setMode('PAY')} disabled={!isAsaasEnabled(currentUser.tenant_id)}
                 title={isAsaasEnabled(currentUser.tenant_id) ? undefined : 'Asaas não habilitado para esta empresa'}
-                className={`px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${mode === 'BOLETO' ? 'bg-mcsystem-50 border-mcsystem-300 text-mcsystem-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                Pagar boleto
+                className={`px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${mode === 'PAY' ? 'bg-mcsystem-50 border-mcsystem-300 text-mcsystem-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                Pagar agora
               </button>
             </div>
           </div>
 
-          {mode === 'BOLETO' && (
-            <div className="space-y-4 bg-gray-50 rounded-xl p-4">
-              <div>
-                <label className={label}>Linha digitável *</label>
-                <input value={line} onChange={e => setLine(e.target.value)}
-                  placeholder="00190.00009 02759.288000 21932.978170 1 87890000005000"
-                  className={`${field} font-mono text-sm bg-white`} />
-                <p className={`text-xs mt-1 ${digitsOnly.length && digitsOnly.length < 44 ? 'text-amber-600' : 'text-gray-400'}`}>
-                  {digitsOnly.length} número(s) — o boleto tem 47 ou 48.
-                </p>
-              </div>
-              <div>
-                <label className={label}>Agendar para (opcional)</label>
-                <input type="date" value={schedule} onChange={e => setSchedule(e.target.value)} disabled={overdue}
-                  className={`${field} bg-white disabled:bg-gray-100 disabled:text-gray-400`} />
-                <p className="text-xs text-gray-400 mt-1">
-                  {overdue
-                    ? 'Vencimento no passado — o Asaas não agenda, paga na hora.'
-                    : 'Em branco, o Asaas paga na data de vencimento do boleto.'}
-                </p>
-              </div>
-              <p className="text-xs text-gray-500 leading-relaxed">
-                O valor debitado é o do boleto, que pode diferir do informado acima por juros ou multa.
-                Sai do saldo da conta Asaas.
-              </p>
+          {mode === 'PAY' && (
+            <div className="bg-gray-50 rounded-xl p-4">
+              <PaymentMethodFields
+                form={payForm} onChange={setPayForm}
+                overdue={overdue} amount={amount}
+              />
             </div>
           )}
+
         </div>
 
         <div className="bg-gray-50 px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
@@ -469,8 +443,8 @@ const NewPayableModal: React.FC<{
             className="px-4 py-2.5 rounded-lg text-gray-600 font-medium hover:bg-gray-200 disabled:opacity-50">Cancelar</button>
           <button onClick={save} disabled={saving}
             className="px-5 py-2.5 bg-mcsystem-900 text-white rounded-lg font-semibold hover:bg-mcsystem-800 flex items-center gap-2 disabled:opacity-50">
-            {saving ? <Loader2 size={16} className="animate-spin" /> : mode === 'BOLETO' ? <Barcode size={16} /> : <CheckCircle2 size={16} />}
-            {mode === 'BOLETO' ? 'Cadastrar e pagar' : 'Cadastrar conta'}
+            {saving ? <Loader2 size={16} className="animate-spin" /> : mode === 'PAY' ? <Barcode size={16} /> : <CheckCircle2 size={16} />}
+            {mode === 'PAY' ? 'Cadastrar e pagar' : 'Cadastrar conta'}
           </button>
         </div>
       </div>

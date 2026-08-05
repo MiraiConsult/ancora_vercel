@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { FinancialRecord, Company, ChartOfAccount, Bank, TransactionStatus, User } from '../types';
+import { FinancialRecord, Company, ChartOfAccount, Bank, TransactionStatus, TransactionType, User } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import {
   AlertTriangle, CalendarClock, CheckCircle2, Search, ChevronDown, Loader2, Wallet, Landmark,
-  Copy, Check, Send, Barcode, X,
+  Copy, Check, Send, Barcode, X, Plus,
 } from 'lucide-react';
-import { asaasCreateTransfer } from '../services/asaasService';
+import { asaasCreateTransfer, asaasPayBill } from '../services/asaasService';
 import { PayBillModal } from './PayBillModal';
 import { isAsaasEnabled } from '../config';
 
@@ -38,6 +38,7 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
   const [payTarget, setPayTarget] = useState<FinancialRecord | null>(null);
   const [sending, setSending] = useState(false);
   const [billTarget, setBillTarget] = useState<FinancialRecord | null>(null);
+  const [newOpen, setNewOpen] = useState(false);
 
   const companyName = (id?: string) => companies.find(c => c.id === id)?.name || null;
   const rubricName = (id?: string) => chartOfAccounts.find(c => c.id === id)?.rubricName || null;
@@ -200,10 +201,14 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
     <div className="space-y-6 animate-in fade-in duration-300">
       <div className="bg-white p-6 rounded-2xl border border-gray-200/80 flex items-start gap-4">
         <div className="bg-gray-900 p-3 rounded-xl text-white"><Wallet size={26} /></div>
-        <div>
+        <div className="flex-1">
           <h2 className="text-2xl font-bold text-gray-900">Contas a pagar</h2>
           <p className="text-gray-500 text-sm mt-0.5">Agenda de vencimentos das despesas, com baixa rápida.</p>
         </div>
+        <button onClick={() => setNewOpen(true)}
+          className="bg-mcsystem-900 hover:bg-mcsystem-800 text-white px-4 py-2.5 rounded-xl font-semibold flex items-center gap-2 shadow-sm whitespace-nowrap">
+          <Plus size={18} /> Nova conta
+        </button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -333,9 +338,232 @@ export const PayablesAgenda: React.FC<PayablesAgendaProps> = ({ records, setReco
           }}
         />
       )}
+
+      {newOpen && (
+        <NewPayableModal
+          companies={companies}
+          chartOfAccounts={chartOfAccounts}
+          banks={banks}
+          currentUser={currentUser}
+          onClose={() => setNewOpen(false)}
+          onCreated={(rec) => { setRecords(list => [rec, ...list]); setNewOpen(false); }}
+        />
+      )}
     </div>
   );
 };
+/**
+ * Cadastra a conta e, na mesma ação, paga ou agenda o boleto pelo Asaas.
+ * Antes era preciso ir a Lançamentos criar a despesa e só depois voltar aqui
+ * para pagar — duas telas para uma conta que chegou agora.
+ */
+const NewPayableModal: React.FC<{
+  companies: Company[];
+  chartOfAccounts: ChartOfAccount[];
+  banks: Bank[];
+  currentUser: User;
+  onClose: () => void;
+  onCreated: (record: FinancialRecord) => void;
+}> = ({ companies, chartOfAccounts, banks, currentUser, onClose, onCreated }) => {
+  const [description, setDescription] = useState('');
+  const [value, setValue] = useState<number | ''>('');
+  const [dueDate, setDueDate] = useState(todayISO());
+  const [rubricId, setRubricId] = useState('');
+  const [companyId, setCompanyId] = useState('');
+  const [bankId, setBankId] = useState('');
+  const [mode, setMode] = useState<'REGISTER' | 'BOLETO'>('REGISTER');
+  const [line, setLine] = useState('');
+  const [schedule, setSchedule] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Rubricas de despesa: a classificação 1 é receita.
+  const expenseRubrics = chartOfAccounts
+    .filter(c => c.classificationCode !== '1')
+    .sort((a, b) => (a.rubricName || '').localeCompare(b.rubricName || '', 'pt-BR'));
+
+  const digitsOnly = line.replace(/\D/g, '');
+  const overdue = dueDate < todayISO();
+  const amount = Number(value) || 0;
+
+  const save = async () => {
+    if (!description.trim()) return alert('Informe a descrição da conta.');
+    if (amount <= 0) return alert('Informe um valor maior que zero.');
+    if (!dueDate) return alert('Informe o vencimento.');
+    if (mode === 'BOLETO' && digitsOnly.length < 44) {
+      return alert('A linha digitável tem 47 ou 48 números. Confira o que foi digitado.');
+    }
+
+    setSaving(true);
+    try {
+      const rubric = chartOfAccounts.find(c => c.id === rubricId);
+      const record: FinancialRecord = {
+        id: `f${Date.now()}`,
+        tenant_id: currentUser.tenant_id,
+        description: description.trim(),
+        // Saída é sempre negativa: o sinal é a fonte da verdade no sistema.
+        amount: -Math.abs(amount),
+        type: TransactionType.EXPENSE,
+        status: overdue ? TransactionStatus.OVERDUE : TransactionStatus.PENDING,
+        dueDate,
+        competenceDate: dueDate,
+        category: rubric?.rubricName || 'A CLASSIFICAR',
+        rubricId: rubricId || undefined,
+        companyId: companyId || undefined,
+        bankId: bankId || undefined,
+      } as FinancialRecord;
+
+      const { error } = await supabase.from('financial_records').insert(record);
+      if (error) throw new Error(error.message);
+
+      // Pagamento só depois da conta existir: o Asaas precisa do recordId para
+      // amarrar o bill ao lançamento.
+      if (mode === 'BOLETO') {
+        try {
+          const { bill } = await asaasPayBill({
+            recordId: record.id,
+            identificationField: digitsOnly,
+            scheduleDate: schedule || undefined,
+            description: record.description,
+          });
+          onCreated({ ...record, asaas_bill_id: bill.id });
+          alert(
+            `Conta cadastrada e boleto enviado ao Asaas.\n\nValor do boleto: ${brl(bill.value)}\nSituação: ${bill.status}\n\n` +
+            'A baixa do lançamento acontece quando o Asaas confirmar o pagamento.',
+          );
+          return;
+        } catch (e: any) {
+          // A conta já está gravada — não some por causa do pagamento.
+          onCreated(record);
+          alert(`Conta cadastrada, mas o pagamento falhou: ${e.message}\n\nUse o botão "Pagar boleto" na linha dela para tentar de novo.`);
+          return;
+        }
+      }
+
+      onCreated(record);
+    } catch (e: any) {
+      alert(`Erro ao cadastrar a conta: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const field = 'w-full px-3 py-2.5 rounded-lg border border-gray-200 outline-none focus:border-mcsystem-500 focus:ring-2 focus:ring-mcsystem-100';
+  const label = 'block text-sm font-medium text-gray-600 mb-1';
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="bg-mcsystem-50 text-mcsystem-700 p-2 rounded-lg"><Wallet size={18} /></div>
+            <h3 className="font-bold text-gray-900">Nova conta a pagar</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        </div>
+
+        <div className="p-6 space-y-4 overflow-y-auto">
+          <div>
+            <label className={label}>Descrição *</label>
+            <input autoFocus value={description} onChange={e => setDescription(e.target.value)}
+              placeholder="Ex: Energia elétrica - agosto" className={field} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={label}>Valor (R$) *</label>
+              <input type="number" step="0.01" min="0" value={value}
+                onChange={e => setValue(e.target.value ? parseFloat(e.target.value) : '')}
+                placeholder="0,00" className={field} />
+            </div>
+            <div>
+              <label className={label}>Vencimento *</label>
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className={field} />
+            </div>
+          </div>
+
+          <div>
+            <label className={label}>Rubrica</label>
+            <select value={rubricId} onChange={e => setRubricId(e.target.value)} className={field}>
+              <option value="">A classificar</option>
+              {expenseRubrics.map(r => <option key={r.id} value={r.id}>{r.rubricName}</option>)}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={label}>Fornecedor</label>
+              <select value={companyId} onChange={e => setCompanyId(e.target.value)} className={field}>
+                <option value="">Nenhum</option>
+                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={label}>Banco</label>
+              <select value={bankId} onChange={e => setBankId(e.target.value)} className={field}>
+                <option value="">Nenhum</option>
+                {banks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 pt-4">
+            <label className={label}>O que fazer agora</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setMode('REGISTER')}
+                className={`px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors ${mode === 'REGISTER' ? 'bg-mcsystem-50 border-mcsystem-300 text-mcsystem-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                Só registrar
+              </button>
+              <button onClick={() => setMode('BOLETO')} disabled={!isAsaasEnabled(currentUser.tenant_id)}
+                title={isAsaasEnabled(currentUser.tenant_id) ? undefined : 'Asaas não habilitado para esta empresa'}
+                className={`px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${mode === 'BOLETO' ? 'bg-mcsystem-50 border-mcsystem-300 text-mcsystem-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                Pagar boleto
+              </button>
+            </div>
+          </div>
+
+          {mode === 'BOLETO' && (
+            <div className="space-y-4 bg-gray-50 rounded-xl p-4">
+              <div>
+                <label className={label}>Linha digitável *</label>
+                <input value={line} onChange={e => setLine(e.target.value)}
+                  placeholder="00190.00009 02759.288000 21932.978170 1 87890000005000"
+                  className={`${field} font-mono text-sm bg-white`} />
+                <p className={`text-xs mt-1 ${digitsOnly.length && digitsOnly.length < 44 ? 'text-amber-600' : 'text-gray-400'}`}>
+                  {digitsOnly.length} número(s) — o boleto tem 47 ou 48.
+                </p>
+              </div>
+              <div>
+                <label className={label}>Agendar para (opcional)</label>
+                <input type="date" value={schedule} onChange={e => setSchedule(e.target.value)} disabled={overdue}
+                  className={`${field} bg-white disabled:bg-gray-100 disabled:text-gray-400`} />
+                <p className="text-xs text-gray-400 mt-1">
+                  {overdue
+                    ? 'Vencimento no passado — o Asaas não agenda, paga na hora.'
+                    : 'Em branco, o Asaas paga na data de vencimento do boleto.'}
+                </p>
+              </div>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                O valor debitado é o do boleto, que pode diferir do informado acima por juros ou multa.
+                Sai do saldo da conta Asaas.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-gray-50 px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
+          <button onClick={onClose} disabled={saving}
+            className="px-4 py-2.5 rounded-lg text-gray-600 font-medium hover:bg-gray-200 disabled:opacity-50">Cancelar</button>
+          <button onClick={save} disabled={saving}
+            className="px-5 py-2.5 bg-mcsystem-900 text-white rounded-lg font-semibold hover:bg-mcsystem-800 flex items-center gap-2 disabled:opacity-50">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : mode === 'BOLETO' ? <Barcode size={16} /> : <CheckCircle2 size={16} />}
+            {mode === 'BOLETO' ? 'Cadastrar e pagar' : 'Cadastrar conta'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const Stat: React.FC<{ label: string; value: string; hint: string; tone: 'critical' | 'warning' | 'neutral' }> = ({ label, value, hint, tone }) => {
   const ring = tone === 'critical' ? 'border-red-200 bg-red-50/40' : tone === 'warning' ? 'border-amber-200 bg-amber-50/40' : 'border-gray-200/80 bg-white';
   const text = tone === 'critical' ? 'text-red-700' : tone === 'warning' ? 'text-amber-700' : 'text-gray-900';

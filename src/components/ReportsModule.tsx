@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import { PayablesReport } from './PayablesReport';
 import {
   Search, Download, AlertTriangle, CalendarClock, CheckCircle2, Layers,
-  X, ChevronDown, Users, FileBarChart,
+  X, ChevronDown, ChevronLeft, ChevronRight, Users, FileBarChart,
 } from 'lucide-react';
 
 interface ReportsModuleProps {
@@ -16,6 +16,34 @@ interface ReportsModuleProps {
 
 type Section = 'RECEIVABLES' | 'PAYABLES';
 type View = 'OVERDUE' | 'UPCOMING' | 'PAID' | 'ALL';
+/** Recortes sintéticos; NONE mostra lançamento a lançamento. */
+type GroupBy = 'NONE' | 'CLIENT' | 'PRODUCT' | 'MONTH';
+
+const MONTH_ABBR = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const monthLabel = (mk: string) => {
+  const [y, m] = mk.split('-').map(Number);
+  return `${MONTH_ABBR[m - 1]}/${String(y).slice(2)}`;
+};
+const addDaysISO = (iso: string, days: number) => {
+  const d = new Date(iso.slice(0, 10) + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+const daysBetweenISO = (a: string, b: string) =>
+  Math.round((new Date(b.slice(0, 10) + 'T00:00:00Z').getTime() - new Date(a.slice(0, 10) + 'T00:00:00Z').getTime()) / 86400000);
+/** Primeiro e último dia do mês de uma data. */
+const monthRange = (iso: string) => {
+  const [y, m] = iso.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { from: `${iso.slice(0, 7)}-01`, to: `${iso.slice(0, 7)}-${String(last).padStart(2, '0')}` };
+};
+
+const GROUPS: { key: GroupBy; label: string }[] = [
+  { key: 'NONE', label: 'Lançamentos' },
+  { key: 'CLIENT', label: 'Por cliente' },
+  { key: 'PRODUCT', label: 'Por produto' },
+  { key: 'MONTH', label: 'Por mês' },
+];
 type Flow = 'INCOME' | 'EXPENSE' | 'BOTH';
 
 const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
@@ -110,7 +138,15 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
   const [selProducts, setSelProducts] = useState<string[] | null>(null);
   const [selClients, setSelClients] = useState<string[] | null>(null);
   const [search, setSearch] = useState('');
-  const [groupByClient, setGroupByClient] = useState(false);
+  const [groupBy, setGroupBy] = useState<GroupBy>('NONE');
+
+  /** Anda o período inteiro, preservando o tamanho da janela. */
+  const shiftPeriod = (dir: -1 | 1) => {
+    if (!from || !to) return;
+    const len = daysBetweenISO(from, to) + 1;
+    setFrom(addDaysISO(from, dir * len));
+    setTo(addDaysISO(to, dir * len));
+  };
 
   const productName = (id?: string | null) => products.find(p => p.id === id)?.name;
   const clientName = (id?: string) => companies.find(c => c.id === id)?.name || 'Sem cliente';
@@ -196,21 +232,74 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
     return { total, count: rows.length, clients: clients.size, avgLate };
   }, [rows]);
 
-  /** Agrupamento por cliente — para cobrar quem deve mais, não item a item. */
+  /** Fatias por produto de um lançamento, já respeitando o filtro de produto. */
+  const productSlices = (r: FinancialRecord): { pid: string; amount: number }[] => {
+    const slices = r.split_revenue?.length
+      ? r.split_revenue.map(s => ({ pid: s.product_id || '__none__', amount: s.amount || 0 }))
+      : [{ pid: r.product_id || '__none__', amount: r.amount }];
+    return selProducts === null ? slices : slices.filter(s => selProducts.includes(s.pid));
+  };
+
+  /**
+   * Recorte sintético: quem deve mais, qual produto pesa mais, qual mês
+   * concentra. Sempre com a quebra atraso / a vencer / recebido, para o número
+   * não esconder de que tipo ele é.
+   */
   const grouped = useMemo(() => {
-    const map = new Map<string, { name: string; total: number; count: number; oldest: string }>();
-    rows.forEach(({ record, value }) => {
-      const key = record.companyId || '__none__';
-      const cur = map.get(key) || { name: clientName(record.companyId), total: 0, count: 0, oldest: record.dueDate };
-      cur.total += value;
+    if (groupBy === 'NONE') return [];
+    const today = todayISO();
+    type G = { key: string; name: string; atraso: number; aVencer: number; recebido: number; count: number; oldest: string };
+    const map = new Map<string, G>();
+
+    const bump = (key: string, name: string, amount: number, r: FinancialRecord) => {
+      const cur = map.get(key) || { key, name, atraso: 0, aVencer: 0, recebido: 0, count: 0, oldest: r.dueDate };
+      if (r.status === TransactionStatus.PAID) cur.recebido += amount;
+      else if (r.dueDate && r.dueDate < today) cur.atraso += amount;
+      else cur.aVencer += amount;
       cur.count += 1;
-      if ((record.dueDate || '') < (cur.oldest || '')) cur.oldest = record.dueDate;
+      if ((r.dueDate || '') < (cur.oldest || '')) cur.oldest = r.dueDate;
       map.set(key, cur);
+    };
+
+    rows.forEach(({ record, value }) => {
+      if (groupBy === 'CLIENT') {
+        bump(record.companyId || '__none__', clientName(record.companyId), value, record);
+      } else if (groupBy === 'MONTH') {
+        const ref = (view === 'PAID' ? (record.paymentDate || record.dueDate) : record.dueDate) || '';
+        bump(ref.slice(0, 7), monthLabel(ref.slice(0, 7)), value, record);
+      } else {
+        // Rateio: cada produto leva a própria fatia, não o valor cheio.
+        productSlices(record).forEach(s => bump(s.pid, productName(s.pid) || 'Sem produto', s.amount, record));
+      }
     });
-    return [...map.values()].sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
-  }, [rows, companies]);
+
+    const list = [...map.values()];
+    return groupBy === 'MONTH'
+      ? list.sort((a, b) => a.key.localeCompare(b.key))
+      : list.sort((a, b) => Math.abs(b.atraso + b.aVencer + b.recebido) - Math.abs(a.atraso + a.aVencer + a.recebido));
+  }, [rows, groupBy, view, companies, products, selProducts]);
+
+  const groupTotal = (g: { atraso: number; aVencer: number; recebido: number }) => g.atraso + g.aVencer + g.recebido;
 
   const exportXlsx = () => {
+    if (groupBy !== 'NONE') {
+      const gLabel = GROUPS.find(g => g.key === groupBy)!.label.replace('Por ', '');
+      const gHead = [gLabel.replace(/^./, c => c.toUpperCase()), 'Lançamentos', 'Em atraso', 'A vencer', 'Recebido', 'Total'];
+      const gBody = grouped.map(g => [g.name, g.count, g.atraso, g.aVencer, g.recebido, groupTotal(g)]);
+      const gFoot = ['TOTAL', totals.count,
+        grouped.reduce((s, g) => s + g.atraso, 0),
+        grouped.reduce((s, g) => s + g.aVencer, 0),
+        grouped.reduce((s, g) => s + g.recebido, 0),
+        grouped.reduce((s, g) => s + groupTotal(g), 0)];
+      const gWs = XLSX.utils.aoa_to_sheet([
+        ['Período', from ? fmtDate(from) : 'início', 'até', to ? fmtDate(to) : 'fim'], [],
+        gHead, ...gBody, [], gFoot,
+      ]);
+      const gWb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(gWb, gWs, 'Recebimentos');
+      XLSX.writeFile(gWb, `Recebimentos_${groupBy.toLowerCase()}_${todayISO()}.xlsx`);
+      return;
+    }
     const head = ['Cliente', 'Produto', 'Descrição', 'Vencimento', 'Pagamento', 'Status', 'Valor', 'Dias em atraso'];
     const body = rows.map(({ record: r, value }) => {
       const late = r.status !== TransactionStatus.PAID && r.dueDate < todayISO() ? -daysUntil(r.dueDate) : '';
@@ -312,15 +401,31 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
           />
         </div>
 
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-gray-500 whitespace-nowrap">
-            {view === 'PAID' ? 'Pago de' : 'Vence de'}
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-500 whitespace-nowrap">
+            {view === 'PAID' ? 'Pago em' : 'Vence em'}
           </span>
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-            className="px-2.5 py-2 border border-gray-200 rounded-lg text-sm" />
-          <span className="text-gray-500">até</span>
-          <input type="date" value={to} onChange={e => setTo(e.target.value)}
-            className="px-2.5 py-2 border border-gray-200 rounded-lg text-sm" />
+          <div className="flex items-center rounded-lg border border-gray-200 overflow-hidden">
+            <button onClick={() => shiftPeriod(-1)} disabled={!from || !to} title="Período anterior"
+              className="px-2 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed border-r border-gray-200">
+              <ChevronLeft size={15} />
+            </button>
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm">
+              <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+                className="outline-none text-gray-700 bg-transparent" />
+              <span className="text-gray-400">até</span>
+              <input type="date" value={to} onChange={e => setTo(e.target.value)}
+                className="outline-none text-gray-700 bg-transparent" />
+            </div>
+            <button onClick={() => shiftPeriod(1)} disabled={!from || !to} title="Próximo período"
+              className="px-2 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed border-l border-gray-200">
+              <ChevronRight size={15} />
+            </button>
+          </div>
+          <button onClick={() => { const r = monthRange(todayISO()); setFrom(r.from); setTo(r.to); }}
+            className="px-2.5 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 whitespace-nowrap">
+            Mês atual
+          </button>
         </div>
 
         <MultiPicker label="Produtos" options={productOptions} selected={selProducts} onChange={setSelProducts} />
@@ -333,14 +438,18 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
           <option value="BOTH">Receitas e despesas</option>
         </select>
 
-        <button
-          onClick={() => setGroupByClient(g => !g)}
-          className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 transition-colors ${
-            groupByClient ? 'border-mcsystem-300 bg-mcsystem-50 text-mcsystem-700 font-medium' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-          }`}
-        >
-          <Users size={14} /> Por cliente
-        </button>
+        <div className="flex gap-1.5">
+          {GROUPS.map(g => (
+            <button
+              key={g.key} onClick={() => setGroupBy(g.key)}
+              className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-1.5 transition-colors ${
+                groupBy === g.key ? 'border-mcsystem-300 bg-mcsystem-50 text-mcsystem-700 font-medium' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {g.key === 'CLIENT' && <Users size={14} />}{g.label}
+            </button>
+          ))}
+        </div>
 
         {hasFilters && (
           <button onClick={clearFilters} className="px-3 py-2 text-sm text-gray-500 hover:text-gray-800 flex items-center gap-1.5">
@@ -386,27 +495,41 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
       <div className="bg-white rounded-2xl border border-gray-200/80 overflow-hidden">
         {rows.length === 0 ? (
           <p className="p-10 text-center text-gray-400 text-sm">Nenhum lançamento com esses filtros.</p>
-        ) : groupByClient ? (
+        ) : groupBy !== 'NONE' ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider">
                 <tr>
-                  <th className="text-left px-5 py-3 font-semibold">Cliente</th>
-                  <th className="text-center px-5 py-3 font-semibold">Lançamentos</th>
-                  <th className="text-left px-5 py-3 font-semibold">Mais antigo</th>
+                  <th className="text-left px-5 py-3 font-semibold">{GROUPS.find(g => g.key === groupBy)!.label.replace('Por ', '')}</th>
+                  <th className="text-center px-4 py-3 font-semibold">Lanç.</th>
+                  <th className="text-right px-4 py-3 font-semibold">Em atraso</th>
+                  <th className="text-right px-4 py-3 font-semibold">A vencer</th>
+                  <th className="text-right px-4 py-3 font-semibold">Recebido</th>
                   <th className="text-right px-5 py-3 font-semibold">Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {grouped.map((g, i) => (
-                  <tr key={i} className="hover:bg-gray-50">
+                {grouped.map(g => (
+                  <tr key={g.key} className="hover:bg-gray-50">
                     <td className="px-5 py-3 font-semibold text-gray-900">{g.name}</td>
-                    <td className="px-5 py-3 text-center text-gray-500">{g.count}</td>
-                    <td className="px-5 py-3 text-gray-500">{fmtDate(g.oldest)}</td>
-                    <td className={`px-5 py-3 text-right font-bold tabular-nums ${g.total < 0 ? 'text-red-600' : 'text-gray-900'}`}>{brl(g.total)}</td>
+                    <td className="px-4 py-3 text-center text-gray-500">{g.count}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-medium text-red-600">{g.atraso ? brl(g.atraso) : <span className="text-gray-300">—</span>}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-amber-700">{g.aVencer ? brl(g.aVencer) : <span className="text-gray-300">—</span>}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-green-600">{g.recebido ? brl(g.recebido) : <span className="text-gray-300">—</span>}</td>
+                    <td className="px-5 py-3 text-right font-bold tabular-nums text-gray-900">{brl(groupTotal(g))}</td>
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr className="bg-gray-50 font-bold text-gray-900">
+                  <td className="px-5 py-3.5">{grouped.length} linha(s)</td>
+                  <td className="px-4 py-3.5 text-center">{totals.count}</td>
+                  <td className="px-4 py-3.5 text-right tabular-nums text-red-600">{brl(grouped.reduce((s, g) => s + g.atraso, 0))}</td>
+                  <td className="px-4 py-3.5 text-right tabular-nums text-amber-700">{brl(grouped.reduce((s, g) => s + g.aVencer, 0))}</td>
+                  <td className="px-4 py-3.5 text-right tabular-nums text-green-600">{brl(grouped.reduce((s, g) => s + g.recebido, 0))}</td>
+                  <td className="px-5 py-3.5 text-right tabular-nums">{brl(grouped.reduce((s, g) => s + groupTotal(g), 0))}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         ) : (

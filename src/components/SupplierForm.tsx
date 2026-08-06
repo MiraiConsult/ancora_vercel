@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Supplier } from '../types';
 import { supabase } from '../lib/supabaseClient';
-import { Loader2, Save, X, Truck, KeyRound, Barcode, Landmark } from 'lucide-react';
+import { lookupCnpj, lookupCep, isCnpjComplete, isCepComplete, maskCnpj, maskCep } from '../lib/lookup';
+import { Loader2, Save, X, Truck, KeyRound, Barcode, Landmark, Search } from 'lucide-react';
 
 const PAY_METHODS: { key: 'PIX' | 'BOLETO' | 'TED'; label: string; icon: React.ElementType }[] = [
   { key: 'PIX', label: 'PIX', icon: KeyRound },
@@ -39,7 +40,55 @@ export const SupplierForm: React.FC<{
     id: '', name: '', doc_type: 'CNPJ', payment_method: 'PIX', bank_account_type: 'CONTA_CORRENTE', status: 'Active',
   } as Supplier);
   const [saving, setSaving] = useState(false);
+  const [looking, setLooking] = useState<'' | 'CNPJ' | 'CEP'>('');
+  const [lookupMsg, setLookupMsg] = useState('');
   const set = (patch: Partial<Supplier>) => setF({ ...f, ...patch });
+
+  /** Puxa da Receita e preenche o que ainda estiver vazio — nada digitado se perde. */
+  const buscarCnpj = async (doc: string) => {
+    if (!isCnpjComplete(doc)) return;
+    setLooking('CNPJ'); setLookupMsg('');
+    try {
+      const d = await lookupCnpj(doc);
+      setF(prev => ({
+        ...prev,
+        name: prev.name?.trim() ? prev.name : (d.nomeFantasia || d.razaoSocial),
+        email: prev.email || d.email,
+        phone: prev.phone || d.phone,
+        zip: prev.zip || d.zip,
+        address: prev.address || d.address,
+        address_number: prev.address_number || d.addressNumber,
+        complement: prev.complement || d.complement,
+        district: prev.district || d.district,
+        city: prev.city || d.city,
+        state: prev.state || d.state,
+      }));
+      setLookupMsg(`${d.razaoSocial}${d.situacao ? ` · ${d.situacao}` : ''}`);
+    } catch (e: any) {
+      setLookupMsg(e.message);
+    } finally {
+      setLooking('');
+    }
+  };
+
+  const buscarCep = async (cep: string) => {
+    if (!isCepComplete(cep)) return;
+    setLooking('CEP');
+    try {
+      const d = await lookupCep(cep);
+      setF(prev => ({
+        ...prev,
+        address: d.address || prev.address,
+        district: d.district || prev.district,
+        city: d.city || prev.city,
+        state: d.state || prev.state,
+      }));
+    } catch (e: any) {
+      setLookupMsg(e.message);
+    } finally {
+      setLooking('');
+    }
+  };
 
   const save = async () => {
     if (!f.name?.trim()) return alert('Informe o nome do fornecedor.');
@@ -102,7 +151,29 @@ export const SupplierForm: React.FC<{
         </div>
         <div>
           <label className={label}>{f.doc_type === 'CPF' ? 'CPF' : 'CNPJ'}</label>
-          <input value={f.document || ''} onChange={e => set({ document: e.target.value })} className={field} />
+          <div className="relative">
+            <input
+              value={f.doc_type === 'CPF' ? (f.document || '') : maskCnpj(f.document || '')}
+              onChange={e => {
+                const v = e.target.value;
+                set({ document: v });
+                if (f.doc_type !== 'CPF' && isCnpjComplete(v)) buscarCnpj(v);
+              }}
+              onBlur={e => { if (f.doc_type !== 'CPF') buscarCnpj(e.target.value); }}
+              placeholder={f.doc_type === 'CPF' ? '000.000.000-00' : '00.000.000/0000-00'}
+              className={`${field} ${f.doc_type !== 'CPF' ? 'pr-9' : ''}`}
+            />
+            {f.doc_type !== 'CPF' && (
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                {looking === 'CNPJ' ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
+              </span>
+            )}
+          </div>
+          {f.doc_type !== 'CPF' && (
+            <p className="text-xs text-gray-400 mt-1 truncate" title={lookupMsg}>
+              {lookupMsg || 'Preenche sozinho pela Receita ao completar o CNPJ.'}
+            </p>
+          )}
         </div>
         <div>
           <label className={label}>Telefone</label>
@@ -206,7 +277,18 @@ export const SupplierForm: React.FC<{
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <div>
               <label className={label}>CEP</label>
-              <input value={f.zip || ''} onChange={e => set({ zip: e.target.value })} className={field} />
+              <div className="relative">
+                <input
+                  value={maskCep(f.zip || '')}
+                  onChange={e => { const v = e.target.value; set({ zip: v }); if (isCepComplete(v)) buscarCep(v); }}
+                  onBlur={e => buscarCep(e.target.value)}
+                  placeholder="00000-000"
+                  className={`${field} pr-9`}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                  {looking === 'CEP' ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
+                </span>
+              </div>
             </div>
             <div className="md:col-span-3">
               <label className={label}>Logradouro</label>

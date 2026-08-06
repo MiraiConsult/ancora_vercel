@@ -645,7 +645,7 @@ const handleAddUser = async (newUser: User) => {
                 />
               ) : <AccessDenied />,
               SUPPLIERS: hasPermission('companies')
-                ? <SuppliersModule suppliers={suppliers} setSuppliers={setSuppliers} />
+                ? <SuppliersModule suppliers={suppliers} setSuppliers={setSuppliers} records={financeRecords} setRecords={setFinanceRecords} />
                 : <AccessDenied />,
               PRODUCTS: hasPermission('products')
                 ? <ProductsModule products={products} setProducts={setProducts} currentUser={user} />

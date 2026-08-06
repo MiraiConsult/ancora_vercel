@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Company, User, NoteColor, FinancialRecord, TransactionType, TransactionStatus, RevenueType, Bank, GeneralNote, Product, Subscription } from '../types';
-import { Search, Plus, Pencil, Trash2, X, Save, User as UserIcon, ChevronDown, StickyNote, TrendingUp, LayoutDashboard, CheckSquare, HelpCircle, LayoutGrid, LayoutList, Square, Copy, ArrowUpDown, Bell } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, X, Save, User as UserIcon, ChevronDown, StickyNote, TrendingUp, LayoutDashboard, CheckSquare, HelpCircle, LayoutGrid, LayoutList, Square, Copy, ArrowUpDown, Bell, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { ClientNotificationsModal } from './ClientNotificationsModal';
+import { lookupCnpj, isCnpjComplete, maskCnpj } from '../lib/lookup';
 
 interface CompaniesModuleProps {
   companies: Company[];
@@ -123,6 +124,28 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<Company>>({ name: '', cnpj: '', segment: '', location: '', status: 'Prospect' });
+  const [buscandoCnpj, setBuscandoCnpj] = useState(false);
+  const [cnpjMsg, setCnpjMsg] = useState('');
+
+  /** Puxa da Receita e preenche o que estiver vazio — nada digitado se perde. */
+  const buscarCnpjCliente = async (doc: string) => {
+    if (!isCnpjComplete(doc)) return;
+    setBuscandoCnpj(true); setCnpjMsg('');
+    try {
+      const d = await lookupCnpj(doc);
+      setFormData(prev => ({
+        ...prev,
+        cnpj: maskCnpj(doc),
+        name: prev.name?.trim() ? prev.name : (d.nomeFantasia || d.razaoSocial),
+        location: prev.location?.trim() ? prev.location : [d.city, d.state].filter(Boolean).join('/'),
+      }));
+      setCnpjMsg(`${d.razaoSocial}${d.situacao ? ` · ${d.situacao}` : ''}`);
+    } catch (e: any) {
+      setCnpjMsg(e.message);
+    } finally {
+      setBuscandoCnpj(false);
+    }
+  };
 
   // Admin Check
   const isAdmin = currentUser.role === 'admin';
@@ -1186,8 +1209,23 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
               <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">CNPJ / CPF</label>
-                    <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-1 focus:ring-mcsystem-500 outline-none" 
-                      value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} />
+                    <div className="relative">
+                      <input type="text" className="w-full px-3 py-2 pr-9 border border-gray-300 rounded focus:ring-1 focus:ring-mcsystem-500 outline-none"
+                        placeholder="00.000.000/0000-00"
+                        value={formData.cnpj}
+                        onChange={e => {
+                          const v = e.target.value;
+                          setFormData({ ...formData, cnpj: v });
+                          if (isCnpjComplete(v)) buscarCnpjCliente(v);
+                        }}
+                        onBlur={e => buscarCnpjCliente(e.target.value)} />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                        {buscandoCnpj ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1 truncate" title={cnpjMsg}>
+                      {cnpjMsg || 'Preenche nome e localização pela Receita ao completar o CNPJ.'}
+                    </p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Localização</label>

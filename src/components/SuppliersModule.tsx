@@ -1,13 +1,34 @@
 import React, { useMemo, useState } from 'react';
-import { Supplier } from '../types';
+import { Supplier, FinancialRecord } from '../types';
 import { supabase } from '../lib/supabaseClient';
-import { Plus, Search, Pencil, Trash2, Truck, KeyRound, Landmark, Mail, Phone } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Truck, KeyRound, Landmark, Mail, Phone, Download, Loader2, CheckSquare, Square } from 'lucide-react';
 import { SupplierForm } from './SupplierForm';
 
 interface SuppliersModuleProps {
   suppliers: Supplier[];
   setSuppliers: React.Dispatch<React.SetStateAction<Supplier[]>>;
+  records: FinancialRecord[];
+  setRecords: React.Dispatch<React.SetStateAction<FinancialRecord[]>>;
 }
+
+/**
+ * Tira da descrição da despesa o nome de quem recebeu. As despesas antigas nao
+ * tem fornecedor nenhum vinculado: o nome so existe no texto livre, escrito de
+ * varios jeitos ("Pix enviado para X", "X (pago por Diego)").
+ */
+const supplierNameFromDescription = (desc?: string): string | null => {
+  let t = (desc || '').trim();
+  if (!t) return null;
+  t = t.replace(/^p(i|í)x\s+(enviado|recebido)\s+para\s+/i, '');
+  // Código que o Asaas cola no fim: BLOCO MAIÚSCULO com números terminando em ASA.
+  t = t.replace(/\s+[A-Z0-9]{12,}ASA\b/g, '');
+  // Anotações entre parênteses ("(pago por Diego)", "(colaboradora PJ)").
+  t = t.replace(/\s*\([^)]*\)\s*/g, ' ');
+  t = t.replace(/\s{2,}/g, ' ').trim();
+  if (t.length < 3) return null;
+  if (/^sem descri/i.test(t)) return null;
+  return t;
+};
 
 const fmtDoc = (s: Supplier) => {
   const d = (s.document || '').replace(/\D/g, '');
@@ -16,9 +37,10 @@ const fmtDoc = (s: Supplier) => {
   return d || null;
 };
 
-export const SuppliersModule: React.FC<SuppliersModuleProps> = ({ suppliers, setSuppliers }) => {
+export const SuppliersModule: React.FC<SuppliersModuleProps> = ({ suppliers, setSuppliers, records, setRecords }) => {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Supplier | null | undefined>(undefined);
+  const [importing, setImporting] = useState(false);
 
   const list = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -71,6 +93,10 @@ export const SuppliersModule: React.FC<SuppliersModuleProps> = ({ suppliers, set
             className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-200 outline-none focus:border-mcsystem-500 focus:ring-2 focus:ring-mcsystem-100"
           />
         </div>
+        <button onClick={() => setImporting(true)}
+          className="px-4 py-3 bg-white border border-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-50 flex items-center justify-center gap-2 whitespace-nowrap">
+          <Download size={18} /> Importar dos lançamentos
+        </button>
         <button onClick={() => setEditing(null)}
           className="px-5 py-3 bg-mcsystem-900 text-white rounded-xl font-semibold hover:bg-mcsystem-800 flex items-center justify-center gap-2 whitespace-nowrap">
           <Plus size={18} /> Novo fornecedor
@@ -148,6 +174,161 @@ export const SuppliersModule: React.FC<SuppliersModuleProps> = ({ suppliers, set
             </table>
           </div>
         )}
+      </div>
+
+      {importing && (
+        <ImportSuppliers
+          suppliers={suppliers} records={records}
+          onClose={() => setImporting(false)}
+          onImported={(novos, vinculos) => {
+            setSuppliers(l => [...l, ...novos]);
+            if (vinculos.size) {
+              setRecords(l => l.map(r => vinculos.has(r.id) ? { ...r, supplier_id: vinculos.get(r.id) } : r));
+            }
+            setImporting(false);
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+/**
+ * Cria fornecedores a partir das despesas já lançadas e amarra os lançamentos
+ * ao fornecedor criado — assim o histórico deixa de ser texto solto.
+ */
+const ImportSuppliers: React.FC<{
+  suppliers: Supplier[];
+  records: FinancialRecord[];
+  onClose: () => void;
+  onImported: (novos: Supplier[], vinculos: Map<string, string>) => void;
+}> = ({ suppliers, records, onClose, onImported }) => {
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  const candidatos = useMemo(() => {
+    const existentes = new Set(suppliers.map(s => s.name.trim().toLowerCase()));
+    const m = new Map<string, { name: string; ids: string[]; total: number }>();
+    for (const r of records) {
+      if (r.amount >= 0 || r.supplier_id) continue;
+      const nome = supplierNameFromDescription(r.description);
+      if (!nome) continue;
+      const k = nome.toLowerCase();
+      if (existentes.has(k)) continue;
+      if (!m.has(k)) m.set(k, { name: nome, ids: [], total: 0 });
+      const c = m.get(k)!;
+      c.ids.push(r.id);
+      c.total += Math.abs(r.amount || 0);
+    }
+    return [...m.values()].sort((a, b) => b.ids.length - a.ids.length || b.total - a.total);
+  }, [records, suppliers]);
+
+  const toggle = (name: string) => {
+    setPicked(p => {
+      const n = new Set(p);
+      n.has(name) ? n.delete(name) : n.add(name);
+      return n;
+    });
+  };
+  const todos = picked.size === candidatos.length && candidatos.length > 0;
+
+  const importar = async () => {
+    const alvos = candidatos.filter(c => picked.has(c.name));
+    if (!alvos.length) return;
+    setBusy(true);
+    try {
+      const agora = Date.now();
+      const novos: Supplier[] = alvos.map((c, i) => ({
+        id: `sp${agora}${i}`,
+        name: c.name,
+        payment_method: 'PIX',
+        status: 'Active',
+      } as Supplier));
+
+      const { data, error } = await supabase.from('suppliers').insert(novos).select();
+      if (error) throw new Error(error.message);
+      const criados = (data as Supplier[]) || novos;
+
+      // Amarra as despesas de cada nome ao fornecedor recém-criado.
+      const vinculos = new Map<string, string>();
+      for (let i = 0; i < alvos.length; i++) {
+        const sid = criados[i]?.id || novos[i].id;
+        const ids = alvos[i].ids;
+        alvos[i].ids.forEach(rid => vinculos.set(rid, sid));
+        for (let j = 0; j < ids.length; j += 200) {
+          await supabase.from('financial_records')
+            .update({ supplier_id: sid }).in('id', ids.slice(j, j + 200));
+        }
+      }
+      onImported(criados, vinculos);
+      alert(`${criados.length} fornecedor(es) criado(s) e ${vinculos.size} lançamento(s) vinculado(s).\n\nAbra cada um para informar a chave PIX ou a conta.`);
+    } catch (e: any) {
+      alert(`Erro ao importar: ${e.message}`);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[210] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+          <div>
+            <h3 className="font-bold text-gray-900 flex items-center gap-2">
+              <Download size={18} className="text-mcsystem-500" /> Importar dos lançamentos
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Nomes tirados da descrição das despesas que ainda não têm fornecedor.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+
+        {candidatos.length === 0 ? (
+          <p className="px-6 py-12 text-center text-sm text-gray-400">
+            Nada a importar — todas as despesas já têm fornecedor, ou as descrições não trazem um nome reconhecível.
+          </p>
+        ) : (
+          <>
+            <div className="px-6 py-2.5 border-b border-gray-100 flex items-center justify-between bg-gray-50/60">
+              <button
+                onClick={() => setPicked(todos ? new Set() : new Set(candidatos.map(c => c.name)))}
+                className="text-sm text-mcsystem-700 font-medium flex items-center gap-2"
+              >
+                {todos ? <CheckSquare size={16} /> : <Square size={16} />}
+                {todos ? 'Desmarcar todos' : `Selecionar todos (${candidatos.length})`}
+              </button>
+              <span className="text-xs text-gray-400">{picked.size} selecionado(s)</span>
+            </div>
+            <ul className="flex-1 overflow-y-auto divide-y divide-gray-100">
+              {candidatos.map(c => {
+                const on = picked.has(c.name);
+                return (
+                  <li key={c.name}>
+                    <button onClick={() => toggle(c.name)}
+                      className={`w-full text-left px-6 py-3 flex items-center gap-3 hover:bg-gray-50 ${on ? 'bg-mcsystem-50/60' : ''}`}>
+                      {on ? <CheckSquare size={17} className="text-mcsystem-600 flex-shrink-0" />
+                          : <Square size={17} className="text-gray-300 flex-shrink-0" />}
+                      <span className="flex-1 font-medium text-gray-800 truncate">{c.name}</span>
+                      <span className="text-xs text-gray-400 whitespace-nowrap">
+                        {c.ids.length} lanç. · {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(c.total)}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+
+        <div className="bg-gray-50 px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
+          <button onClick={onClose} disabled={busy}
+            className="px-4 py-2.5 rounded-lg text-gray-600 font-medium hover:bg-gray-200 disabled:opacity-50">Cancelar</button>
+          <button onClick={importar} disabled={busy || picked.size === 0}
+            className="px-5 py-2.5 bg-mcsystem-900 text-white rounded-lg font-semibold hover:bg-mcsystem-800 flex items-center gap-2 disabled:opacity-50">
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            Importar {picked.size > 0 ? picked.size : ''}
+          </button>
+        </div>
       </div>
     </div>
   );

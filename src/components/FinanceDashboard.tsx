@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { FinancialRecord, TransactionType, TransactionStatus, ChartOfAccount, RevenueType, Bank, Company, User, FinancialRecordSplit, Product } from '../types';
+import { FinancialRecord, TransactionType, TransactionStatus, ChartOfAccount, RevenueType, Bank, Company, User, FinancialRecordSplit, Product, Supplier } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, AreaChart, Area, Line, PieChart, Pie, ComposedChart, LineChart, ReferenceLine } from 'recharts';
 import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as PieIcon, DollarSign, Plus, X, Save, List, Hash, Tag, Search, Pencil, Trash2, Landmark, Tags, Grid3X3, CalendarRange, FileCheck, Filter, Upload, Download, ChevronDown, TrendingUp, Wallet, ArrowRightLeft, LayoutDashboard, ChevronRight, Eye, EyeOff, Calendar, ArrowUpRight, ArrowDownRight, Minus, Settings2, Check, Copy, RefreshCw, BarChart3, TrendingDown, Sparkles, CreditCard, Clock, CalendarClock, Lock, CheckSquare, Square, CheckCircle2, Calculator, Split, Building, Edit3, Table, BookTemplate, BookOpen, ArrowUp, ArrowDown, ArrowUpDown, Users, Package, Barcode } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -21,6 +21,7 @@ interface FinanceDashboardProps {
   companies: Company[];
   setCompanies: React.Dispatch<React.SetStateAction<Company[]>>;
   products: Product[];
+  suppliers?: Supplier[];
   currentUser: User;
   /** Aba inicial quando a navegação vem do menu lateral */
   initialTab?: MainTab;
@@ -111,6 +112,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
     companies,
     setCompanies,
     products,
+    suppliers,
     currentUser,
     initialTab,
     hideTabs = false
@@ -330,7 +332,8 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   useEffect(() => {
     // Generate preview if count >= 1 and we are NOT editing
     if (installmentCount >= 1 && !editingTransactionId) {
-        const inputAmount = newRecord.amount || 0;
+        // Com rateio, o valor do lançamento é a soma das fatias.
+        const inputAmount = rubricSplit.length > 0 ? rubricSplitTotal : (newRecord.amount || 0);
         const count = installmentCount;
         
         let baseAmount = 0;
@@ -380,7 +383,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
         }
         setInstallmentsPreview(newPreviews);
     } 
-  }, [installmentCount, newRecord.amount, newRecord.competenceDate, newRecord.dueDate, editingTransactionId, competenceType, amountDistribution]);
+  }, [installmentCount, newRecord.amount, rubricSplit, newRecord.competenceDate, newRecord.dueDate, editingTransactionId, competenceType, amountDistribution]);
 
   // Click outside handler for Menus
   useEffect(() => {
@@ -1269,7 +1272,8 @@ const newRecords: FinancialRecord[] = [];
     const isIncome = newRecord.type === TransactionType.INCOME;
     if (isIncome) {
       if (!newRecord.product_id) { alert("Selecione o Produto."); return; }
-    } else if (!newRecord.rubricId) {
+    } else if (!newRecord.rubricId && !rubricSplit.some(sp => sp.rubric_id)) {
+      // Com rateio, a rubrica vem das fatias — o seletor único nem aparece.
       alert("Selecione uma Rubrica."); return;
     }
 
@@ -1294,6 +1298,27 @@ const newRecords: FinancialRecord[] = [];
         ? newRecord.split_revenue.filter(s => s.product_id && s.amount > 0)
         : null;
 
+    // Rateio por rubrica, usado tanto no lançamento único quanto nas parcelas.
+    const rubricRows = rubricSplit.filter(sp => sp.rubric_id && Number(sp.amount));
+    const rubricRowsTotal = rubricRows.reduce((acc, sp) => acc + Number(sp.amount), 0);
+    const dominante = (rows: { rubric_id: string; amount: number }[]) =>
+      rows.length ? rows.reduce((a, b) => (Math.abs(b.amount) > Math.abs(a.amount) ? b : a)).rubric_id : undefined;
+
+    /**
+     * As fatias da parcela. Em "repetir valor", a parcela vale o total e o
+     * rateio vai inteiro; em "dividir total", cada fatia encolhe na mesma
+     * proporção. A última absorve o arredondamento para a soma bater com a
+     * parcela — senão o DRE fica com centavos sobrando.
+     */
+    const rubricRowsFor = (installmentAmount: number) => {
+      if (!rubricRows.length || !rubricRowsTotal) return undefined;
+      const ratio = installmentAmount / rubricRowsTotal;
+      const rows = rubricRows.map(sp => ({ ...sp, amount: Number((Number(sp.amount) * ratio).toFixed(2)) }));
+      const diff = Number((installmentAmount - rows.reduce((a, b) => a + b.amount, 0)).toFixed(2));
+      if (diff !== 0) rows[rows.length - 1].amount = Number((rows[rows.length - 1].amount + diff).toFixed(2));
+      return rows;
+    };
+
     if (installmentCount > 1 && !editingTransactionId) {
         // --- CREATE INSTALLMENTS ---
         const seriesId = `s_${Date.now()}`;
@@ -1308,6 +1333,7 @@ const newRecords: FinancialRecord[] = [];
 
             // Valor direto: o sinal digitado pelo usuário é mantido
             let installmentAmount = inst.amount;
+            const rubricRowsDaParcela = rubricRowsFor(installmentAmount);
             return {
                 id: `f${Date.now()}-${i}`,
                 tenant_id: currentUser.tenant_id,
@@ -1318,7 +1344,8 @@ const newRecords: FinancialRecord[] = [];
                 dueDate: inst.dueDate,
                 competenceDate: inst.competenceDate,
                 category: displayCategory,
-                rubricId: newRecord.rubricId,
+                rubricId: dominante(rubricRowsDaParcela || []) || newRecord.rubricId,
+                split_rubrics: rubricRowsDaParcela,
                 bankId: newRecord.bankId,
                 companyId: newRecord.companyId,
                 revenueTypeId: splitPayload ? undefined : newRecord.revenueTypeId,
@@ -1362,12 +1389,6 @@ const newRecords: FinancialRecord[] = [];
         // continuam mostrando algo coerente.
         const splitLimpo = rubricSplit.filter(sp => sp.rubric_id && Number(sp.amount));
         const usaRateio = splitLimpo.length > 0;
-        // Parcelar dividiria o total, mas as fatias continuariam cheias em cada
-        // parcela — o DRE ficaria com N vezes o valor. Bloqueia em vez de somar errado.
-        if (usaRateio && installmentCount > 1) {
-          alert('Rateio por rubrica ainda não funciona junto com parcelamento.\n\nDeixe o número de parcelas em 1, ou lance uma parcela por vez.');
-          return;
-        }
         if (usaRateio && rubricSplit.some(sp => !sp.rubric_id && Number(sp.amount))) {
           alert('Há uma linha do rateio com valor mas sem rubrica. Escolha a rubrica ou remova a linha.');
           return;
@@ -2703,7 +2724,21 @@ const newRecords: FinancialRecord[] = [];
                                     <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Vencimento</label><input required type="date" value={newRecord.dueDate} onChange={e => setNewRecord({...newRecord, dueDate: e.target.value})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/></div>
                                     <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Competência</label><input type="month" value={newRecord.competenceDate ? newRecord.competenceDate.slice(0, 7) : ''} onChange={e => setNewRecord({...newRecord, competenceDate: e.target.value ? `${e.target.value}-01` : ''})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/></div>
                                 </div>
-                                <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Cliente / Fornecedor (Opcional)</label><div className="flex gap-2 items-center"><SearchableSelect options={companies.map(c => ({ value: c.id, label: c.name }))} value={newRecord.companyId} onChange={val => setNewRecord({...newRecord, companyId: val})} placeholder="Vincular a um cliente..." /><button type="button" onClick={() => setIsNewCompanyModalOpen(true)} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 border border-gray-200" title="Novo Cliente"><Plus size={16}/></button></div></div>
+                                <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Cliente / Fornecedor (Opcional)</label><div className="flex gap-2 items-center"><SearchableSelect
+                                    options={[
+                                      ...companies.map(c => ({ value: `c:${c.id}`, label: `${c.name} · cliente` })),
+                                      ...(suppliers || []).map(sp => ({ value: `s:${sp.id}`, label: `${sp.name} · fornecedor` })),
+                                    ]}
+                                    value={newRecord.supplier_id ? `s:${newRecord.supplier_id}` : (newRecord.companyId ? `c:${newRecord.companyId}` : '')}
+                                    onChange={val => {
+                                      // Um campo só, dois cadastros: o prefixo diz em qual coluna gravar.
+                                      if (!val) return setNewRecord({ ...newRecord, companyId: undefined, supplier_id: undefined });
+                                      const [tipo, id] = [val.slice(0, 1), val.slice(2)];
+                                      setNewRecord(tipo === 's'
+                                        ? { ...newRecord, supplier_id: id, companyId: undefined }
+                                        : { ...newRecord, companyId: id, supplier_id: undefined });
+                                    }}
+                                    placeholder="Vincular a um cliente ou fornecedor..." /><button type="button" onClick={() => setIsNewCompanyModalOpen(true)} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 border border-gray-200" title="Novo Cliente"><Plus size={16}/></button></div></div>
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Conta / Banco</label><div className="flex gap-2 items-center"><SearchableSelect options={banks.map(b => ({ value: b.id, label: b.name }))} value={newRecord.bankId} onChange={val => setNewRecord({...newRecord, bankId: val})} placeholder="Selecionar conta..." /><button type="button" onClick={() => setIsNewBankModalOpen(true)} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 border border-gray-200" title="Nova Conta"><Plus size={16}/></button></div></div>
                             </div>
                             

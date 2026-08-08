@@ -19,13 +19,29 @@ export const TenantAccessPanel: React.FC<{
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('collaborator');
   const [busy, setBusy] = useState(false);
+  const [requireApproval, setRequireApproval] = useState(false);
+
+  const toggleApproval = async (on: boolean) => {
+    setRequireApproval(on);
+    const { error } = await supabase.from('organization_settings')
+      .update({ require_payment_approval: on }).eq('id', currentUser.tenant_id);
+    if (error) {
+      setRequireApproval(!on);
+      alert('Não foi possível alterar: ' + error.message);
+    }
+  };
 
   const load = async () => {
     if (!currentUser.tenant_id) return;
     setLoading(true);
-    const { data, error } = await supabase.rpc('tenant_access_list', { p_tenant_id: currentUser.tenant_id });
-    if (error) console.warn('tenant_access_list:', error.message);
-    setMembers((data as Member[]) || []);
+    const [acc, cfg] = await Promise.all([
+      supabase.rpc('tenant_access_list', { p_tenant_id: currentUser.tenant_id }),
+      supabase.from('organization_settings')
+        .select('require_payment_approval').eq('id', currentUser.tenant_id).maybeSingle(),
+    ]);
+    if (acc.error) console.warn('tenant_access_list:', acc.error.message);
+    setMembers((acc.data as Member[]) || []);
+    setRequireApproval(!!cfg.data?.require_payment_approval);
     setLoading(false);
   };
 
@@ -136,6 +152,22 @@ export const TenantAccessPanel: React.FC<{
           ))}
         </ul>
       )}
+
+      <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/60 flex items-start gap-3">
+        <ShieldCheck size={18} className="text-gray-400 mt-0.5 flex-shrink-0" />
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-gray-800">Exigir autorização para pagar</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Ligado, todo pagamento pelo Asaas fica parado em <b>Autorizações</b> até um administrador
+            aprovar — o dinheiro não sai antes disso, e não é preciso entrar no Asaas para liberar.
+          </p>
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+          <input type="checkbox" checked={requireApproval} onChange={e => toggleApproval(e.target.checked)}
+            className="rounded border-gray-300 text-mcsystem-600 focus:ring-mcsystem-500 h-4 w-4" />
+          <span className="text-sm text-gray-700">{requireApproval ? 'Ligado' : 'Desligado'}</span>
+        </label>
+      </div>
 
       <p className="px-6 py-3 border-t border-gray-100 text-xs text-gray-400 flex items-start gap-2">
         <UserPlus size={13} className="mt-0.5 flex-shrink-0" />

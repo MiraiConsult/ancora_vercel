@@ -158,8 +158,23 @@ export interface TransferParams {
   };
 }
 
+/** Com aprovação ligada, o pagamento para aqui e não vai ao Asaas ainda. */
+export interface PaymentResult {
+  transfer?: { id: string; status: string; value: number };
+  bill?: { id: string; status: string; value: number };
+  intentId?: string;
+  pendingApproval?: boolean;
+}
+
 export const asaasCreateTransfer = (params: TransferParams) =>
-  invoke('create_transfer', params) as Promise<{ transfer: { id: string; status: string; value: number }; intentId: string }>;
+  invoke('create_transfer', params) as Promise<PaymentResult>;
+
+/** Aprova um pedido parado — é aqui que o dinheiro começa a sair. */
+export const asaasApprovePayment = (intentId: string) =>
+  invoke('approve_payment', { intentId }) as Promise<{ approved: boolean; method: string; payment: any }>;
+
+export const asaasRejectPayment = (intentId: string, reason?: string) =>
+  invoke('reject_payment', { intentId, reason }) as Promise<{ rejected: boolean }>;
 
 export const asaasDeleteSubscription = (params: { rowId: string; subscriptionId?: string }) =>
   invoke('delete_subscription', params);
@@ -175,8 +190,8 @@ export const asaasPayBill = (params: {
   description?: string;
   value?: number;
   dueDate?: string;
-}) => invoke('pay_bill', params) as Promise<{
-  bill: { id: string; status: string; value: number; dueDate?: string; scheduleDate?: string; companyName?: string };
+}) => invoke('pay_bill', params) as Promise<PaymentResult & {
+  bill?: { id: string; status: string; value: number; dueDate?: string; scheduleDate?: string; companyName?: string };
 }>;
 
 /** Impostos da nota — o Asaas exige o objeto inteiro, mesmo zerado. */

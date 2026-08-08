@@ -45,19 +45,26 @@ export const guessKeyType = (key: string): string => {
   return 'EVP';
 };
 
-/** Começa no meio mais provável: a chave PIX do lançamento, quando existe. */
+/**
+ * Começa no meio que o lançamento já indicava: a conta de pagamento informada
+ * na hora de lançar. Boleto traz a linha digitável quando ela já foi colada.
+ */
 export const emptyPayForm = (record?: FinancialRecord): PayForm => {
-  const savedKey = record?.payment_account?.type === 'PIX' ? (record.payment_account.pixKey || '') : '';
+  const acc = record?.payment_account;
+  const savedKey = acc?.type === 'PIX' ? (acc.pixKey || '') : '';
+  const method: PayMethod = acc?.type === 'BOLETO' ? 'BOLETO'
+    : acc?.type === 'BANK' ? 'TED'
+      : savedKey ? 'PIX_KEY' : 'BOLETO';
   return {
-    method: savedKey ? 'PIX_KEY' : 'BOLETO',
+    method,
     schedule: '',
-    line: '',
+    line: acc?.type === 'BOLETO' ? (acc.barcode || '') : '',
     qr: '',
     pixKey: savedKey,
     pixKeyType: record?.payment_account?.pixKeyType || '',
     bank: {
-      bankCode: '', agency: '', account: '', accountDigit: '',
-      ownerName: record?.payment_account?.holder || '', cpfCnpj: '', bankAccountType: 'CONTA_CORRENTE',
+      bankCode: '', agency: acc?.agency || '', account: acc?.account || '', accountDigit: '',
+      ownerName: acc?.holder || '', cpfCnpj: acc?.document || '', bankAccountType: 'CONTA_CORRENTE',
     },
   };
 };
@@ -106,19 +113,26 @@ export const payFormReady = (f: PayForm): boolean =>
 export const submitPayment = async (
   recordId: string, f: PayForm, description?: string,
 ): Promise<{ patch: Partial<FinancialRecord>; message: string }> => {
+  const emEspera = {
+    patch: {},
+    message: 'Pedido registrado e aguardando autorização.\n\nUm administrador precisa aprovar em Autorizações antes de o dinheiro sair. Nada foi enviado ao Asaas ainda.',
+  };
+
   if (f.method === 'BOLETO') {
-    const { bill } = await asaasPayBill({
+    const res = await asaasPayBill({
       recordId,
       identificationField: digits(f.line),
       scheduleDate: f.schedule || undefined,
       description,
     });
+    if (res.pendingApproval) return emEspera;
+    const bill = res.bill!;
     return {
       patch: { asaas_bill_id: bill.id },
       message: `Boleto enviado ao Asaas.\n\nValor: ${brl(bill.value)}\nSituação: ${bill.status}\n\nA baixa do lançamento acontece quando o Asaas confirmar o pagamento.`,
     };
   }
-  const { transfer } = await asaasCreateTransfer({
+  const res = await asaasCreateTransfer({
     recordId,
     method: f.method,
     scheduleDate: f.schedule || undefined,
@@ -127,6 +141,8 @@ export const submitPayment = async (
     ...(f.method === 'PIX_KEY' ? { pixKey: f.pixKey.trim(), pixKeyType: f.pixKeyType || guessKeyType(f.pixKey) } : {}),
     ...(f.method === 'TED' ? { bankAccount: f.bank } : {}),
   });
+  if (res.pendingApproval) return emEspera;
+  const transfer = res.transfer!;
   return {
     patch: { asaas_transfer_id: transfer.id },
     message: `Pagamento enviado ao Asaas.\n\nValor: ${brl(transfer.value)}\nSituação: ${transfer.status}\n\nO Asaas ainda confirma o saque com o sistema antes de executar. A baixa do lançamento vem quando a transferência concluir.`,

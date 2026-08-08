@@ -2678,16 +2678,33 @@ const newRecords: FinancialRecord[] = [];
                                         <select
                                             value={newRecord.payment_account?.type || ''}
                                             onChange={e => {
-                                                const type = e.target.value as 'PIX' | 'BANK' | '';
+                                                const type = e.target.value as 'PIX' | 'BANK' | 'BOLETO' | '';
                                                 setNewRecord({ ...newRecord, payment_account: type ? { ...(newRecord.payment_account || {}), type } : undefined });
                                             }}
                                             className="text-xs px-2 py-1.5 border border-gray-200 rounded-lg bg-white"
                                         >
                                             <option value="">Não informar</option>
                                             <option value="PIX">PIX</option>
+                                            <option value="BOLETO">Boleto</option>
                                             <option value="BANK">Conta bancária</option>
                                         </select>
                                     </div>
+
+                                    {newRecord.payment_account?.type === 'BOLETO' && (
+                                        <div className="space-y-2">
+                                            <input
+                                                type="text"
+                                                placeholder="Linha digitável (pode deixar em branco e informar na hora de pagar)"
+                                                value={newRecord.payment_account?.barcode || ''}
+                                                onChange={e => setNewRecord({ ...newRecord, payment_account: { ...newRecord.payment_account, barcode: e.target.value } })}
+                                                className="w-full px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg focus:ring-1 focus:ring-mcsystem-500 outline-none"
+                                            />
+                                            <p className="text-[11px] text-gray-400">
+                                                O boleto costuma chegar perto do vencimento — deixe em branco agora e cole o código
+                                                depois, aqui ou direto na tela de Contas a Pagar.
+                                            </p>
+                                        </div>
+                                    )}
 
                                     {newRecord.payment_account?.type === 'PIX' && (
                                         <div className="space-y-2">

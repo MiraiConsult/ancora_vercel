@@ -86,6 +86,62 @@ function chargeTerms(p: Record<string, any>) {
   return terms;
 }
 
+
+/**
+ * Monta o corpo que vai ao Asaas a partir do destino ja registrado na intencao.
+ * Existe para o pagamento aprovado depois sair exatamente igual ao que foi
+ * pedido — o destino nao e remontado a partir de parametros novos.
+ */
+function payloadFromDestination(
+  method: string,
+  dest: Record<string, any>,
+  value: number,
+  description: string,
+  scheduleDate?: string | null,
+  externalReference?: string,
+) {
+  const sched = scheduleDate ? { scheduleDate } : {};
+  if (method === 'PIX_QR') {
+    return { qrCode: { payload: dest.payload }, value, description, ...sched };
+  }
+  if (method === 'TED') {
+    return {
+      value,
+      bankAccount: {
+        bank: { code: dest.bankCode },
+        ownerName: dest.ownerName,
+        cpfCnpj: dest.cpfCnpj,
+        agency: dest.agency,
+        account: dest.account,
+        accountDigit: dest.accountDigit || undefined,
+        bankAccountType: dest.bankAccountType || 'CONTA_CORRENTE',
+      },
+      operationType: 'TED',
+      description,
+      externalReference,
+      ...sched,
+    };
+  }
+  if (method === 'BOLETO') {
+    return {
+      identificationField: dest.line,
+      externalReference,
+      description,
+      ...sched,
+      ...(dest.value ? { value: Number(dest.value) } : {}),
+      ...(dest.dueDate ? { dueDate: dest.dueDate } : {}),
+    };
+  }
+  return {
+    value,
+    pixAddressKey: dest.pixKey,
+    pixAddressKeyType: dest.pixKeyType || undefined,
+    description,
+    externalReference,
+    ...sched,
+  };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -105,10 +161,16 @@ Deno.serve(async (req: Request) => {
     if (userErr || !user) throw new Error('Sessão inválida.');
 
     // Guard: Asaas habilitado só para o tenant configurado.
-    const { data: profile } = await supabase.from('profiles').select('tenant_id').eq('id', user.id).single();
+    const { data: profile } = await supabase.from('profiles').select('tenant_id, role').eq('id', user.id).single();
     if (ASAAS_TENANT_ID && profile?.tenant_id !== ASAAS_TENANT_ID) {
       throw new Error('Asaas não está habilitado para esta empresa.');
     }
+
+    // Aprovacao no sistema: quando ligada, o pagamento nao vai direto ao Asaas.
+    const { data: orgCfg } = await supabase.from('organization_settings')
+      .select('require_payment_approval').eq('id', profile?.tenant_id).maybeSingle();
+    const requireApproval = !!orgCfg?.require_payment_approval;
+    const isAdmin = profile?.role === 'admin';
 
     const { action, ...params } = await req.json();
 
@@ -666,9 +728,18 @@ Deno.serve(async (req: Request) => {
           pix_key_type: pixKeyType,
           holder: params.holder || acc.holder || null,
           description: rec.description || null,
-          status: 'AWAITING_APPROVAL',
+          record_description: rec.description || null,
+          schedule_date: params.scheduleDate || null,
+          requested_by: user.id,
+          // Com aprovacao ligada o dinheiro nao sai agora: o pedido espera aval.
+          status: requireApproval ? 'PENDING_APPROVAL' : 'AWAITING_APPROVAL',
         });
         if (intErr) throw new Error('Falha ao registrar a intenção de pagamento: ' + intErr.message);
+
+        if (requireApproval) {
+          result = { pendingApproval: true, intentId };
+          break;
+        }
 
         let transfer: any;
         try {
@@ -723,6 +794,26 @@ Deno.serve(async (req: Request) => {
         if (params.value) payload.value = Number(params.value);
         if (params.dueDate) payload.dueDate = params.dueDate;
 
+        if (requireApproval) {
+          const intentId = `pi_${crypto.randomUUID()}`;
+          const { error: intErr } = await supabase.from('payment_intents').insert({
+            id: intentId,
+            tenant_id: rec.tenant_id,
+            record_id: rec.id,
+            value: Math.abs(Number(rec.amount) || 0),
+            method: 'BOLETO',
+            destination: { line, value: params.value || null, dueDate: params.dueDate || null },
+            description: rec.description || null,
+            record_description: rec.description || null,
+            schedule_date: params.scheduleDate || null,
+            requested_by: user.id,
+            status: 'PENDING_APPROVAL',
+          });
+          if (intErr) throw new Error('Falha ao registrar o pedido de pagamento: ' + intErr.message);
+          result = { pendingApproval: true, intentId };
+          break;
+        }
+
         const bill = await asaas('/bill', 'POST', payload);
 
         const { error: upErr } = await supabase.from('financial_records')
@@ -730,6 +821,82 @@ Deno.serve(async (req: Request) => {
         if (upErr) throw new Error('Conta enviada ao Asaas, mas falhou ao vincular ao lançamento: ' + upErr.message);
 
         result = { bill };
+        break;
+      }
+
+      /**
+       * Aprova um pedido parado e so entao cria o pagamento no Asaas. E aqui
+       * que o dinheiro comeca a sair — por isso exige admin, e o destino vem da
+       * intencao registrada, nao de parametros novos da chamada.
+       */
+      case 'approve_payment': {
+        if (!isAdmin) throw new Error('Somente um administrador pode aprovar pagamentos.');
+
+        const { data: intent, error: intErr } = await supabase
+          .from('payment_intents').select('*').eq('id', params.intentId).single();
+        if (intErr || !intent) throw new Error('Pedido de pagamento não encontrado.');
+        if (intent.status !== 'PENDING_APPROVAL') {
+          throw new Error(`Este pedido já foi processado (${intent.status}).`);
+        }
+
+        const { data: rec } = await supabase
+          .from('financial_records').select('*').eq('id', intent.record_id).single();
+        if (!rec) throw new Error('Lançamento do pedido não existe mais.');
+        if (rec.status === 'Pago') throw new Error('Este lançamento já está pago.');
+        if (rec.asaas_transfer_id || rec.asaas_bill_id) {
+          throw new Error('Este lançamento já foi enviado ao Asaas.');
+        }
+
+        const method = String(intent.method || 'PIX_KEY').toUpperCase();
+        const value = Math.abs(Number(intent.value) || 0);
+        const description = (intent.record_description || rec.description || 'Pagamento').slice(0, 120);
+        const payload = payloadFromDestination(
+          method, intent.destination || {}, value, description, intent.schedule_date, intent.id,
+        );
+
+        let feito: any;
+        try {
+          feito = method === 'BOLETO' ? await asaas('/bill', 'POST', payload)
+            : method === 'PIX_QR' ? await asaas('/pix/qrCodes/pay', 'POST', payload)
+              : await asaas('/transfers', 'POST', payload);
+        } catch (e) {
+          await supabase.from('payment_intents')
+            .update({ status: 'FAILED', refuse_reason: String((e as Error)?.message || e), decided_at: new Date().toISOString(), approved_by: user.id })
+            .eq('id', intent.id);
+          throw e;
+        }
+
+        // Boleto nao passa pela validacao de saque: ja nasce resolvido.
+        await supabase.from('payment_intents').update({
+          status: method === 'BOLETO' ? 'APPROVED' : 'AWAITING_APPROVAL',
+          approved_by: user.id,
+          asaas_transfer_id: feito.id,
+          ...(method === 'BOLETO' ? { decided_at: new Date().toISOString() } : {}),
+        }).eq('id', intent.id);
+
+        await supabase.from('financial_records')
+          .update(method === 'BOLETO' ? { asaas_bill_id: feito.id } : { asaas_transfer_id: feito.id })
+          .eq('id', rec.id);
+
+        result = { approved: true, method, payment: feito };
+        break;
+      }
+
+      case 'reject_payment': {
+        if (!isAdmin) throw new Error('Somente um administrador pode recusar pagamentos.');
+        const { data: intent } = await supabase
+          .from('payment_intents').select('id, status').eq('id', params.intentId).single();
+        if (!intent) throw new Error('Pedido de pagamento não encontrado.');
+        if (intent.status !== 'PENDING_APPROVAL') {
+          throw new Error(`Este pedido já foi processado (${intent.status}).`);
+        }
+        await supabase.from('payment_intents').update({
+          status: 'REJECTED',
+          refuse_reason: String(params.reason || 'Recusado no sistema.'),
+          approved_by: user.id,
+          decided_at: new Date().toISOString(),
+        }).eq('id', params.intentId);
+        result = { rejected: true };
         break;
       }
 

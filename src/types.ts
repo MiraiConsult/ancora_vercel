@@ -89,7 +89,9 @@ export interface Company {
 
 /** Dados de destino do pagamento, guardados no próprio lançamento. */
 export interface PaymentAccount {
-  type?: 'PIX' | 'BANK';
+  type?: 'PIX' | 'BANK' | 'BOLETO';
+  /** Linha digitável do boleto — informada quando ele chega, perto do vencimento. */
+  barcode?: string;
   pixKey?: string;
   pixKeyType?: 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'RANDOM';
   bank?: string;

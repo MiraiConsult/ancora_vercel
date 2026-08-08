@@ -9,6 +9,7 @@ import { ContractsModule } from './components/ContractsModule';
 import { PayablesAgenda } from './components/PayablesAgenda';
 import { RegistrationsModule } from './components/RegistrationsModule';
 import { SuppliersModule } from './components/SuppliersModule';
+import { ApprovalsModule } from './components/ApprovalsModule';
 import type { MainTab } from './components/FinanceDashboard';
 
 // Páginas do menu que abrem o módulo financeiro numa aba específica
@@ -37,6 +38,7 @@ const PAGE_TITLES: Record<string, string> = {
   coa: 'Plano de Contas',
   lists: 'Cadastros Auxiliares',
   registrations: 'Cadastros',
+  approvals: 'Autorizações',
   alerts: 'Alertas',
   database: 'Exportar Dados',
   settings: 'Configurações',
@@ -127,6 +129,7 @@ const App: React.FC = () => {
   const [revenueTypes, setRevenueTypes] = useState<RevenueType[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
   const [chartOfAccounts, setChartOfAccounts] = useState<ChartOfAccount[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
 
   useEffect(() => {
     // Safety timeout: If Supabase hangs, force stop loading after 8 seconds
@@ -359,6 +362,11 @@ const App: React.FC = () => {
       setProducts(checkError(productsRes, 'products'));
       setSubscriptions(checkError(subscriptionsRes, 'subscriptions'));
       setSuppliers(checkError(suppliersRes, 'suppliers'));
+
+      // Pagamentos parados esperando aval — vira o contador do menu.
+      supabase.from('payment_intents').select('id', { count: 'exact', head: true })
+        .eq('status', 'PENDING_APPROVAL')
+        .then(({ count }) => setPendingApprovals(count || 0));
 
       // Para super admin, orgRes.data é um objeto (single), não array
       if (orgRes.data) {
@@ -700,6 +708,11 @@ const handleAddUser = async (newUser: User) => {
           />
         ) : <AccessDenied />;
 
+      case 'approvals':
+        return hasPermission('finance')
+          ? <ApprovalsModule currentUser={user} users={allUsers} />
+          : <AccessDenied />;
+
       case 'contracts':
         return hasPermission('contracts') ? (
           <ContractsModule
@@ -836,6 +849,7 @@ const handleAddUser = async (newUser: User) => {
           unreadCount={unreadNotifications}
           pendingValidationCount={financeRecords.filter(r => r.needsValidation).length}
           overduePayablesCount={financeRecords.filter(r => r.amount < 0 && (r.status as string) !== 'Pago' && r.dueDate && r.dueDate < new Date().toISOString().slice(0, 10)).length}
+          pendingApprovalCount={pendingApprovals}
           isCollapsed={isSidebarCollapsed}
           onToggle={toggleSidebar}
         />

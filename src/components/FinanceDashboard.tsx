@@ -197,6 +197,12 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   const [editChoiceModal, setEditChoiceModal] = useState<{ isOpen: boolean, record: FinancialRecord | null }>({ isOpen: false, record: null });
   
   // Transaction Form State
+  /**
+   * Rateio por rubrica no formulário. Vazio = uma rubrica só (comportamento
+   * antigo). Com linhas, a soma delas é que define o valor do lançamento.
+   */
+  const [rubricSplit, setRubricSplit] = useState<{ rubric_id: string; description?: string; amount: number }[]>([]);
+
   const [newRecord, setNewRecord] = useState<Partial<FinancialRecord>>({
       description: '',
       amount: 0,
@@ -1351,15 +1357,39 @@ const newRecords: FinancialRecord[] = [];
             : (installmentsPreview.length > 0 ? installmentsPreview[0].amount : Number(newRecord.amount));
         // Valor direto: o sinal digitado pelo usuário é mantido
         const calculatedAmount = finalAmount;
+        // Com rateio, a soma das fatias manda no valor, e a rubrica principal
+        // passa a ser a maior delas — as telas que leem rubricId sozinho
+        // continuam mostrando algo coerente.
+        const splitLimpo = rubricSplit.filter(sp => sp.rubric_id && Number(sp.amount));
+        const usaRateio = splitLimpo.length > 0;
+        // Parcelar dividiria o total, mas as fatias continuariam cheias em cada
+        // parcela — o DRE ficaria com N vezes o valor. Bloqueia em vez de somar errado.
+        if (usaRateio && installmentCount > 1) {
+          alert('Rateio por rubrica ainda não funciona junto com parcelamento.\n\nDeixe o número de parcelas em 1, ou lance uma parcela por vez.');
+          return;
+        }
+        if (usaRateio && rubricSplit.some(sp => !sp.rubric_id && Number(sp.amount))) {
+          alert('Há uma linha do rateio com valor mas sem rubrica. Escolha a rubrica ou remova a linha.');
+          return;
+        }
+        const valorFinal = usaRateio
+          ? splitLimpo.reduce((acc, sp) => acc + Number(sp.amount), 0)
+          : calculatedAmount;
+        const rubricaDominante = usaRateio
+          ? splitLimpo.reduce((a, b) => (Math.abs(b.amount) > Math.abs(a.amount) ? b : a)).rubric_id
+          : newRecord.rubricId;
+
         const transactionToSave: Partial<FinancialRecord> = {
             ...newRecord,
             description: baseDescription,
-            amount: calculatedAmount,
+            amount: valorFinal,
+            rubricId: rubricaDominante,
+            split_rubrics: usaRateio ? splitLimpo : undefined,
             // O sinal é a fonte única da verdade: positivo entra, negativo sai.
             // O type deixa de ser escolhido à parte para não poder discordar do
             // sinal — havia lançamento contado como receita numa tela e como
             // despesa em outra.
-            type: calculatedAmount >= 0 ? TransactionType.INCOME : TransactionType.EXPENSE,
+            type: valorFinal >= 0 ? TransactionType.INCOME : TransactionType.EXPENSE,
             dueDate: finalDueDate,
             competenceDate: editingTransactionId
                 ? newRecord.competenceDate
@@ -1419,6 +1449,8 @@ const newRecords: FinancialRecord[] = [];
         // Ensure competenceDate is correctly formatted for the month input
         competenceDate: record.competenceDate ? record.competenceDate.slice(0, 7) + '-01' : undefined
     });
+    // Reabre o rateio como estava gravado, para editar sem refazer.
+    setRubricSplit(record.split_rubrics?.length ? record.split_rubrics.map(sp => ({ ...sp })) : []);
 
     setInstallmentCount(1);
     setInstallmentsPreview([{ dueDate: record.dueDate, competenceDate: record.competenceDate || record.dueDate, amount: record.amount }]);
@@ -1512,7 +1544,9 @@ const newRecords: FinancialRecord[] = [];
 };
 
   const handleDeleteTransaction = async (e: React.MouseEvent, id: string) => { e.preventDefault(); e.stopPropagation(); if (window.confirm('Excluir esta transação?')) { setRecords(prev => prev.filter(r => r.id !== id)); if (!isMockUser) { const { error } = await supabase.from('financial_records').delete().eq('id', id); if (error) alert("Erro ao excluir."); } } };
-  const resetTransactionForm = () => { setNewRecord({ description: '', amount: 0, type: TransactionType.EXPENSE, status: TransactionStatus.PENDING, dueDate: new Date().toISOString().split('T')[0], competenceDate: new Date().toISOString().slice(0,7)+'-01', rubricId: '', revenueTypeId: '', bankId: '', companyId: '', split_revenue: [] }); setInstallmentCount(1); setCompetenceType('FIXED'); setAmountDistribution('TOTAL'); setInstallmentsPreview([]); setEditingTransactionId(null);  }
+  const rubricSplitTotal = rubricSplit.reduce((acc, sp) => acc + (Number(sp.amount) || 0), 0);
+
+  const resetTransactionForm = () => { setNewRecord({ description: '', amount: 0, type: TransactionType.EXPENSE, status: TransactionStatus.PENDING, dueDate: new Date().toISOString().split('T')[0], competenceDate: new Date().toISOString().slice(0,7)+'-01', rubricId: '', revenueTypeId: '', bankId: '', companyId: '', split_revenue: [] }); setInstallmentCount(1); setCompetenceType('FIXED'); setAmountDistribution('TOTAL'); setInstallmentsPreview([]); setEditingTransactionId(null); setRubricSplit([]);  }
   const handleStatusChange = async (id: string, newStatus: TransactionStatus) => { const now = new Date().toISOString().split('T')[0]; const record = records.find(r => r.id === id); const updates: any = { status: newStatus }; if (record && newStatus === TransactionStatus.PAID && !record.paymentDate) { updates.paymentDate = now; } setRecords(prev => prev.map(r => { if (r.id === id) { return { ...r, ...updates }; } return r; })); if (!isMockUser) { await supabase.from('financial_records').update(updates).eq('id', id); } };
 
   // ... (Bulk actions unchanged) ...
@@ -1649,6 +1683,14 @@ const newRecords: FinancialRecord[] = [];
     }
   };
 
+  /** Rubricas que o lançamento toca — mais de uma quando há rateio. */
+  const rubricsOf = (r: FinancialRecord): ChartOfAccount[] => {
+    const ids = r.split_rubrics?.length
+      ? r.split_rubrics.map(sp => sp.rubric_id)
+      : [r.rubricId];
+    return ids.map(id => chartOfAccounts.find(c => c.id === id)).filter(Boolean) as ChartOfAccount[];
+  };
+
   // --- DRILL DOWN HANDLER (BUG FIX) ---
   const handleCellClick = (node: any, dateKey: string, mode: 'DRE' | 'CASHFLOW') => {
       if (!node || !node.values || node.values[dateKey] === 0) return;
@@ -1671,11 +1713,10 @@ const newRecords: FinancialRecord[] = [];
               if (mode === 'DRE' && node.code === '1') {
                   return r.amount >= 0;
               }
-              const rubric = chartOfAccounts.find(c => c.id === r.rubricId);
-              return rubric && rubric.classificationCode === node.code;
+              // Com rateio, o lançamento aparece em toda classificação que ele toca.
+              return rubricsOf(r).some(c => c.classificationCode === node.code);
           } else if (node.type === 'CENTER') {
-              const rubric = chartOfAccounts.find(c => c.id === r.rubricId);
-              return rubric && rubric.centerCode === node.code;
+              return rubricsOf(r).some(c => c.centerCode === node.code);
           } else if (node.type === 'RUBRIC') {
               // Linhas de receita são por Produto (DRE, ou Fluxo no modo Produto)
               // Linhas de receita são sempre por Produto (DRE e Fluxo de Caixa)
@@ -1687,8 +1728,7 @@ const newRecords: FinancialRecord[] = [];
                   }
                   return (r.product_id ?? null) === targetProductId;
               }
-              const rubric = chartOfAccounts.find(c => c.id === r.rubricId);
-              return rubric && rubric.rubricCode === node.code;
+              return rubricsOf(r).some(c => c.rubricCode === node.code);
           }
           return false;
       });
@@ -1897,6 +1937,24 @@ const newRecords: FinancialRecord[] = [];
       const compareKeys = isCompareEnabled ? comparePeriod.months.map(m => `${comparePeriod.year}-${String(m).padStart(2, '0')}`) : [];
       const hierarchy: any[] = []; const netResult: Record<string, number> = {}; const prevNetResult: Record<string, number> = {};
       
+      /**
+       * Quanto deste lançamento pertence às rubricas do nó. Com rateio, só a
+       * fatia de cada rubrica conta — sem isso o valor cheio entraria na
+       * rubrica principal e o DRE mostraria o dobro do que existe.
+       */
+      const amountForRubrics = (r: FinancialRecord, rubricIds: string[]): number => {
+        if (r.split_rubrics?.length) {
+          return r.split_rubrics
+            .filter(sp => rubricIds.includes(sp.rubric_id || ''))
+            .reduce((acc, sp) => acc + (Number(sp.amount) || 0), 0);
+        }
+        return rubricIds.includes(r.rubricId || '') ? r.amount : 0;
+      };
+      const touchesRubrics = (r: FinancialRecord, rubricIds: string[]): boolean =>
+        r.split_rubrics?.length
+          ? r.split_rubrics.some(sp => rubricIds.includes(sp.rubric_id || ''))
+          : rubricIds.includes(r.rubricId || '');
+
       const calculateValueForNode = (rubricIds: string[], keys: string[], isExpense: boolean) => { 
         const vals: Record<string, number> = {}; 
         keys.forEach(key => { 
@@ -1905,7 +1963,7 @@ const newRecords: FinancialRecord[] = [];
                     // Use competence date first, then due date, then payment date as fallback
                     let rDate = r.competenceDate || r.dueDate || r.paymentDate || '';
                     if (!rDate) return false; // Skip records without any date
-                    return rubricIds.includes(r.rubricId || '') && rDate.startsWith(key); 
+                    return touchesRubrics(r, rubricIds) && rDate.startsWith(key); 
                 }
                 
                 // CASHFLOW logic
@@ -1925,8 +1983,8 @@ const newRecords: FinancialRecord[] = [];
                 
                 // Ensure we have a valid date and it matches the period
                 if (!rDate) return false;
-                return rubricIds.includes(r.rubricId || '') && rDate.startsWith(key); 
-            }).reduce((acc, r) => acc + r.amount, 0);
+                return touchesRubrics(r, rubricIds) && rDate.startsWith(key); 
+            }).reduce((acc, r) => acc + amountForRubrics(r, rubricIds), 0);
         }); 
         return vals; 
       };
@@ -2276,7 +2334,7 @@ const newRecords: FinancialRecord[] = [];
                               return (
                               <tr key={r.id} className={`group transition-colors ${isSelected ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`}>
                                   <td className="p-4 text-center"><div onClick={() => handleSelectOne(r.id)} className="cursor-pointer text-gray-300 hover:text-mcsystem-500 transition-colors">{isSelected ? <CheckSquare size={18} className="text-mcsystem-500" /> : <Square size={18} />}</div></td>
-                                  <td className="p-4"><span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">{chartOfAccounts.find(c => c.id === r.rubricId)?.rubricName || (r.revenueTypeId ? revenueTypes.find(rt => rt.id === r.revenueTypeId)?.name : r.category)}</span></td>
+                                  <td className="p-4"><span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">{chartOfAccounts.find(c => c.id === r.rubricId)?.rubricName || (r.revenueTypeId ? revenueTypes.find(rt => rt.id === r.revenueTypeId)?.name : r.category)}</span>{(r.split_rubrics?.length || 0) > 1 && (<span className="ml-1 bg-mcsystem-50 text-mcsystem-700 px-1.5 py-1 rounded text-[10px] font-bold" title={r.split_rubrics!.map(sp => `${chartOfAccounts.find(c => c.id === sp.rubric_id)?.rubricName || 'Rubrica'}: ${sp.description || ''} ${sp.amount}`).join('\n')}>+{r.split_rubrics!.length - 1}</span>)}</td>
                                   <td className="p-4">{new Date(r.dueDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</td>
                                   <td className="p-4 text-xs text-gray-500">{r.competenceDate ? new Date(r.competenceDate).toLocaleDateString('pt-BR', {month: '2-digit', year: 'numeric', timeZone: 'UTC'}) : '-'}</td>
                                   <td className="p-4 font-medium text-gray-800">{r.description}{r.companyId && (<div className="flex items-center mt-1 text-[10px] text-gray-500 font-normal"><Building size={10} className="mr-1" />{companies.find(c => c.id === r.companyId)?.name}</div>)}</td>
@@ -2621,7 +2679,7 @@ const newRecords: FinancialRecord[] = [];
                             <div className="space-y-6">
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Descrição</label><input required type="text" placeholder="Ex: Venda de Consultoria" value={newRecord.description} onChange={e => setNewRecord({...newRecord, description: e.target.value})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-mcsystem-500 outline-none"/></div>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Valor (R$)</label><input required type="number" step="0.01" placeholder="0,00" value={newRecord.amount || ''} onChange={e => setNewRecord({...newRecord, amount: Number(e.target.value)})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/><p className="text-[10px] text-gray-400 mt-1">Positivo = entrada · Negativo = saída</p>
+                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Valor (R$)</label><input required type="number" step="0.01" placeholder="0,00" readOnly={rubricSplit.length > 0} value={rubricSplit.length > 0 ? (rubricSplitTotal || '') : (newRecord.amount || '')} onChange={e => setNewRecord({...newRecord, amount: Number(e.target.value)})} className={`w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm ${rubricSplit.length > 0 ? 'bg-gray-100 text-gray-500' : ''}`}/><p className="text-[10px] text-gray-400 mt-1">{rubricSplit.length > 0 ? 'Somado das rubricas ao lado' : 'Positivo = entrada · Negativo = saída'}</p>
                                     {(newRecord.amount || 0) > 0 && (
                                       <label className="flex items-start gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
                                         <input
@@ -2661,12 +2719,78 @@ const newRecords: FinancialRecord[] = [];
                                             <div className="flex-1"><SearchableSelect required options={products.filter(p => p.active).map(p => ({ value: p.id, label: p.name }))} value={newRecord.product_id} onChange={val => setNewRecord({...newRecord, product_id: val})} placeholder="Selecione o Produto" /></div>
                                         </div>
                                         ) : (
-                                        <div className="flex items-center gap-2">
+                                        rubricSplit.length > 0 ? (
+                                        <div className="space-y-2">
+                                          {rubricSplit.map((sp, i) => (
+                                            <div key={i} className="bg-white rounded-lg border border-gray-200 p-2.5 space-y-2">
+                                              <div className="flex items-center gap-2">
+                                                <span className="text-[11px] font-bold text-gray-400 w-4">{i + 1}</span>
+                                                <div className="flex-1">
+                                                  <SearchableSelect
+                                                    options={chartOfAccounts.filter(c => c.classificationCode !== '1').map(c => ({ value: c.id, label: `${c.rubricCode} - ${c.rubricName}` }))}
+                                                    value={sp.rubric_id}
+                                                    onChange={val => setRubricSplit(rubricSplit.map((x, j) => j === i ? { ...x, rubric_id: val } : x))}
+                                                    placeholder="Rubrica"
+                                                  />
+                                                </div>
+                                                <button type="button" onClick={() => setRubricSplit(rubricSplit.filter((_, j) => j !== i))}
+                                                  className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md" title="Remover">
+                                                  <Trash2 size={15} />
+                                                </button>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <input
+                                                  type="text" placeholder="Descrição desta parte"
+                                                  value={sp.description || ''}
+                                                  onChange={e => setRubricSplit(rubricSplit.map((x, j) => j === i ? { ...x, description: e.target.value } : x))}
+                                                  className="flex-1 px-2.5 py-2 border border-gray-200 rounded-lg text-sm"
+                                                />
+                                                <input
+                                                  type="number" step="0.01" placeholder="0,00"
+                                                  value={sp.amount === 0 ? '' : sp.amount}
+                                                  onChange={e => setRubricSplit(rubricSplit.map((x, j) => j === i ? { ...x, amount: parseFloat(e.target.value) || 0 } : x))}
+                                                  className="w-28 px-2.5 py-2 border border-gray-200 rounded-lg text-sm text-right tabular-nums"
+                                                />
+                                              </div>
+                                            </div>
+                                          ))}
+
+                                          <div className="flex items-center justify-between gap-2 pt-1">
+                                            <button type="button"
+                                              onClick={() => setRubricSplit([...rubricSplit, { rubric_id: '', description: '', amount: 0 }])}
+                                              className="text-xs font-semibold text-mcsystem-700 hover:text-mcsystem-800 flex items-center gap-1">
+                                              <Plus size={14} /> Outra rubrica
+                                            </button>
+                                            <div className="text-right">
+                                              <span className="text-[11px] text-gray-400 uppercase tracking-wide">Total do lançamento</span>
+                                              <p className={`font-bold tabular-nums ${rubricSplitTotal < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                                R$ {rubricSplitTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                              </p>
+                                            </div>
+                                          </div>
+
+                                          <button type="button" onClick={() => setRubricSplit([])}
+                                            className="text-xs text-gray-400 hover:text-gray-600 underline">
+                                            Voltar para uma rubrica só
+                                          </button>
+                                        </div>
+                                        ) : (
+                                        <div className="space-y-2">
+                                          <div className="flex items-center gap-2">
                                             <div className="p-1.5 rounded-md bg-white border"><Tag size={16} className="text-gray-400"/></div>
                                             <div className="flex-1"><SearchableSelect required options={chartOfAccounts.filter(c => c.classificationCode !== '1').map(c => ({ value: c.id, label: `${c.rubricCode} - ${c.rubricName}`}))} value={newRecord.rubricId} onChange={val => setNewRecord({...newRecord, rubricId: val})} placeholder="Selecione a Rubrica (Plano de Contas)" /></div>
                                             <button type="button" onClick={() => setIsNewRubricModalOpen(true)} className="p-3 bg-white hover:bg-gray-100 rounded-lg border border-gray-200" title="Nova Rubrica"><Plus size={16}/></button>
+                                          </div>
+                                          <button type="button"
+                                            onClick={() => setRubricSplit([
+                                              { rubric_id: newRecord.rubricId || '', description: '', amount: Number(newRecord.amount) || 0 },
+                                              { rubric_id: '', description: '', amount: 0 },
+                                            ])}
+                                            className="text-xs font-semibold text-mcsystem-700 hover:text-mcsystem-800 flex items-center gap-1">
+                                            <Plus size={14} /> Dividir em várias rubricas
+                                          </button>
                                         </div>
-                                        )}
+                                        ))}
                                     </div>
                                 </div>
 

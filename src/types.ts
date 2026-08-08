@@ -138,6 +138,12 @@ export interface FinancialRecord {
   dealId?: string; // Legado — mantido para compatibilidade com registros existentes
   seriesId?: string;
   split_revenue?: { revenue_type_id?: string; product_id?: string; amount: number; }[];
+  /**
+   * Um lançamento que cobre várias rubricas — cada fatia com a própria
+   * descrição e valor. A soma das fatias É o valor do lançamento (diferente do
+   * rateio por produto, que é proporcional ao total).
+   */
+  split_rubrics?: { rubric_id: string; description?: string; amount: number }[];
   /** Produto/rateio definido na mão — o sync do Asaas não sobrescreve. */
   product_manual?: boolean;
   /** Onde o dinheiro vai ser pago (chave PIX ou banco/agência/conta). */

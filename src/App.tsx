@@ -855,7 +855,7 @@ const handleAddUser = async (newUser: User) => {
           isCollapsed={isSidebarCollapsed}
           onToggle={toggleSidebar}
         />
-        <main className={`flex-1 p-8 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'ml-20' : 'ml-64'} ${isSuperAdmin && impersonatedTenantName ? 'mt-14' : ''} min-w-0`}>
+        <main className={`flex-1 p-4 sm:p-6 lg:p-8 flex flex-col transition-all duration-300 overflow-x-hidden ${isSidebarCollapsed ? 'ml-20' : 'ml-64'} ${isSuperAdmin && impersonatedTenantName ? 'mt-14' : ''} min-w-0`}>
            <header className="flex-shrink-0 flex justify-between items-center mb-8">
               <h1 className="text-xl font-semibold text-gray-800 capitalize">{PAGE_TITLES[currentPage] || currentPage}</h1>
               <div className="flex items-center space-x-4">

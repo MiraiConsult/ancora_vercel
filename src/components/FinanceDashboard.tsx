@@ -2337,11 +2337,11 @@ const newRecords: FinancialRecord[] = [];
                   )}
               </div>
 
-              <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-lg border border-gray-100 shadow-sm transition-all">{selectedRecordIds.size > 0 ? (<div className="flex items-center justify-between w-full animate-in slide-in-from-top-2"><div className="flex items-center space-x-4"><div className="bg-mcsystem-500 text-white px-3 py-1.5 rounded-md text-sm font-bold flex items-center shadow-sm"><CheckSquare size={16} className="mr-2"/> {selectedRecordIds.size} Selecionados</div><button onClick={() => setSelectedRecordIds(new Set())} className="text-gray-500 hover:text-gray-700 text-sm flex items-center"><X size={14} className="mr-1"/> Cancelar</button></div><div className="flex items-center space-x-2">{reconOnlyPending && (<button onClick={handleBulkValidate} className="bg-yellow-400 text-yellow-950 hover:bg-yellow-300 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center border border-yellow-500"><CheckCircle2 size={14} className="mr-1"/> Validar</button>)}<button onClick={() => handleBulkStatusChange(TransactionStatus.PAID)} className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><CheckCircle2 size={14} className="mr-1"/> Marcar Pago</button><button onClick={() => handleBulkStatusChange(TransactionStatus.PENDING)} className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Clock size={14} className="mr-1"/> Marcar Pendente</button><div className="h-4 w-px bg-gray-300 mx-2"></div><button onClick={handleBulkDuplicate} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Copy size={14} className="mr-1"/> Duplicar</button><button onClick={handleBulkDelete} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Trash2 size={14} className="mr-1"/> Excluir</button></div></div>) : (<><div className="flex gap-4 items-center flex-1"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input type="text" placeholder="Buscar lançamentos..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={reconSearch} onChange={e => setReconSearch(e.target.value)} /></div><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterType} onChange={e => setReconFilterType(e.target.value as any)}><option value="ALL">Todas Movimentações</option><option value={TransactionType.INCOME}>Receitas</option><option value={TransactionType.EXPENSE}>Despesas</option></select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterBank} onChange={e => setReconFilterBank(e.target.value as any)}><option value="ALL">Todos os Bancos</option>{banks.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}</select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterStatus} onChange={e => setReconFilterStatus(e.target.value as any)}><option value="ALL">Todos Status</option><option value={TransactionStatus.PAID}>Realizado / Pago</option><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select><DateRangeFilter value={reconRange} onChange={setReconRange} /><span className="text-xs text-gray-400 whitespace-nowrap">por vencimento</span>{/* Fica sempre visível: escondê-lo quando a fila zera faz o filtro parecer
+              <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-lg border border-gray-100 shadow-sm transition-all">{selectedRecordIds.size > 0 ? (<div className="flex items-center justify-between w-full animate-in slide-in-from-top-2"><div className="flex items-center space-x-4"><div className="bg-mcsystem-500 text-white px-3 py-1.5 rounded-md text-sm font-bold flex items-center shadow-sm"><CheckSquare size={16} className="mr-2"/> {selectedRecordIds.size} Selecionados</div><button onClick={() => setSelectedRecordIds(new Set())} className="text-gray-500 hover:text-gray-700 text-sm flex items-center"><X size={14} className="mr-1"/> Cancelar</button></div><div className="flex items-center space-x-2">{reconOnlyPending && (<button onClick={handleBulkValidate} className="bg-yellow-400 text-yellow-950 hover:bg-yellow-300 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center border border-yellow-500"><CheckCircle2 size={14} className="mr-1"/> Validar</button>)}<button onClick={() => handleBulkStatusChange(TransactionStatus.PAID)} className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><CheckCircle2 size={14} className="mr-1"/> Marcar Pago</button><button onClick={() => handleBulkStatusChange(TransactionStatus.PENDING)} className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Clock size={14} className="mr-1"/> Marcar Pendente</button><div className="h-4 w-px bg-gray-300 mx-2"></div><button onClick={handleBulkDuplicate} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Copy size={14} className="mr-1"/> Duplicar</button><button onClick={handleBulkDelete} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Trash2 size={14} className="mr-1"/> Excluir</button></div></div>) : (<><div className="flex gap-3 items-center flex-1 flex-wrap"><div className="relative flex-1 min-w-[200px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input type="text" placeholder="Buscar lançamentos..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={reconSearch} onChange={e => setReconSearch(e.target.value)} /></div><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterType} onChange={e => setReconFilterType(e.target.value as any)}><option value="ALL">Todas Movimentações</option><option value={TransactionType.INCOME}>Receitas</option><option value={TransactionType.EXPENSE}>Despesas</option></select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterBank} onChange={e => setReconFilterBank(e.target.value as any)}><option value="ALL">Todos os Bancos</option>{banks.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}</select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterStatus} onChange={e => setReconFilterStatus(e.target.value as any)}><option value="ALL">Todos Status</option><option value={TransactionStatus.PAID}>Realizado / Pago</option><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select><DateRangeFilter value={reconRange} onChange={setReconRange} /><span className="text-xs text-gray-400 whitespace-nowrap">por vencimento</span>{/* Fica sempre visível: escondê-lo quando a fila zera faz o filtro parecer
     inexistente. Apagado sem pendência, amarelo com a contagem quando há. */}
 <button onClick={() => { setReconOnlyPending(v => !v); setSelectedRecordIds(new Set()); }} title={pendingValidationRecords.length > 0 ? 'Lançamentos importados que ainda não entram no DRE nem no Dashboard' : 'Nenhum lançamento pendente de validação'} className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${reconOnlyPending ? 'bg-yellow-400 border-yellow-400 text-yellow-950' : pendingValidationRecords.length > 0 ? 'bg-white border-yellow-200 text-yellow-700 hover:bg-yellow-50' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}><AlertCircle size={15} /> A validar{pendingValidationRecords.length > 0 && <span className={`text-[10px] font-bold px-1.5 rounded-full ${reconOnlyPending ? 'bg-yellow-950 text-yellow-100' : 'bg-yellow-400 text-yellow-950'}`}>{pendingValidationRecords.length}</span>}</button></div><button onClick={() => { resetTransactionForm(); setIsModalOpen(true); }} className="bg-mcsystem-500 hover:bg-mcsystem-400 text-white px-4 py-2 rounded-lg font-bold flex items-center shadow-sm whitespace-nowrap"><Plus size={18} className="mr-2" /> Novo Lançamento</button></>)}</div>
               <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-                  <table className="w-full text-left text-sm text-gray-600">
+                  <table className="w-full text-left text-sm text-gray-600 min-w-[900px]">
                       <thead className="bg-gray-50 text-gray-700 font-bold border-b border-gray-200 uppercase text-xs tracking-wider">
                           <tr>
                             <th className="p-4 w-10 text-center"><div onClick={() => handleSelectAll(filtered)} className="cursor-pointer text-gray-400 hover:text-mcsystem-500 transition-colors">{allSelected ? <CheckSquare size={18} className="text-mcsystem-500" /> : <Square size={18} />}</div></th>
@@ -2521,6 +2521,62 @@ const newRecords: FinancialRecord[] = [];
               const saidas = noPeriodo.filter(r => r.amount < 0).reduce((a, r) => a + r.amount, 0);
               const saldo = entradas + saidas;
 
+              /**
+               * Colunas do resumo: dias quando a janela cabe em ~2 meses,
+               * senão meses. É o que faz "filtrei agosto" virar uma coluna por
+               * dia e "filtrei o ano" virar uma por mês, sem opção extra.
+               */
+              const diaISO = (d: Date) => {
+                const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+                return z.toISOString().slice(0, 10);
+              };
+              const dataDoCaixa = (r: FinancialRecord) => (includeProjections
+                ? (r.dueDate || r.competenceDate)
+                : (r.paymentDate || r.dueDate || r.competenceDate)) || '';
+
+              const limites = (() => {
+                if (cashRange.from && cashRange.to) return { ini: cashRange.from, fim: cashRange.to };
+                const datas = noPeriodo.map(dataDoCaixa).filter(Boolean).sort();
+                return { ini: datas[0] || diaISO(new Date()), fim: datas[datas.length - 1] || diaISO(new Date()) };
+              })();
+              const dias = Math.round(
+                (new Date(limites.fim + 'T00:00:00').getTime() - new Date(limites.ini + 'T00:00:00').getTime()) / 86400000,
+              ) + 1;
+              const porDia = dias <= 62;
+
+              const colunas: { key: string; label: string }[] = [];
+              if (porDia) {
+                for (let d = new Date(limites.ini + 'T00:00:00'); diaISO(d) <= limites.fim; d.setDate(d.getDate() + 1)) {
+                  const k = diaISO(d);
+                  colunas.push({ key: k, label: k.slice(8, 10) + '/' + k.slice(5, 7) });
+                }
+              } else {
+                const ini = new Date(limites.ini + 'T00:00:00');
+                const fim = new Date(limites.fim + 'T00:00:00');
+                for (let d = new Date(ini.getFullYear(), ini.getMonth(), 1); d <= fim; d.setMonth(d.getMonth() + 1)) {
+                  const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                  colunas.push({ key: k, label: `${monthNames[d.getMonth()]}/${String(d.getFullYear()).slice(2)}` });
+                }
+              }
+
+              const chaveDe = (r: FinancialRecord) => {
+                const d = dataDoCaixa(r);
+                return porDia ? d.slice(0, 10) : d.slice(0, 7);
+              };
+              const entradaPor: Record<string, number> = {};
+              const saidaPor: Record<string, number> = {};
+              noPeriodo.forEach(r => {
+                const k = chaveDe(r);
+                if (r.amount >= 0) entradaPor[k] = (entradaPor[k] || 0) + r.amount;
+                else saidaPor[k] = (saidaPor[k] || 0) + r.amount;
+              });
+
+              // Colunas sem movimento viram ruído numa janela longa.
+              const colunasComDado = porDia && colunas.length > 20
+                ? colunas.filter(c => entradaPor[c.key] || saidaPor[c.key])
+                : colunas;
+
+              // Maiores saídas do período — onde o dinheiro está indo.
               // Maiores saídas do período — onde o dinheiro está indo.
               const porRubrica = new Map<string, number>();
               noPeriodo.filter(r => r.amount < 0).forEach(r => {
@@ -2569,6 +2625,64 @@ const newRecords: FinancialRecord[] = [];
                               <p className={`text-3xl font-bold tabular-nums mt-2 ${saldo >= 0 ? 'text-blue-700' : 'text-amber-700'}`}>R$ {brlFull(saldo)}</p>
                               <p className="text-xs text-gray-400 mt-1">{saldo >= 0 ? 'entrou mais do que saiu' : 'saiu mais do que entrou'}</p>
                           </div>
+                      </div>
+
+                      <div className="bg-white rounded-2xl border border-gray-200/80 overflow-hidden">
+                        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+                          <h4 className="font-bold text-gray-800 text-sm">
+                            Caixa {porDia ? 'por dia' : 'por mês'}
+                          </h4>
+                          <span className="text-xs text-gray-400">
+                            {colunasComDado.length} {porDia ? 'dia(s)' : 'mês(es)'} com movimento
+                          </span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-gray-50 text-gray-500 uppercase text-[11px] tracking-wider">
+                                <th className="px-5 py-2.5 text-left font-semibold sticky left-0 bg-gray-50 z-10 min-w-[140px]">Período</th>
+                                {colunasComDado.map(c => (
+                                  <th key={c.key} className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">{c.label}</th>
+                                ))}
+                                <th className="px-5 py-2.5 text-right font-semibold border-l border-gray-200 bg-gray-100">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              <tr className="hover:bg-gray-50/70">
+                                <td className="px-5 py-2.5 font-medium text-green-700 sticky left-0 bg-white z-10">Entradas</td>
+                                {colunasComDado.map(c => (
+                                  <td key={c.key} className="px-3 py-2.5 text-right tabular-nums text-green-700">
+                                    {entradaPor[c.key] ? brlFull(entradaPor[c.key]) : <span className="text-gray-200">—</span>}
+                                  </td>
+                                ))}
+                                <td className="px-5 py-2.5 text-right tabular-nums font-bold text-green-700 border-l border-gray-200 bg-gray-50">{brlFull(entradas)}</td>
+                              </tr>
+                              <tr className="hover:bg-gray-50/70">
+                                <td className="px-5 py-2.5 font-medium text-red-700 sticky left-0 bg-white z-10">Saídas</td>
+                                {colunasComDado.map(c => (
+                                  <td key={c.key} className="px-3 py-2.5 text-right tabular-nums text-red-700">
+                                    {saidaPor[c.key] ? brlFull(Math.abs(saidaPor[c.key])) : <span className="text-gray-200">—</span>}
+                                  </td>
+                                ))}
+                                <td className="px-5 py-2.5 text-right tabular-nums font-bold text-red-700 border-l border-gray-200 bg-gray-50">{brlFull(Math.abs(saidas))}</td>
+                              </tr>
+                            </tbody>
+                            <tfoot>
+                              <tr className="bg-gray-50 font-bold text-gray-900">
+                                <td className="px-5 py-3 sticky left-0 bg-gray-50 z-10">Saldo</td>
+                                {colunasComDado.map(c => {
+                                  const v = (entradaPor[c.key] || 0) + (saidaPor[c.key] || 0);
+                                  return (
+                                    <td key={c.key} className={`px-3 py-3 text-right tabular-nums ${v < 0 ? 'text-red-600' : v > 0 ? 'text-green-600' : 'text-gray-300'}`}>
+                                      {v ? brlFull(v) : '—'}
+                                    </td>
+                                  );
+                                })}
+                                <td className={`px-5 py-3 text-right tabular-nums border-l border-gray-200 ${saldo < 0 ? 'text-red-600' : 'text-green-600'}`}>{brlFull(saldo)}</td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
                       </div>
 
                       {topRubricas.length > 0 && (

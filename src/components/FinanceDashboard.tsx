@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import { generateFinancialInsight } from '../services/geminiService';
 import { supabase } from '../lib/supabaseClient';
 import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
+import { DateRangeFilter, presetRange, inRange, type DateRange } from './DateRangeFilter';
 import { PayRecordModal } from './PayRecordModal';
 import { isAsaasEnabled } from '../config';
 
@@ -124,6 +125,8 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   );
   const [showCashEvolution, setShowCashEvolution] = useState(initialTab === 'CASH_EVOLUTION');
   const [reportViewMode, setReportViewMode] = useState<ReportViewMode>('SUMMARY');
+  /** Período do resumo do caixa — independente do ano/meses da matriz. */
+  const [cashRange, setCashRange] = useState<DateRange>(() => presetRange('MONTH'));
   
   // --- View Options & Advanced Filtering ---
   const [hideEmptyRows, setHideEmptyRows] = useState(true);
@@ -180,6 +183,10 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   // A Validação virou um filtro daqui, em vez de tela própria: o lançamento
   // pendente some do DRE e do Dashboard, então precisa ser fácil de achar.
   const [reconOnlyPending, setReconOnlyPending] = useState(false);
+  /** Período da lista de lançamentos, no mesmo filtro do resto do sistema. */
+  const [reconRange, setReconRange] = useState<DateRange>(() => presetRange('MONTH'));
+  /** Lançamento aberto na própria linha — evita abrir modal só para conferir. */
+  const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
   const [billTarget, setBillTarget] = useState<FinancialRecord | null>(null);
   const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
 
@@ -2215,6 +2222,7 @@ const newRecords: FinancialRecord[] = [];
           const matchesType = reconFilterType === 'ALL' || r.type === reconFilterType;
           const matchesStatus = reconFilterStatus === 'ALL' || r.status === reconFilterStatus;
           const matchesBank = reconFilterBank === 'ALL' || r.bankId === reconFilterBank;
+          if (!inRange(r.dueDate, reconRange)) return false;
           const matchesSearch = r.description.toLowerCase().includes(reconSearch.toLowerCase()) || (chartOfAccounts.find(c=>c.id===r.rubricId)?.rubricName || r.category ||'').toLowerCase().includes(reconSearch.toLowerCase()) || r.amount.toString().includes(reconSearch);
           return matchesType && matchesStatus && matchesSearch && matchesBank;
       });
@@ -2329,7 +2337,7 @@ const newRecords: FinancialRecord[] = [];
                   )}
               </div>
 
-              <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-lg border border-gray-100 shadow-sm transition-all">{selectedRecordIds.size > 0 ? (<div className="flex items-center justify-between w-full animate-in slide-in-from-top-2"><div className="flex items-center space-x-4"><div className="bg-mcsystem-500 text-white px-3 py-1.5 rounded-md text-sm font-bold flex items-center shadow-sm"><CheckSquare size={16} className="mr-2"/> {selectedRecordIds.size} Selecionados</div><button onClick={() => setSelectedRecordIds(new Set())} className="text-gray-500 hover:text-gray-700 text-sm flex items-center"><X size={14} className="mr-1"/> Cancelar</button></div><div className="flex items-center space-x-2">{reconOnlyPending && (<button onClick={handleBulkValidate} className="bg-yellow-400 text-yellow-950 hover:bg-yellow-300 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center border border-yellow-500"><CheckCircle2 size={14} className="mr-1"/> Validar</button>)}<button onClick={() => handleBulkStatusChange(TransactionStatus.PAID)} className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><CheckCircle2 size={14} className="mr-1"/> Marcar Pago</button><button onClick={() => handleBulkStatusChange(TransactionStatus.PENDING)} className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Clock size={14} className="mr-1"/> Marcar Pendente</button><div className="h-4 w-px bg-gray-300 mx-2"></div><button onClick={handleBulkDuplicate} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Copy size={14} className="mr-1"/> Duplicar</button><button onClick={handleBulkDelete} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Trash2 size={14} className="mr-1"/> Excluir</button></div></div>) : (<><div className="flex gap-4 items-center flex-1"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input type="text" placeholder="Buscar lançamentos..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={reconSearch} onChange={e => setReconSearch(e.target.value)} /></div><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterType} onChange={e => setReconFilterType(e.target.value as any)}><option value="ALL">Todas Movimentações</option><option value={TransactionType.INCOME}>Receitas</option><option value={TransactionType.EXPENSE}>Despesas</option></select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterBank} onChange={e => setReconFilterBank(e.target.value as any)}><option value="ALL">Todos os Bancos</option>{banks.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}</select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterStatus} onChange={e => setReconFilterStatus(e.target.value as any)}><option value="ALL">Todos Status</option><option value={TransactionStatus.PAID}>Realizado / Pago</option><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select>{/* Fica sempre visível: escondê-lo quando a fila zera faz o filtro parecer
+              <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-lg border border-gray-100 shadow-sm transition-all">{selectedRecordIds.size > 0 ? (<div className="flex items-center justify-between w-full animate-in slide-in-from-top-2"><div className="flex items-center space-x-4"><div className="bg-mcsystem-500 text-white px-3 py-1.5 rounded-md text-sm font-bold flex items-center shadow-sm"><CheckSquare size={16} className="mr-2"/> {selectedRecordIds.size} Selecionados</div><button onClick={() => setSelectedRecordIds(new Set())} className="text-gray-500 hover:text-gray-700 text-sm flex items-center"><X size={14} className="mr-1"/> Cancelar</button></div><div className="flex items-center space-x-2">{reconOnlyPending && (<button onClick={handleBulkValidate} className="bg-yellow-400 text-yellow-950 hover:bg-yellow-300 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center border border-yellow-500"><CheckCircle2 size={14} className="mr-1"/> Validar</button>)}<button onClick={() => handleBulkStatusChange(TransactionStatus.PAID)} className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><CheckCircle2 size={14} className="mr-1"/> Marcar Pago</button><button onClick={() => handleBulkStatusChange(TransactionStatus.PENDING)} className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Clock size={14} className="mr-1"/> Marcar Pendente</button><div className="h-4 w-px bg-gray-300 mx-2"></div><button onClick={handleBulkDuplicate} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Copy size={14} className="mr-1"/> Duplicar</button><button onClick={handleBulkDelete} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Trash2 size={14} className="mr-1"/> Excluir</button></div></div>) : (<><div className="flex gap-4 items-center flex-1"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input type="text" placeholder="Buscar lançamentos..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={reconSearch} onChange={e => setReconSearch(e.target.value)} /></div><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterType} onChange={e => setReconFilterType(e.target.value as any)}><option value="ALL">Todas Movimentações</option><option value={TransactionType.INCOME}>Receitas</option><option value={TransactionType.EXPENSE}>Despesas</option></select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterBank} onChange={e => setReconFilterBank(e.target.value as any)}><option value="ALL">Todos os Bancos</option>{banks.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}</select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterStatus} onChange={e => setReconFilterStatus(e.target.value as any)}><option value="ALL">Todos Status</option><option value={TransactionStatus.PAID}>Realizado / Pago</option><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select><DateRangeFilter value={reconRange} onChange={setReconRange} /><span className="text-xs text-gray-400 whitespace-nowrap">por vencimento</span>{/* Fica sempre visível: escondê-lo quando a fila zera faz o filtro parecer
     inexistente. Apagado sem pendência, amarelo com a contagem quando há. */}
 <button onClick={() => { setReconOnlyPending(v => !v); setSelectedRecordIds(new Set()); }} title={pendingValidationRecords.length > 0 ? 'Lançamentos importados que ainda não entram no DRE nem no Dashboard' : 'Nenhum lançamento pendente de validação'} className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${reconOnlyPending ? 'bg-yellow-400 border-yellow-400 text-yellow-950' : pendingValidationRecords.length > 0 ? 'bg-white border-yellow-200 text-yellow-700 hover:bg-yellow-50' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}><AlertCircle size={15} /> A validar{pendingValidationRecords.length > 0 && <span className={`text-[10px] font-bold px-1.5 rounded-full ${reconOnlyPending ? 'bg-yellow-950 text-yellow-100' : 'bg-yellow-400 text-yellow-950'}`}>{pendingValidationRecords.length}</span>}</button></div><button onClick={() => { resetTransactionForm(); setIsModalOpen(true); }} className="bg-mcsystem-500 hover:bg-mcsystem-400 text-white px-4 py-2 rounded-lg font-bold flex items-center shadow-sm whitespace-nowrap"><Plus size={18} className="mr-2" /> Novo Lançamento</button></>)}</div>
               <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
@@ -2352,8 +2360,14 @@ const newRecords: FinancialRecord[] = [];
                               const realValue = r.amount; const isPositiveFlow = realValue >= 0; const isSelected = selectedRecordIds.has(r.id);
                               const saldo = runningBalance.get(r.id) ?? 0;
 
+                              const isExpanded = expandedRecordId === r.id;
+                              const rubricasDoLancamento = r.split_rubrics?.length
+                                ? r.split_rubrics
+                                : (r.rubricId ? [{ rubric_id: r.rubricId, description: undefined, amount: r.amount }] : []);
                               return (
-                              <tr key={r.id} className={`group transition-colors ${isSelected ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`}>
+                              <React.Fragment key={r.id}>
+                              <tr onClick={() => setExpandedRecordId(isExpanded ? null : r.id)}
+                                  className={`group transition-colors cursor-pointer ${isSelected ? 'bg-blue-50/50' : isExpanded ? 'bg-mcsystem-50/40' : 'hover:bg-gray-50'}`}>
                                   <td className="p-4 text-center"><div onClick={() => handleSelectOne(r.id)} className="cursor-pointer text-gray-300 hover:text-mcsystem-500 transition-colors">{isSelected ? <CheckSquare size={18} className="text-mcsystem-500" /> : <Square size={18} />}</div></td>
                                   <td className="p-4"><span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">{chartOfAccounts.find(c => c.id === r.rubricId)?.rubricName || (r.revenueTypeId ? revenueTypes.find(rt => rt.id === r.revenueTypeId)?.name : r.category)}</span>{(r.split_rubrics?.length || 0) > 1 && (<span className="ml-1 bg-mcsystem-50 text-mcsystem-700 px-1.5 py-1 rounded text-[10px] font-bold" title={r.split_rubrics!.map(sp => `${chartOfAccounts.find(c => c.id === sp.rubric_id)?.rubricName || 'Rubrica'}: ${sp.description || ''} ${sp.amount}`).join('\n')}>+{r.split_rubrics!.length - 1}</span>)}</td>
                                   <td className="p-4">{new Date(r.dueDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</td>
@@ -2365,6 +2379,79 @@ const newRecords: FinancialRecord[] = [];
                                   <td className={`p-4 text-right font-semibold whitespace-nowrap ${saldo < 0 ? 'text-red-600' : 'text-gray-700'}`}>R$ {saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                   <td className="p-4 text-center"><div className="flex justify-center space-x-2">{r.amount < 0 && r.status !== TransactionStatus.PAID && !r.asaas_bill_id && !r.asaas_transfer_id && isAsaasEnabled(currentUser?.tenant_id) && (<button type="button" onClick={(e) => { e.stopPropagation(); setBillTarget(r); }} title="Pagar boleto pelo saldo do Asaas" className="flex items-center px-2.5 py-1 bg-green-50 text-green-700 rounded text-xs font-medium hover:bg-green-100 transition-colors"><Barcode size={12} className="mr-1"/> Pagar</button>)}{r.asaas_bill_id && (<span title="Boleto enviado ao Asaas" className="flex items-center px-2.5 py-1 bg-blue-50 text-blue-700 rounded text-xs font-medium"><Barcode size={12} className="mr-1"/> No Asaas</span>)}<button onClick={(e) => handleEditTransaction(e, r)} className="flex items-center px-2.5 py-1 bg-mcsystem-50 text-mcsystem-600 rounded text-xs font-medium hover:bg-mcsystem-100 transition-colors"><Pencil size={12} className="mr-1"/> Editar</button><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(e, r.id); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors relative z-10"><Trash2 size={16} className="pointer-events-none" /></button></div></td>
                               </tr>
+
+                              {isExpanded && (
+                                <tr>
+                                  <td colSpan={10} className="bg-mcsystem-50/30 border-b border-mcsystem-100 px-6 py-4">
+                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 text-sm">
+                                      <div className="space-y-1.5">
+                                        <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Lançamento</p>
+                                        <p className="font-semibold text-gray-900">{r.description}</p>
+                                        <p className="text-gray-500">Vence {new Date(r.dueDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+                                          {r.competenceDate && ` · comp. ${new Date(r.competenceDate).toLocaleDateString('pt-BR', { month: '2-digit', year: 'numeric', timeZone: 'UTC' })}`}
+                                          {r.paymentDate && ` · pago em ${new Date(r.paymentDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}`}
+                                        </p>
+                                        <p className={`text-lg font-bold tabular-nums ${r.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                          {r.amount < 0 ? '− ' : ''}R$ {Math.abs(r.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </p>
+                                        {(companies.find(c => c.id === r.companyId) || suppliers?.find(sp => sp.id === r.supplier_id)) && (
+                                          <p className="text-gray-500 flex items-center gap-1.5">
+                                            <Building size={12} />
+                                            {suppliers?.find(sp => sp.id === r.supplier_id)?.name || companies.find(c => c.id === r.companyId)?.name}
+                                            <span className="text-gray-400">{r.supplier_id ? '· fornecedor' : '· cliente'}</span>
+                                          </p>
+                                        )}
+                                        {banks.find(b => b.id === r.bankId) && (
+                                          <p className="text-gray-500 flex items-center gap-1.5"><Landmark size={12} /> {banks.find(b => b.id === r.bankId)?.name}</p>
+                                        )}
+                                      </div>
+
+                                      <div className="space-y-1.5">
+                                        <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                                          {rubricasDoLancamento.length > 1 ? `Rateio em ${rubricasDoLancamento.length} rubricas` : 'Rubrica'}
+                                        </p>
+                                        {rubricasDoLancamento.length === 0 && <p className="text-gray-400">Sem rubrica definida.</p>}
+                                        <ul className="space-y-1">
+                                          {rubricasDoLancamento.map((sp, k) => (
+                                            <li key={k} className="flex items-baseline gap-2">
+                                              <span className="text-gray-700">{chartOfAccounts.find(c => c.id === sp.rubric_id)?.rubricName || r.category}</span>
+                                              {sp.description && <span className="text-gray-400 text-xs truncate">{sp.description}</span>}
+                                              <span className="ml-auto tabular-nums text-gray-600 whitespace-nowrap">
+                                                R$ {Math.abs(Number(sp.amount) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                              </span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+
+                                      <div className="space-y-2">
+                                        <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Pagamento</p>
+                                        {r.payment_account?.type ? (
+                                          <p className="text-gray-600">
+                                            {r.payment_account.type === 'PIX' ? `PIX · ${r.payment_account.pixKey || 'sem chave'}`
+                                              : r.payment_account.type === 'BOLETO' ? `Boleto · ${r.payment_account.barcode ? 'código informado' : 'código pendente'}`
+                                                : `Conta · ${r.payment_account.bank || ''} ${r.payment_account.agency || ''} ${r.payment_account.account || ''}`}
+                                          </p>
+                                        ) : <p className="text-gray-400">Não informado.</p>}
+                                        {r.asaas_bill_id && <p className="text-blue-700 text-xs">Boleto enviado ao Asaas</p>}
+                                        {r.asaas_transfer_id && <p className="text-blue-700 text-xs">Pagamento enviado ao Asaas</p>}
+                                        {r.seriesId && <p className="text-gray-400 text-xs">Faz parte de um parcelamento</p>}
+                                        <div className="flex gap-2 pt-1">
+                                          <button onClick={(e) => { e.stopPropagation(); handleEditTransaction(e, r); }}
+                                            className="px-3 py-1.5 bg-mcsystem-900 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5">
+                                            <Pencil size={12} /> Editar
+                                          </button>
+                                          <button onClick={(e) => { e.stopPropagation(); setExpandedRecordId(null); }}
+                                            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-white">
+                                            Fechar
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                              </React.Fragment>
                           )})}
                           {filtered.length === 0 && <tr><td colSpan={9} className="p-8 text-center text-gray-400">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
                           {filtered.length > 0 && (
@@ -2418,12 +2505,90 @@ const newRecords: FinancialRecord[] = [];
 
       if (reportViewMode === 'SUMMARY') {
           if (mode === 'CASHFLOW') {
-              const income = calculateRowTotal(hierarchy.find(h=>h.code==='INFLOW')?.values || {}, primaryKeys);
-              const expense = calculateRowTotal(hierarchy.find(h=>h.code==='OUTFLOW')?.values || {}, primaryKeys);
+              /**
+               * Resumo do caixa por intervalo de datas, calculado direto dos
+               * lançamentos — e não da matriz, que é presa a ano + meses. É o
+               * "bater o olho" antes de abrir o detalhado.
+               */
+              const noPeriodo = validRecords.filter(r => {
+                if (!includeProjections && r.status !== TransactionStatus.PAID) return false;
+                const d = includeProjections
+                  ? (r.dueDate || r.competenceDate)
+                  : (r.paymentDate || r.dueDate || r.competenceDate);
+                return inRange(d, cashRange);
+              });
+              const entradas = noPeriodo.filter(r => r.amount >= 0).reduce((a, r) => a + r.amount, 0);
+              const saidas = noPeriodo.filter(r => r.amount < 0).reduce((a, r) => a + r.amount, 0);
+              const saldo = entradas + saidas;
+
+              // Maiores saídas do período — onde o dinheiro está indo.
+              const porRubrica = new Map<string, number>();
+              noPeriodo.filter(r => r.amount < 0).forEach(r => {
+                const fatias = r.split_rubrics?.length
+                  ? r.split_rubrics.map(sp => ({ id: sp.rubric_id, v: Number(sp.amount) || 0 }))
+                  : [{ id: r.rubricId, v: r.amount }];
+                fatias.forEach(f => {
+                  const nome = chartOfAccounts.find(c => c.id === f.id)?.rubricName || r.category || 'Sem rubrica';
+                  porRubrica.set(nome, (porRubrica.get(nome) || 0) + Math.abs(f.v));
+                });
+              });
+              const topRubricas = [...porRubrica.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+              const brlFull = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
               return (
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-100 max-w-4xl mx-auto p-8 animate-in fade-in">
-                      <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold text-gray-800">Resumo de Caixa ({primaryPeriod.year})</h3><button onClick={() => setReportViewMode('DETAILED')} className="text-sm text-mcsystem-500 hover:underline flex items-center"><List size={14} className="mr-1"/> Ver Detalhado (Matriz)</button></div>
-                      <div className="grid grid-cols-3 gap-6 text-center"><div className="p-6 bg-green-50 rounded-xl border border-green-100"><p className="text-sm text-green-600 font-bold uppercase mb-2">Entradas (Selecionadas)</p><p className="text-2xl font-bold text-green-700">R$ {income.toLocaleString('pt-BR')}</p></div><div className="p-6 bg-red-50 rounded-xl border border-red-100"><p className="text-sm text-red-600 font-bold uppercase mb-2">Saídas (Selecionadas)</p><p className="text-2xl font-bold text-red-700">R$ {Math.abs(expense).toLocaleString('pt-BR')}</p></div><div className="p-6 bg-blue-50 rounded-xl border border-blue-100"><p className="text-sm text-blue-600 font-bold uppercase mb-2">Saldo do Período</p><p className="text-2xl font-bold text-blue-700">R$ {(income + expense).toLocaleString('pt-BR')}</p></div></div>
+                  <div className="space-y-5 animate-in fade-in">
+                      <div className="bg-white rounded-2xl border border-gray-200/80 px-5 py-4 flex flex-wrap items-center gap-3">
+                          <DateRangeFilter value={cashRange} onChange={setCashRange} label="Período" />
+                          <button onClick={() => setIncludeProjections(!includeProjections)}
+                            className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${includeProjections ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                            {includeProjections ? <CheckSquare size={15} className="mr-2"/> : <Square size={15} className="mr-2"/>}
+                            Incluir pendentes
+                          </button>
+                          <span className="text-xs text-gray-400">
+                            {includeProjections ? 'Por vencimento, incluindo o que ainda não foi pago.' : 'Só o que foi pago, pela data da baixa.'}
+                          </span>
+                          <button onClick={() => setReportViewMode('DETAILED')}
+                            className="ml-auto px-4 py-2 text-sm bg-mcsystem-900 text-white rounded-lg font-semibold hover:bg-mcsystem-800 flex items-center gap-2">
+                            <List size={15} /> Ver detalhado
+                          </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="bg-white rounded-2xl border border-green-200 p-6">
+                              <p className="text-[11px] text-green-700 font-bold uppercase tracking-wider">Total de entradas</p>
+                              <p className="text-3xl font-bold text-green-700 tabular-nums mt-2">R$ {brlFull(entradas)}</p>
+                              <p className="text-xs text-gray-400 mt-1">{noPeriodo.filter(r => r.amount >= 0).length} lançamento(s)</p>
+                          </div>
+                          <div className="bg-white rounded-2xl border border-red-200 p-6">
+                              <p className="text-[11px] text-red-700 font-bold uppercase tracking-wider">Total de saídas</p>
+                              <p className="text-3xl font-bold text-red-700 tabular-nums mt-2">R$ {brlFull(Math.abs(saidas))}</p>
+                              <p className="text-xs text-gray-400 mt-1">{noPeriodo.filter(r => r.amount < 0).length} lançamento(s)</p>
+                          </div>
+                          <div className={`bg-white rounded-2xl border p-6 ${saldo >= 0 ? 'border-blue-200' : 'border-amber-300'}`}>
+                              <p className={`text-[11px] font-bold uppercase tracking-wider ${saldo >= 0 ? 'text-blue-700' : 'text-amber-700'}`}>Saldo operacional</p>
+                              <p className={`text-3xl font-bold tabular-nums mt-2 ${saldo >= 0 ? 'text-blue-700' : 'text-amber-700'}`}>R$ {brlFull(saldo)}</p>
+                              <p className="text-xs text-gray-400 mt-1">{saldo >= 0 ? 'entrou mais do que saiu' : 'saiu mais do que entrou'}</p>
+                          </div>
+                      </div>
+
+                      {topRubricas.length > 0 && (
+                        <div className="bg-white rounded-2xl border border-gray-200/80 overflow-hidden">
+                          <div className="px-6 py-3 border-b border-gray-100">
+                            <h4 className="font-bold text-gray-800 text-sm">Para onde foi o dinheiro</h4>
+                          </div>
+                          <ul className="divide-y divide-gray-100">
+                            {topRubricas.map(([nome, valor]) => (
+                              <li key={nome} className="px-6 py-2.5 flex items-center gap-3">
+                                <span className="flex-1 text-sm text-gray-700 truncate">{nome}</span>
+                                <div className="w-32 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-red-400" style={{ width: `${Math.min(100, (valor / Math.abs(saidas || 1)) * 100)}%` }} />
+                                </div>
+                                <span className="text-sm font-semibold text-gray-800 tabular-nums w-32 text-right">R$ {brlFull(valor)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                   </div>
               );
           } else { // DRE SUMMARY

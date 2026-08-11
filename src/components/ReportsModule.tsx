@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { FinancialRecord, Company, Product, ChartOfAccount, TransactionType, TransactionStatus } from '../types';
 import * as XLSX from 'xlsx';
 import { PayablesReport } from './PayablesReport';
+import { DateRangeFilter } from './DateRangeFilter';
 import {
   Search, Download, AlertTriangle, CalendarClock, CheckCircle2, Layers,
   X, ChevronDown, ChevronLeft, ChevronRight, Users, FileBarChart,
@@ -401,32 +402,11 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-500 whitespace-nowrap">
-            {view === 'PAID' ? 'Pago em' : 'Vence em'}
-          </span>
-          <div className="flex items-center rounded-lg border border-gray-200 overflow-hidden">
-            <button onClick={() => shiftPeriod(-1)} disabled={!from || !to} title="Período anterior"
-              className="px-2 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed border-r border-gray-200">
-              <ChevronLeft size={15} />
-            </button>
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm">
-              <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-                className="outline-none text-gray-700 bg-transparent" />
-              <span className="text-gray-400">até</span>
-              <input type="date" value={to} onChange={e => setTo(e.target.value)}
-                className="outline-none text-gray-700 bg-transparent" />
-            </div>
-            <button onClick={() => shiftPeriod(1)} disabled={!from || !to} title="Próximo período"
-              className="px-2 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed border-l border-gray-200">
-              <ChevronRight size={15} />
-            </button>
-          </div>
-          <button onClick={() => { const r = monthRange(todayISO()); setFrom(r.from); setTo(r.to); }}
-            className="px-2.5 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 whitespace-nowrap">
-            Mês atual
-          </button>
-        </div>
+        <DateRangeFilter
+          value={{ from, to }}
+          onChange={r => { setFrom(r.from); setTo(r.to); }}
+          label={view === 'PAID' ? 'Pago em' : 'Vence em'}
+        />
 
         <MultiPicker label="Produtos" options={productOptions} selected={selProducts} onChange={setSelProducts} />
         <MultiPicker label="Clientes" options={clientOptions} selected={selClients} onChange={setSelClients} />

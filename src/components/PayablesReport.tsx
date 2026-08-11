@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { FinancialRecord, Company, ChartOfAccount } from '../types';
 import * as XLSX from 'xlsx';
+import { DateRangeFilter } from './DateRangeFilter';
 import {
   Download, Wallet, AlertTriangle, CalendarClock, CheckCircle2,
   ChevronLeft, ChevronRight, Search, List,
@@ -187,25 +188,7 @@ export const PayablesReport: React.FC<PayablesReportProps> = ({ records, compani
 
       {/* Período */}
       <div className="bg-white rounded-2xl border border-gray-200/80 px-5 py-4 flex flex-wrap items-center gap-3">
-        <div className="flex items-center rounded-xl border border-gray-200 overflow-hidden">
-          <button onClick={() => shiftPeriod(-1)} disabled={!from || !to}
-            title="Período anterior"
-            className="px-2.5 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed border-r border-gray-200">
-            <ChevronLeft size={16} />
-          </button>
-          <div className="flex items-center gap-2 px-3 py-1.5 text-sm">
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-              className="outline-none text-gray-700 bg-transparent" />
-            <span className="text-gray-400">até</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)}
-              className="outline-none text-gray-700 bg-transparent" />
-          </div>
-          <button onClick={() => shiftPeriod(1)} disabled={!from || !to}
-            title="Próximo período"
-            className="px-2.5 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed border-l border-gray-200">
-            <ChevronRight size={16} />
-          </button>
-        </div>
+        <DateRangeFilter value={{ from, to }} onChange={r => { setFrom(r.from); setTo(r.to); }} label="Vencimento" />
 
         <div className="flex gap-1.5 text-sm">
           <button onClick={() => setMonth(today)} className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Mês atual</button>

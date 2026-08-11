@@ -283,8 +283,10 @@ Deno.serve(async (req: Request) => {
         const baseDescription = params.description || `Cobrança — ${client.name}`;
         const stamp = Date.now();
         const seriesId = installments > 1 ? `i${stamp}` : null;
+        // MESMO id do asaas-sync (fa{payment_id}), pelo mesmo motivo das
+        // assinaturas: sem isso são duas linhas para a mesma cobrança.
         const records = charges.map((p: any, i: number) => ({
-          id: `f${stamp}-${i}`,
+          id: `fa${p.id}`,
           tenant_id: client.tenant_id,
           description: installments > 1 ? `${baseDescription} (${i + 1}/${charges.length})` : baseDescription,
           amount: Number(p.value),
@@ -321,8 +323,11 @@ Deno.serve(async (req: Request) => {
         if (params.endDate) asaasBody.endDate = params.endDate;
         const sub = await asaas('/subscriptions', 'POST', asaasBody);
 
+        // MESMO id que o asaas-sync usaria. Antes a criação gravava
+        // s{timestamp} e o sync sa{asaas_id}: a reconciliação dependia de haver
+        // constraint única em asaas_id, e sem ela nascia uma segunda linha.
         const row: Record<string, unknown> = {
-          id: `s${Date.now()}`,
+          id: `sa${sub.id}`,
           tenant_id: client.tenant_id,
           client_id: params.clientId,
           product_id: params.productId || null,

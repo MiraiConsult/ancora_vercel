@@ -53,7 +53,7 @@ import { DataExportModule } from './components/DataExportModule';
 import { TenantSelector } from './components/TenantSelector';
 import { AuthCallback } from './components/AuthCallback';
 import { User, RevenueType, Bank, Company, FinancialRecord, Tenant, SystemNotification, ChartOfAccount, GeneralNote, Product, Subscription, Supplier } from './types';
-import { ShieldAlert, Bell, Wifi, WifiOff, AlertTriangle, HelpCircle, X, Database, Building2 } from 'lucide-react';
+import { ShieldAlert, Bell, Wifi, WifiOff, AlertTriangle, HelpCircle, X, Database, Building2, Menu } from 'lucide-react';
 import { supabase, supabaseUrl, supabaseKey } from './lib/supabaseClient'; // Import credentials
 import { isAsaasEnabled } from './config';
 import {
@@ -106,6 +106,8 @@ const App: React.FC = () => {
 
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  /** No celular o menu vira gaveta: fora da tela até ser aberto pelo botão. */
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [currentTenant, setCurrentTenant] = useState<Tenant | null>({
       id: 'default',
       name: 'Ancóra Demo',
@@ -845,7 +847,7 @@ const handleAddUser = async (newUser: User) => {
 
         <Sidebar
           currentPage={currentPage}
-          onNavigate={setCurrentPage}
+          onNavigate={(p) => { setCurrentPage(p); setIsMobileMenuOpen(false); }}
           currentUser={user}
           onLogout={signOut}
           unreadCount={unreadNotifications}
@@ -854,10 +856,26 @@ const handleAddUser = async (newUser: User) => {
           pendingApprovalCount={pendingApprovals}
           isCollapsed={isSidebarCollapsed}
           onToggle={toggleSidebar}
+          mobileOpen={isMobileMenuOpen}
+          onCloseMobile={() => setIsMobileMenuOpen(false)}
         />
-        <main className={`flex-1 p-4 sm:p-6 lg:p-8 flex flex-col transition-all duration-300 overflow-x-hidden ${isSidebarCollapsed ? 'ml-20' : 'ml-64'} ${isSuperAdmin && impersonatedTenantName ? 'mt-14' : ''} min-w-0`}>
-           <header className="flex-shrink-0 flex justify-between items-center mb-8">
-              <h1 className="text-xl font-semibold text-gray-800 capitalize">{PAGE_TITLES[currentPage] || currentPage}</h1>
+
+        {/* Escurece o conteúdo enquanto a gaveta está aberta no celular. */}
+        {isMobileMenuOpen && (
+          <div className="fixed inset-0 bg-black/40 z-40 lg:hidden" onClick={() => setIsMobileMenuOpen(false)} />
+        )}
+        <main className={`flex-1 p-4 sm:p-6 lg:p-8 flex flex-col transition-all duration-300 overflow-x-hidden ml-0 ${isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'} ${isSuperAdmin && impersonatedTenantName ? 'mt-14' : ''} min-w-0`}>
+           <header className="flex-shrink-0 flex justify-between items-center mb-6 lg:mb-8 gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  onClick={() => setIsMobileMenuOpen(true)}
+                  className="lg:hidden p-2 -ml-1 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0"
+                  title="Abrir menu"
+                >
+                  <Menu size={22} />
+                </button>
+                <h1 className="text-lg sm:text-xl font-semibold text-gray-800 capitalize truncate">{PAGE_TITLES[currentPage] || currentPage}</h1>
+              </div>
               <div className="flex items-center space-x-4">
                   <div onClick={() => setCurrentPage('alerts')} className="relative cursor-pointer hover:bg-gray-100 p-2 rounded-full transition-colors">
                        {unreadNotifications > 0 && <span className="absolute top-1 right-1 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white animate-ping"></span>}

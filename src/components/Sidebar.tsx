@@ -2,7 +2,7 @@
 
 import React from 'react';
 import {
-  UserCog, LogOut, Bell, Database, ChevronsLeft, Zap,
+  UserCog, LogOut, Bell, Database, ChevronsLeft, Zap, X,
   LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Tags, FileSignature, Wallet, ShieldCheck,
   FileBarChart,
 } from 'lucide-react';
@@ -21,10 +21,16 @@ interface SidebarProps {
   pendingApprovalCount?: number;
   isCollapsed: boolean;
   onToggle: () => void;
+  /** Gaveta aberta no celular. Acima de lg o menu é fixo e isso não vale. */
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, currentUser, onLogout, unreadCount, pendingValidationCount = 0, overduePayablesCount = 0, pendingApprovalCount = 0, isCollapsed, onToggle }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, currentUser, onLogout, unreadCount, pendingValidationCount = 0, overduePayablesCount = 0, pendingApprovalCount = 0, isCollapsed, onToggle, mobileOpen = false, onCloseMobile }) => {
   const isAdmin = currentUser.role === 'admin';
+  // Recolhido é um estado de desktop. Na gaveta o menu é largo, então mostrar
+  // só ícones ali deixaria uma faixa de 256px com o conteúdo de 80px.
+  const collapsed = isCollapsed && !mobileOpen;
 
   // Menu agrupado — o sistema inteiro é financeiro, então a navegação é por
   // atividade (operação, relatórios, cadastros) em vez de um item "financeiro".
@@ -80,24 +86,29 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
   };
 
   return (
-    <div className={`bg-mcsystem-900 text-white h-screen fixed left-0 top-0 flex flex-col shadow-2xl z-50 transition-all duration-300 ease-in-out ${isCollapsed ? 'w-20' : 'w-64'}`}>
+    <div className={`bg-mcsystem-900 text-white h-screen fixed left-0 top-0 flex flex-col shadow-2xl z-50 transition-all duration-300 ease-in-out
+      ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
+      ${collapsed ? 'lg:w-20 w-64' : 'w-64'}`}>
       
       <button
         onClick={onToggle}
-        className="absolute top-6 -right-3 transform w-6 h-6 bg-white border-2 border-gray-200 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-mcsystem-500 z-[51] transition-all duration-300"
-        title={isCollapsed ? "Expandir menu" : "Minimizar menu"}
+        className="hidden lg:flex absolute top-6 -right-3 transform w-6 h-6 bg-white border-2 border-gray-200 rounded-full items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-mcsystem-500 z-[51] transition-all duration-300"
+        title={collapsed ? "Expandir menu" : "Minimizar menu"}
       >
-        <ChevronsLeft size={16} className={`transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} />
+        <ChevronsLeft size={16} className={`transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`} />
       </button>
 
-      <div className={`p-6 border-b border-mcsystem-800 flex flex-col items-center justify-center bg-mcsystem-900 relative overflow-hidden transition-all duration-300 ${isCollapsed ? 'py-6' : ''}`}>
+      <div className={`p-6 border-b border-mcsystem-800 flex flex-col items-center justify-center bg-mcsystem-900 relative overflow-hidden transition-all duration-300 ${collapsed ? 'py-6' : ''}`}>
         {/* Decorative element */}
         <div className="absolute -top-10 -right-10 w-24 h-24 bg-mcsystem-800 rounded-full opacity-50 blur-xl"></div>
         
         {/* Logo Area */}
+        <button onClick={onCloseMobile} className="lg:hidden absolute top-4 right-4 z-20 p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-mcsystem-800" title="Fechar menu">
+          <X size={18} />
+        </button>
         <div className="cursor-pointer flex items-center gap-3 mb-1 relative z-10 w-full" onClick={() => onNavigate('dashboard')}>
           <div className="h-9 w-9 bg-mcsystem-500 rounded-lg flex-shrink-0 shadow-lg shadow-mcsystem-500/30 flex items-center justify-center font-bold text-lg">⚓</div>
-          {!isCollapsed && (
+          {!collapsed && (
           <div className="transition-opacity duration-200">
              <h1 className="text-xl font-bold tracking-tight text-white leading-none">Ancóra</h1>
           </div>
@@ -111,29 +122,29 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
           if (visible.length === 0) return null;
           return (
             <div key={gi} className={gi > 0 ? 'mt-5' : ''}>
-              {group.section && !isCollapsed && (
+              {group.section && !collapsed && (
                 <p className="px-6 mb-2 text-[10px] font-bold uppercase tracking-widest text-gray-600">{group.section}</p>
               )}
-              {group.section && isCollapsed && <div className="mx-4 mb-2 h-px bg-mcsystem-800" />}
+              {group.section && collapsed && <div className="mx-4 mb-2 h-px bg-mcsystem-800" />}
               <ul className="space-y-1 px-3">
                 {visible.map(item => {
                   const Icon = item.icon;
                   const isActive = currentPage === item.id;
                   return (
-                    <li key={item.id} title={isCollapsed ? item.label : undefined}>
+                    <li key={item.id} title={collapsed ? item.label : undefined}>
                       <button
                         onClick={() => onNavigate(item.id)}
-                        className={`w-full flex items-center px-4 py-2.5 rounded-lg transition-all duration-200 group ${isCollapsed ? 'justify-center' : 'justify-between'}
+                        className={`w-full flex items-center px-4 py-2.5 rounded-lg transition-all duration-200 group ${collapsed ? 'justify-center' : 'justify-between'}
                           ${isActive
                             ? 'text-white bg-mcsystem-800 shadow-md border border-mcsystem-700'
                             : 'text-gray-400 hover:text-white hover:bg-mcsystem-800/50 border border-transparent'
                           }`}
                       >
                         <div className="flex items-center min-w-0">
-                          <Icon size={18} className={`transition-colors flex-shrink-0 ${isCollapsed ? '' : 'mr-3'} ${isActive ? 'text-mcsystem-500' : 'text-gray-500 group-hover:text-gray-300'}`} />
-                          {!isCollapsed && <span className="text-sm font-medium tracking-wide truncate">{item.label}</span>}
+                          <Icon size={18} className={`transition-colors flex-shrink-0 ${collapsed ? '' : 'mr-3'} ${isActive ? 'text-mcsystem-500' : 'text-gray-500 group-hover:text-gray-300'}`} />
+                          {!collapsed && <span className="text-sm font-medium tracking-wide truncate">{item.label}</span>}
                         </div>
-                        {!isCollapsed && item.badge > 0 && (
+                        {!collapsed && item.badge > 0 && (
                           <span className="bg-red-500 text-white text-[10px] font-bold rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center shadow-sm flex-shrink-0">
                             {item.badge}
                           </span>
@@ -150,22 +161,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
 
       <div className="p-4 border-t border-mcsystem-800 bg-mcsystem-900 mt-auto">
          <div className="mb-3">
-           <CompanySwitcher currentTenantId={currentUser.tenant_id} collapsed={isCollapsed} />
+           <CompanySwitcher currentTenantId={currentUser.tenant_id} collapsed={collapsed} />
          </div>
-         <div className={`flex items-center rounded-lg bg-mcsystem-800/30 border border-mcsystem-800 backdrop-blur-sm transition-all duration-300 ${isCollapsed ? 'p-2 justify-center' : 'px-3 py-3'}`}>
-            <div className={`h-9 w-9 bg-gradient-to-br from-mcsystem-500 to-blue-600 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-lg ring-2 ring-mcsystem-900 flex-shrink-0 ${isCollapsed ? '' : 'mr-3'}`}>
+         <div className={`flex items-center rounded-lg bg-mcsystem-800/30 border border-mcsystem-800 backdrop-blur-sm transition-all duration-300 ${collapsed ? 'p-2 justify-center' : 'px-3 py-3'}`}>
+            <div className={`h-9 w-9 bg-gradient-to-br from-mcsystem-500 to-blue-600 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-lg ring-2 ring-mcsystem-900 flex-shrink-0 ${collapsed ? '' : 'mr-3'}`}>
                 {currentUser.avatar || 'US'}
             </div>
-            {!isCollapsed && (
+            {!collapsed && (
             <div className="overflow-hidden flex-1">
                 <p className="text-sm font-semibold text-white truncate">{currentUser.name}</p>
                 <p className="text-[10px] text-gray-400 truncate uppercase tracking-wider">{currentUser.role === 'admin' ? 'Administrador' : 'Colaborador'}</p>
             </div>
             )}
          </div>
-        <button onClick={onLogout} title={isCollapsed ? "Sair do Sistema" : undefined} className={`flex items-center justify-center text-gray-400 hover:text-white hover:bg-red-500/10 hover:border-red-500/20 border border-transparent transition-all w-full text-xs font-medium mt-3 rounded-md uppercase tracking-wider ${isCollapsed ? 'h-9 w-9' : 'px-3 py-2'}`}>
-          <LogOut size={14} className={isCollapsed ? '' : 'mr-2'} />
-          {!isCollapsed && 'Sair do Sistema'}
+        <button onClick={onLogout} title={collapsed ? "Sair do Sistema" : undefined} className={`flex items-center justify-center text-gray-400 hover:text-white hover:bg-red-500/10 hover:border-red-500/20 border border-transparent transition-all w-full text-xs font-medium mt-3 rounded-md uppercase tracking-wider ${collapsed ? 'h-9 w-9' : 'px-3 py-2'}`}>
+          <LogOut size={14} className={collapsed ? '' : 'mr-2'} />
+          {!collapsed && 'Sair do Sistema'}
         </button>
       </div>
     </div>

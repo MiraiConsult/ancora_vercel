@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 
 export interface DateRange { from: string; to: string }
@@ -71,16 +71,6 @@ export const DateRangeFilter: React.FC<{
 }> = ({ value, onChange, label, className = '' }) => {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => {
-      if (box.current && !box.current.contains(e.target as Node)) { setOpen(false); setCustom(false); }
-    };
-    document.addEventListener('click', onClick);
-    return () => document.removeEventListener('click', onClick);
-  }, [open]);
 
   const shift = (dir: -1 | 1) => {
     if (!value.from || !value.to) return;
@@ -94,13 +84,16 @@ export const DateRangeFilter: React.FC<{
       : value.to ? `até ${fmt(value.to)}` : 'Todo o período';
 
   return (
-    <div className={`flex items-center gap-2 ${className}`} ref={box}>
+    <div className={`flex items-center gap-2 ${className}`}>
       {label && <span className="text-sm text-gray-500 whitespace-nowrap">{label}</span>}
 
-      <div className="flex items-center rounded-lg border border-gray-200 bg-white overflow-hidden">
+      {/* Sem overflow-hidden aqui: ele recorta o menu absoluto do filho, e o
+          dropdown some sem nenhum sinal de erro. O arredondamento vai nas
+          pontas dos botões. */}
+      <div className="flex items-center rounded-lg border border-gray-200 bg-white">
         <button type="button" onClick={() => shift(-1)} disabled={!value.from || !value.to}
           title="Período anterior"
-          className="px-2 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed border-r border-gray-200">
+          className="px-2 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed border-r border-gray-200 rounded-l-lg">
           <ChevronLeft size={15} />
         </button>
 
@@ -113,7 +106,11 @@ export const DateRangeFilter: React.FC<{
           </button>
 
           {open && (
-            <div className="absolute z-50 left-0 mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden">
+            <>
+            {/* Fecha ao clicar fora sem depender de listener global — o mesmo
+                padrão dos outros seletores do sistema. */}
+            <div className="fixed inset-0 z-[59]" onClick={() => { setOpen(false); setCustom(false); }} />
+            <div className="absolute z-[60] left-0 mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden">
               <ul className="py-1">
                 {PRESETS.map(p => (
                   <li key={p.key}>
@@ -147,12 +144,13 @@ export const DateRangeFilter: React.FC<{
                 </div>
               )}
             </div>
+            </>
           )}
         </div>
 
         <button type="button" onClick={() => shift(1)} disabled={!value.from || !value.to}
           title="Próximo período"
-          className="px-2 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed border-l border-gray-200">
+          className="px-2 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed border-l border-gray-200 rounded-r-lg">
           <ChevronRight size={15} />
         </button>
       </div>

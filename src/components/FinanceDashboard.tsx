@@ -1746,9 +1746,9 @@ const newRecords: FinancialRecord[] = [];
           } else if (node.type === 'CENTER') {
               return rubricsOf(r).some(c => c.centerCode === node.code);
           } else if (node.type === 'RUBRIC') {
-              // Linhas de receita são por Produto (DRE, ou Fluxo no modo Produto)
-              // Linhas de receita são sempre por Produto (DRE e Fluxo de Caixa)
-              const isProductRow = r.amount >= 0;
+              // Receita é linha de Produto só para quem cadastrou produtos; sem
+              // eles a linha é uma rubrica do plano de contas, como a despesa.
+              const isProductRow = r.amount >= 0 && products.some(p => p.active);
               if (isProductRow) {
                   const targetProductId = node.code === 'SEM_PRODUTO' ? null : node.code;
                   if (r.split_revenue && r.split_revenue.length > 0) {
@@ -2017,6 +2017,13 @@ const newRecords: FinancialRecord[] = [];
         return vals; 
       };
       
+      /**
+       * Agrupar receita por produto só faz sentido para quem cadastrou produtos.
+       * Sem eles, todo lançamento cai em "Sem produto" e a tela perde a
+       * abertura — o caso de quem classifica a receita pelo plano de contas.
+       */
+      const temProdutos = products.some(p => p.active);
+
       const calculateValueForRevenueType = (productId: string | null, keys: string[]) => {
           const vals: Record<string, number> = {};
           keys.forEach(key => {
@@ -2088,20 +2095,38 @@ const newRecords: FinancialRecord[] = [];
 
         const outflowCenters = uniqueCenters.filter(c => c.classificationCode !== '1').sort((a,b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 
-        // Entradas sempre agrupadas por Produto (mesma lógica do DRE)
-        const productBuckets: { id: string | null, name: string }[] = [
-            ...products.filter(p => p.active).map(p => ({ id: p.id as string | null, name: p.name })),
-            { id: null, name: 'Sem produto' },
-        ];
-        productBuckets.forEach(pb => {
-            inflowNode.children.push({
-                code: pb.id || 'SEM_PRODUTO',
-                name: pb.name,
-                type: 'RUBRIC',
-                values: calculateValueForRevenueTypeCashflow(pb.id, primaryKeys),
-                prevValues: calculateValueForRevenueTypeCashflow(pb.id, compareKeys)
-            });
-        });
+        // Entradas por Produto quando há produtos; senão pelo plano de contas.
+        if (temProdutos) {
+          const productBuckets: { id: string | null, name: string }[] = [
+              ...products.filter(p => p.active).map(p => ({ id: p.id as string | null, name: p.name })),
+              { id: null, name: 'Sem produto' },
+          ];
+          productBuckets.forEach(pb => {
+              inflowNode.children.push({
+                  code: pb.id || 'SEM_PRODUTO',
+                  name: pb.name,
+                  type: 'RUBRIC',
+                  values: calculateValueForRevenueTypeCashflow(pb.id, primaryKeys),
+                  prevValues: calculateValueForRevenueTypeCashflow(pb.id, compareKeys)
+              });
+          });
+        } else {
+          const inflowCenters = uniqueCenters.filter(c => c.classificationCode === '1')
+            .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+          inflowCenters.forEach(center => {
+            const centerNode: any = { code: center.code, name: center.name, type: 'CENTER', values: {}, prevValues: {}, children: [] };
+            chartOfAccounts.filter(c => c.centerCode === center.code)
+              .sort((a, b) => a.rubricCode.localeCompare(b.rubricCode, undefined, { numeric: true }))
+              .forEach(rubric => {
+                centerNode.children.push({
+                  code: rubric.rubricCode, name: rubric.rubricName, type: 'RUBRIC',
+                  values: calculateValueForNode([rubric.id], primaryKeys, false),
+                  prevValues: calculateValueForNode([rubric.id], compareKeys, false),
+                });
+              });
+            inflowNode.children.push(centerNode);
+          });
+        }
 
         outflowCenters.forEach(center => {
             const centerNode: any = { code: center.code, name: center.name, type: 'CENTER', values: {}, prevValues: {}, children: [] };
@@ -2141,7 +2166,7 @@ const newRecords: FinancialRecord[] = [];
               const clsNode: any = { code: clsCode, name: clsName, type: 'CLASSIFICATION', values: {}, prevValues: {}, children: [] };
               const isExpense = clsCode !== '1';
               
-              if (clsCode === '1') { // DRE Receitas são por Produto
+              if (clsCode === '1' && temProdutos) { // DRE Receitas são por Produto
                   const productBuckets: { id: string | null, name: string }[] = [
                       ...products.filter(p => p.active).map(p => ({ id: p.id as string | null, name: p.name })),
                       { id: null, name: 'Sem produto' },
@@ -2150,7 +2175,7 @@ const newRecords: FinancialRecord[] = [];
                       const rtNode = { code: pb.id || 'SEM_PRODUTO', name: pb.name, type: 'RUBRIC', values: calculateValueForRevenueType(pb.id, primaryKeys), prevValues: calculateValueForRevenueType(pb.id, compareKeys) };
                       clsNode.children.push(rtNode);
                   });
-              } else { // DRE Despesas are by COA hierarchy
+              } else { // Despesas — e receitas de quem não usa produto — pelo plano de contas
                   const centers = Array.from(new Set(chartOfAccounts.filter(c => c.classificationCode === clsCode).map(c => c.centerCode))).sort(); 
                   centers.forEach(centerCode => { 
                       const centerName = chartOfAccounts.find(c => c.centerCode === centerCode)?.centerName || 'Geral'; 

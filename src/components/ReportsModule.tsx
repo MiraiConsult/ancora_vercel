@@ -3,6 +3,7 @@ import { FinancialRecord, Company, Product, ChartOfAccount, TransactionType, Tra
 import * as XLSX from 'xlsx';
 import { PayablesReport } from './PayablesReport';
 import { DateRangeFilter } from './DateRangeFilter';
+import { RecordsDrillModal } from './RecordsDrillModal';
 import {
   Search, Download, AlertTriangle, CalendarClock, CheckCircle2, Layers,
   X, ChevronDown, ChevronLeft, ChevronRight, Users, FileBarChart,
@@ -140,6 +141,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
   const [selClients, setSelClients] = useState<string[] | null>(null);
   const [search, setSearch] = useState('');
   const [groupBy, setGroupBy] = useState<GroupBy>('NONE');
+  /** Linha sintética aberta no detalhe. */
+  const [drill, setDrill] = useState<{ title: string; records: FinancialRecord[]; total: number } | null>(null);
 
   /** Anda o período inteiro, preservando o tamanho da janela. */
   const shiftPeriod = (dir: -1 | 1) => {
@@ -249,15 +252,17 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
   const grouped = useMemo(() => {
     if (groupBy === 'NONE') return [];
     const today = todayISO();
-    type G = { key: string; name: string; atraso: number; aVencer: number; recebido: number; count: number; oldest: string };
+    type G = { key: string; name: string; atraso: number; aVencer: number; recebido: number; count: number; oldest: string; records: FinancialRecord[] };
     const map = new Map<string, G>();
 
     const bump = (key: string, name: string, amount: number, r: FinancialRecord) => {
-      const cur = map.get(key) || { key, name, atraso: 0, aVencer: 0, recebido: 0, count: 0, oldest: r.dueDate };
+      const cur = map.get(key) || { key, name, atraso: 0, aVencer: 0, recebido: 0, count: 0, oldest: r.dueDate, records: [] as FinancialRecord[] };
       if (r.status === TransactionStatus.PAID) cur.recebido += amount;
       else if (r.dueDate && r.dueDate < today) cur.atraso += amount;
       else cur.aVencer += amount;
       cur.count += 1;
+      // Guarda o lançamento para o clique na linha abrir o detalhe.
+      if (!cur.records.includes(r)) cur.records.push(r);
       if ((r.dueDate || '') < (cur.oldest || '')) cur.oldest = r.dueDate;
       map.set(key, cur);
     };
@@ -490,8 +495,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {grouped.map(g => (
-                  <tr key={g.key} className="hover:bg-gray-50">
-                    <td className="px-5 py-3 font-semibold text-gray-900">{g.name}</td>
+                  <tr key={g.key} className="hover:bg-gray-50 cursor-pointer"
+                      title="Ver os lançamentos desta linha"
+                      onClick={() => setDrill({ title: g.name, records: g.records, total: groupTotal(g) })}>
+                    <td className="px-5 py-3 font-semibold text-gray-900 hover:text-mcsystem-600">{g.name}</td>
                     <td className="px-4 py-3 text-center text-gray-500">{g.count}</td>
                     <td className="px-4 py-3 text-right tabular-nums font-medium text-red-600">{g.atraso ? brl(g.atraso) : <span className="text-gray-300">—</span>}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-amber-700">{g.aVencer ? brl(g.aVencer) : <span className="text-gray-300">—</span>}</td>
@@ -569,6 +576,18 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ records, companies
           </div>
         )}
       </div>
+
+      <RecordsDrillModal
+        open={!!drill}
+        onClose={() => setDrill(null)}
+        title={drill?.title || ''}
+        subtitle={`${from ? fmtDate(from) : 'início'} a ${to ? fmtDate(to) : 'fim'}`}
+        records={drill?.records || []}
+        expectedTotal={drill?.total}
+        companies={companies}
+        products={products}
+        chartOfAccounts={chartOfAccounts}
+      />
     </div>
   );
 };

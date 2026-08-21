@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { FinancialRecord, Company, ChartOfAccount } from '../types';
 import * as XLSX from 'xlsx';
 import { DateRangeFilter } from './DateRangeFilter';
+import { RecordsDrillModal } from './RecordsDrillModal';
 import {
   Download, Wallet, AlertTriangle, CalendarClock, CheckCircle2,
   ChevronLeft, ChevronRight, Search, List,
@@ -69,6 +70,8 @@ export const PayablesReport: React.FC<PayablesReportProps> = ({ records, compani
   const [to, setTo] = useState(initial.to);
   const [includePaid, setIncludePaid] = useState(true);
   const [search, setSearch] = useState('');
+  /** Linha sintética aberta no detalhe. */
+  const [drill, setDrill] = useState<{ title: string; records: FinancialRecord[]; total: number } | null>(null);
 
   const today = todayISO();
   const supplierName = (id?: string) => companies.find(c => c.id === id)?.name || 'Sem fornecedor';
@@ -110,9 +113,13 @@ export const PayablesReport: React.FC<PayablesReportProps> = ({ records, compani
           : rubricOf(r);
 
     const map = new Map<string, Bucket>();
+    // Os lançamentos de cada linha, para o clique abrir o detalhe.
+    const porLinha = new Map<string, FinancialRecord[]>();
     for (const r of filtered) {
       const k = keyOf(r);
       if (!map.has(k)) map.set(k, emptyBucket());
+      if (!porLinha.has(k)) porLinha.set(k, []);
+      porLinha.get(k)!.push(r);
       const b = map.get(k)!;
       const v = Math.abs(r.amount || 0);
       const st = statusOf(r);
@@ -121,7 +128,7 @@ export const PayablesReport: React.FC<PayablesReportProps> = ({ records, compani
     }
 
     const rows = Array.from(map.entries())
-      .map(([key, b]) => ({ key, label: view === 'MONTH' ? monthLabel(key) : key, b }))
+      .map(([key, b]) => ({ key, label: view === 'MONTH' ? monthLabel(key) : key, b, records: porLinha.get(key) || [] }))
       .filter(r => bucketTotal(r.b) > 0.005)
       .sort((a, b) => view === 'MONTH'
         ? a.key.localeCompare(b.key)
@@ -302,9 +309,11 @@ export const PayablesReport: React.FC<PayablesReportProps> = ({ records, compani
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {data.rows.map(r => (
-                  <tr key={r.key} className="hover:bg-gray-50/70">
+                  <tr key={r.key} className="hover:bg-gray-50/70 cursor-pointer"
+                      title="Ver os lançamentos desta linha"
+                      onClick={() => setDrill({ title: r.label, records: r.records, total: -bucketTotal(r.b) })}>
                     <td className="px-6 py-3">
-                      <span className="font-medium text-gray-800">{r.label}</span>
+                      <span className="font-medium text-gray-800 hover:text-mcsystem-600">{r.label}</span>
                       <span className="text-gray-400 text-xs ml-2">{r.b.qtd} lanç.</span>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-medium text-red-600">{r.b.vencido ? brl(r.b.vencido) : <span className="text-gray-300">—</span>}</td>
@@ -329,6 +338,17 @@ export const PayablesReport: React.FC<PayablesReportProps> = ({ records, compani
           </div>
         )}
       </div>
+
+      <RecordsDrillModal
+        open={!!drill}
+        onClose={() => setDrill(null)}
+        title={drill?.title || ''}
+        subtitle={`${from ? fmtDate(from) : 'início'} a ${to ? fmtDate(to) : 'fim'}`}
+        records={drill?.records || []}
+        expectedTotal={drill?.total}
+        companies={companies}
+        chartOfAccounts={chartOfAccounts}
+      />
     </div>
   );
 };

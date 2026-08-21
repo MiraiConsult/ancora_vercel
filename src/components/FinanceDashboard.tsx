@@ -9,6 +9,7 @@ import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
 import { DateRangeFilter, presetRange, inRange, type DateRange } from './DateRangeFilter';
 import { PayRecordModal } from './PayRecordModal';
 import { isProjected, projectSubscriptions, shiftMonthKey } from '../lib/subscriptionProjection';
+import { RecordsDrillModal } from './RecordsDrillModal';
 import { isAsaasEnabled } from '../config';
 
 interface FinanceDashboardProps {
@@ -203,6 +204,9 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   const [isDrillDownOpen, setIsDrillDownOpen] = useState(false);
   const [drillDownRecords, setDrillDownRecords] = useState<FinancialRecord[]>([]);
   const [drillDownTitle, setDrillDownTitle] = useState('');
+  const [drillDownSubtitle, setDrillDownSubtitle] = useState('');
+  /** Valor que a tela mostrava — o modal avisa quando a soma não bate (rateio). */
+  const [drillDownExpected, setDrillDownExpected] = useState<number | undefined>(undefined);
 
   // Modal State (Transactions)
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -269,24 +273,43 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   const [isSplittingRevenue, setIsSplittingRevenue] = useState(false);
 
   // --- Derived lists for Dropdowns ---
+  /**
+   * A classificação é identificada por código **e** nome.
+   *
+   * O plano de contas herdado usa só dois códigos: 1 para entrada e 3 para
+   * tudo que sai. Debaixo do 3 convivem CUSTO FIXO, CUSTO VARIÁVEL,
+   * INVESTIMENTOS e NÃO-OPERACIONAIS — quatro classificações, um código só.
+   * Enquanto a chave era o código, o Map guardava a primeira e descartava as
+   * outras em silêncio: o seletor de nova rubrica só oferecia "1 - RECEITA" e
+   * "3 - CUSTO VARIÁVEL", e o DRE juntava as quatro num bloco só.
+   */
+  const classificationKey = (code: string, name: string) => `${code}|${name}`;
   const uniqueClassifications = useMemo(() => {
-      const map = new Map<string, string>();
+      const map = new Map<string, { code: string; name: string }>();
       chartOfAccounts.forEach(c => {
-          if (!map.has(c.classificationCode)) {
-              map.set(c.classificationCode, c.classificationName);
-          }
+          const k = classificationKey(c.classificationCode, c.classificationName);
+          if (!map.has(k)) map.set(k, { code: c.classificationCode, name: c.classificationName });
       });
-      return Array.from(map.entries()).map(([code, name]) => ({ code, name })).sort((a,b) => a.code.localeCompare(b.code, 'en', { numeric: true }));
+      return Array.from(map.entries())
+        .map(([key, v]) => ({ key, code: v.code, name: v.name }))
+        .sort((a, b) => a.code.localeCompare(b.code, 'en', { numeric: true }) || a.name.localeCompare(b.name, 'pt-BR'));
   }, [chartOfAccounts]);
 
   const uniqueCenters = useMemo(() => {
-      const map = new Map<string, { name: string, classificationCode: string }>();
+      const map = new Map<string, { name: string, classificationCode: string, classificationName: string }>();
       chartOfAccounts.forEach(c => {
           if (!map.has(c.centerCode)) {
-              map.set(c.centerCode, { name: c.centerName, classificationCode: c.classificationCode });
+              map.set(c.centerCode, { name: c.centerName, classificationCode: c.classificationCode, classificationName: c.classificationName });
           }
       });
-      return Array.from(map.entries()).map(([code, data]) => ({ code, name: data.name, classificationCode: data.classificationCode })).sort((a,b) => a.code.localeCompare(b.code, 'en', { numeric: true }));
+      return Array.from(map.entries())
+        .map(([code, d]) => ({
+          code, name: d.name,
+          classificationCode: d.classificationCode,
+          classificationName: d.classificationName,
+          classificationKey: classificationKey(d.classificationCode, d.classificationName),
+        }))
+        .sort((a, b) => a.code.localeCompare(b.code, 'en', { numeric: true }));
   }, [chartOfAccounts]);
 
   // Extract available years from records
@@ -586,9 +609,11 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
     e.preventDefault();
     if (!newRubricData.centerCode || !newRubricData.rubricName) return;
   
+    // A classificação vem do próprio grupo. Buscar por código traria a
+    // classificação errada, já que várias dividem o mesmo código.
     const center = uniqueCenters.find(c => c.code === newRubricData.centerCode);
-    const classification = uniqueClassifications.find(c => c.code === center?.classificationCode);
-    if (!center || !classification) return;
+    if (!center) return;
+    const classification = { code: center.classificationCode, name: center.classificationName };
   
     const existingInCenter = chartOfAccounts.filter(c => c.centerCode === newRubricData.centerCode);
     let maxSuffix = 0;
@@ -865,13 +890,16 @@ const newRecords: FinancialRecord[] = [];
     } else if (coaFormType === 'group') {
         if (!coaFormData.classificationCode || !coaFormData.groupName) { alert("Selecione a classificação e informe o nome do grupo."); return; }
 
-        const classification = uniqueClassifications.find(c => c.code === coaFormData.classificationCode);
+        const classification = uniqueClassifications.find(c => c.key === coaFormData.classificationCode);
         if (!classification) return;
 
-        const centersInClass = chartOfAccounts.filter(c => c.classificationCode === coaFormData.classificationCode);
+        // O sufixo do novo grupo olha todo o código, não só a classificação:
+        // classificações que dividem o código dividem também a numeração dos
+        // grupos, e repetir um código existente juntaria os dois no relatório.
+        const centersInClass = chartOfAccounts.filter(c => c.classificationCode === classification.code);
         const centerSuffixes = centersInClass.map(c => parseInt(c.centerCode.split('.')[1]) || 0);
         const maxCenterSuffix = centerSuffixes.length > 0 ? Math.max(...centerSuffixes) : 0;
-        const newCenterCode = `${coaFormData.classificationCode}.${maxCenterSuffix + 1}`;
+        const newCenterCode = `${classification.code}.${maxCenterSuffix + 1}`;
 
         const groupName = coaFormData.groupName.toUpperCase();
         const rubricName = coaFormData.rubricName?.trim().toUpperCase() || `OUTRAS DE ${groupName}`;
@@ -890,8 +918,7 @@ const newRecords: FinancialRecord[] = [];
 
         const center = uniqueCenters.find(c => c.code === coaFormData.centerCode);
         if (!center) return;
-        const classification = uniqueClassifications.find(c => c.code === center.classificationCode);
-        if (!classification) return;
+        const classification = { code: center.classificationCode, name: center.classificationName };
 
         if (editingRubricId) {
             const existing = chartOfAccounts.find(c => c.id === editingRubricId);
@@ -950,6 +977,9 @@ const newRecords: FinancialRecord[] = [];
     e.preventDefault(); e.stopPropagation();
     setEditingRubricId(rubric.id);
     setCoaFormData({ classificationName: rubric.classificationName, classificationCode: rubric.classificationCode, centerCode: rubric.centerCode, rubricName: rubric.rubricName });
+    // Sem isso a Classificação abria vazia e o Grupo ficava desabilitado ao
+    // editar — o formulário não mostrava onde a rubrica já estava.
+    setSelectedClassificationForCascading(classificationKey(rubric.classificationCode, rubric.classificationName));
     setIsCOAModalOpen(true);
     setCoaFormType('rubric');
   };
@@ -1724,8 +1754,16 @@ const newRecords: FinancialRecord[] = [];
   };
 
   // --- DRILL DOWN HANDLER (BUG FIX) ---
-  const handleCellClick = (node: any, dateKey: string, mode: 'DRE' | 'CASHFLOW') => {
-      if (!node || !node.values || node.values[dateKey] === 0) return;
+  /**
+   * Abre o detalhe de um número do relatório.
+   *
+   * `dateKeys` é uma lista porque a coluna TOTAL é o mesmo nó somado em vários
+   * meses — clicar nela tem que trazer os lançamentos de todos eles.
+   */
+  const handleCellClick = (node: any, dateKeys: string[], mode: 'DRE' | 'CASHFLOW', periodoLabel?: string) => {
+      if (!node || !node.values) return;
+      const alvo = dateKeys.reduce((a, k) => a + (node.values[k] || 0), 0);
+      if (!alvo) return;
   
       // A célula do caixa pode conter renovação prevista; a lista tem que
       // mostrar as mesmas linhas, senão o detalhe não fecha com o total.
@@ -1741,9 +1779,11 @@ const newRecords: FinancialRecord[] = [];
               else if (r.status === TransactionStatus.PAID) rDate = r.paymentDate || r.dueDate;
               else return false;
           }
-          if (!rDate || !rDate.startsWith(dateKey)) return false;
+          if (!rDate || !dateKeys.some(k => rDate.startsWith(k))) return false;
 
           if (node.type === 'ROOT') {
+              // Linha de resultado: entra tudo que passou pelo período.
+              if (node.code === 'NET') return true;
               if (node.code === 'INFLOW') return r.amount >= 0;
               if (node.code === 'OUTFLOW') return r.amount < 0;
           } else if (node.type === 'CLASSIFICATION') {
@@ -1751,7 +1791,9 @@ const newRecords: FinancialRecord[] = [];
                   return r.amount >= 0;
               }
               // Com rateio, o lançamento aparece em toda classificação que ele toca.
-              return rubricsOf(r).some(c => c.classificationCode === node.code);
+              // Nome junto: várias classificações dividem o mesmo código.
+              return rubricsOf(r).some(c => c.classificationCode === node.code
+                && (!node.key || c.classificationName === node.name));
           } else if (node.type === 'CENTER') {
               return rubricsOf(r).some(c => c.centerCode === node.code);
           } else if (node.type === 'RUBRIC') {
@@ -1774,7 +1816,11 @@ const newRecords: FinancialRecord[] = [];
       });
   
       setDrillDownRecords(recordsToDisplay);
-      setDrillDownTitle(`${node.name} (${dateKey})`);
+      setDrillDownTitle(node.name);
+      setDrillDownSubtitle(
+        `${periodoLabel || dateKeys.join(', ')} · ${mode === 'DRE' ? 'por competência' : 'por caixa'}`,
+      );
+      setDrillDownExpected(alvo);
       setIsDrillDownOpen(true);
   };
 
@@ -2201,11 +2247,19 @@ const newRecords: FinancialRecord[] = [];
 
         hierarchy.push(inflowNode, outflowNode);
       } else { // DRE
-          let classifications = Array.from(new Set(chartOfAccounts.map(c => c.classificationCode))).sort(); if (!classifications.includes('1')) classifications = ['1', ...classifications].sort();
-          classifications.forEach(clsCode => { 
-              let clsName = chartOfAccounts.find(c => c.classificationCode === clsCode)?.classificationName; 
-              if (clsCode === '1' && !clsName) clsName = 'RECEITA OPERACIONAL'; if (!clsName) clsName = `GRUPO ${clsCode}`; 
-              const clsNode: any = { code: clsCode, name: clsName, type: 'CLASSIFICATION', values: {}, prevValues: {}, children: [] };
+          // Uma linha por classificação real (código + nome). Agrupar só pelo
+          // código fundia CUSTO FIXO, CUSTO VARIÁVEL, INVESTIMENTOS e
+          // NÃO-OPERACIONAIS num bloco único, com o nome do primeiro deles.
+          let classifications = uniqueClassifications.map(c => ({ ...c }));
+          if (!classifications.some(c => c.code === '1')) {
+            classifications = [{ key: '1|RECEITA OPERACIONAL', code: '1', name: 'RECEITA OPERACIONAL' }, ...classifications];
+          }
+          classifications.forEach(cls => {
+              const clsCode = cls.code;
+              const clsName = cls.name || `GRUPO ${clsCode}`;
+              // `code` continua sendo o código real — é o que diz se a linha é
+              // despesa. A chave composta vai à parte, para React e drill-down.
+              const clsNode: any = { code: clsCode, key: cls.key, name: clsName, type: 'CLASSIFICATION', values: {}, prevValues: {}, children: [] };
               const isExpense = clsCode !== '1';
               
               if (clsCode === '1' && revenueDim !== 'COA') { // Receita por Produto ou Tipo de Receita
@@ -2214,7 +2268,7 @@ const newRecords: FinancialRecord[] = [];
                       clsNode.children.push(rtNode);
                   });
               } else { // Despesas — e receitas de quem não usa produto — pelo plano de contas
-                  const centers = Array.from(new Set(chartOfAccounts.filter(c => c.classificationCode === clsCode).map(c => c.centerCode))).sort(); 
+                  const centers = uniqueCenters.filter(c => c.classificationKey === cls.key).map(c => c.code).sort();
                   centers.forEach(centerCode => { 
                       const centerName = chartOfAccounts.find(c => c.centerCode === centerCode)?.centerName || 'Geral'; 
                       const centerNode: any = { code: centerCode, name: centerName, type: 'CENTER', values: {}, prevValues: {}, children: [] };
@@ -2534,6 +2588,19 @@ const newRecords: FinancialRecord[] = [];
   const renderHierarchicalReport = (mode: 'DRE' | 'CASHFLOW') => {
       const { hierarchy, primaryKeys, compareKeys, netResult, prevNetResult } = buildHierarchy(mode);
       const calculateRowTotal = (values: Record<string, number>, keys: string[]) => keys.reduce((acc, m) => acc + (values[m] || 0), 0);
+      /** "out/2026" para uma coluna, "set/2026 a dez/2026" para a coluna TOTAL. */
+      const rotuloPeriodo = (keys: string[]) => {
+        if (keys.length === 1) return `${monthNames[Number(keys[0].split('-')[1]) - 1].toLowerCase()}/${keys[0].split('-')[0]}`;
+        const ordenadas = [...keys].sort();
+        const nome = (k: string) => `${monthNames[Number(k.split('-')[1]) - 1].toLowerCase()}/${k.split('-')[0]}`;
+        return `${nome(ordenadas[0])} a ${nome(ordenadas[ordenadas.length - 1])}`;
+      };
+      /** Props de uma célula clicável — o mesmo comportamento em todo nível. */
+      const celulaDetalhe = (node: any, keys: string[]) => ({
+        onClick: () => handleCellClick(node, keys, mode, rotuloPeriodo(keys)),
+        title: 'Ver os lançamentos deste valor',
+        className: 'cursor-pointer',
+      });
       const netTotal = primaryKeys.reduce((acc, m) => acc + (netResult[m] || 0), 0);
       const prevNetTotal = isCompareEnabled ? compareKeys.reduce((acc, m) => acc + (prevNetResult[m] || 0), 0) : 0;
 
@@ -2792,6 +2859,8 @@ const newRecords: FinancialRecord[] = [];
 
       const filterNodes = (nodes: any[]): any[] => { if (!hideEmptyRows) return nodes; return nodes.map(node => { if (node.children && node.children.length > 0) { const filteredChildren = filterNodes(node.children); const totalVal = primaryKeys.reduce((acc, m) => acc + Math.abs(node.values[m] || 0), 0); if (filteredChildren.length > 0 || totalVal > 0.01) { return { ...node, children: filteredChildren }; } return null; } else { const totalVal = primaryKeys.reduce((acc, m) => acc + Math.abs(node.values[m] || 0), 0); return totalVal > 0.01 ? node : null; } }).filter(Boolean); };
       const displayedHierarchy = filterNodes(hierarchy); const bottomLineLabel = mode === 'DRE' ? 'RESULTADO LÍQUIDO' : 'SALDO OPERACIONAL';
+      /** A linha de resultado não vem da hierarquia — vira um nó só para o detalhe. */
+      const linhaResultado = { code: 'NET', name: bottomLineLabel, type: 'ROOT', values: netResult };
 
       const handleExportExcel = () => {
         const rows: any[][] = [];
@@ -2826,11 +2895,11 @@ const newRecords: FinancialRecord[] = [];
                               const prevClsTotal = calculateRowTotal(cls.prevValues, compareKeys);
                               const isExpense = (mode === 'DRE' && cls.code !== '1') || (mode === 'CASHFLOW' && cls.code === 'OUTFLOW');
                               return (
-                              <React.Fragment key={cls.code}>
+                              <React.Fragment key={cls.key || cls.code}>
                                   <tr className="bg-slate-50 border-b border-gray-200 font-bold text-gray-900 uppercase">
-                                      <td className="p-3 border-r border-gray-200 sticky left-0 bg-slate-50 z-10">{cls.name}</td>
-                                      {primaryKeys.map((mk, i) => (<td key={mk} onClick={() => handleCellClick(cls, mk, mode)} className="p-3 text-right cursor-pointer hover:bg-gray-200 transition-colors">{renderCellWithComparison(cls.values[mk], isCompareEnabled && compareKeys[i] ? cls.prevValues[compareKeys[i]] : 0, isExpense)}</td>))}
-                                      <td className="p-3 text-right font-bold border-l border-gray-300 bg-gray-200">{renderCellWithComparison(clsTotal, prevClsTotal, isExpense)}</td>
+                                      <td {...celulaDetalhe(cls, primaryKeys)} className="p-3 border-r border-gray-200 sticky left-0 bg-slate-50 z-10 cursor-pointer hover:text-mcsystem-600">{cls.name}</td>
+                                      {primaryKeys.map((mk, i) => (<td key={mk} {...celulaDetalhe(cls, [mk])} className="p-3 text-right cursor-pointer hover:bg-gray-200 transition-colors">{renderCellWithComparison(cls.values[mk], isCompareEnabled && compareKeys[i] ? cls.prevValues[compareKeys[i]] : 0, isExpense)}</td>))}
+                                      <td {...celulaDetalhe(cls, primaryKeys)} className="p-3 text-right font-bold border-l border-gray-300 bg-gray-200 cursor-pointer hover:bg-gray-300 transition-colors">{renderCellWithComparison(clsTotal, prevClsTotal, isExpense)}</td>
                                   </tr>
                                   {cls.children.map((center: any) => {
                                       const centerTotal = calculateRowTotal(center.values, primaryKeys);
@@ -2840,9 +2909,9 @@ const newRecords: FinancialRecord[] = [];
                                       <React.Fragment key={center.code}>
                                           {center.type === 'CENTER' && (
                                               <tr className="font-semibold text-gray-800 bg-white hover:bg-gray-50 border-b border-gray-100">
-                                                  <td className="p-3 pl-6 border-r border-gray-200 sticky left-0 bg-white z-10 flex items-center">{center.name}</td>
-                                                  {primaryKeys.map((mk, i) => (<td key={mk} onClick={() => handleCellClick(center, mk, mode)} className="p-3 text-right cursor-pointer hover:bg-gray-100 transition-colors">{renderCellWithComparison(center.values[mk], isCompareEnabled && compareKeys[i] ? center.prevValues[compareKeys[i]] : 0, cIsExpense)}</td>))}
-                                                  <td className="p-3 text-right font-bold border-l border-gray-200 bg-gray-50">{renderCellWithComparison(centerTotal, prevCenterTotal, cIsExpense)}</td>
+                                                  <td {...celulaDetalhe(center, primaryKeys)} className="p-3 pl-6 border-r border-gray-200 sticky left-0 bg-white z-10 flex items-center cursor-pointer hover:text-mcsystem-600">{center.name}</td>
+                                                  {primaryKeys.map((mk, i) => (<td key={mk} {...celulaDetalhe(center, [mk])} className="p-3 text-right cursor-pointer hover:bg-gray-100 transition-colors">{renderCellWithComparison(center.values[mk], isCompareEnabled && compareKeys[i] ? center.prevValues[compareKeys[i]] : 0, cIsExpense)}</td>))}
+                                                  <td {...celulaDetalhe(center, primaryKeys)} className="p-3 text-right font-bold border-l border-gray-200 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors">{renderCellWithComparison(centerTotal, prevCenterTotal, cIsExpense)}</td>
                                               </tr>
                                           )}
                                           {(center.type === 'RUBRIC' ? [center] : center.children).map((rubric: any) => {
@@ -2851,9 +2920,9 @@ const newRecords: FinancialRecord[] = [];
                                               const rIsExpense = cIsExpense;
                                               return (
                                               <tr key={rubric.code} className="text-gray-500 hover:bg-blue-50/20 text-[11px] border-b border-gray-50">
-                                                  <td className={`p-2 border-r border-gray-100 sticky left-0 bg-white z-10 truncate ${center.type === 'RUBRIC' ? 'pl-6 font-medium text-gray-700' : 'pl-10'}`}>{rubric.name}</td>
-                                                  {primaryKeys.map((mk, i) => (<td key={mk} onClick={() => handleCellClick(rubric, mk, mode)} className="p-2 text-right cursor-pointer hover:bg-blue-100/50 transition-colors">{renderCellWithComparison(rubric.values[mk], isCompareEnabled && compareKeys[i] ? rubric.prevValues[compareKeys[i]] : 0, rIsExpense)}</td>))}
-                                                  <td className="p-2 text-right border-l border-gray-100 bg-gray-50/50">{renderCellWithComparison(rubricTotal, prevRubricTotal, rIsExpense)}</td>
+                                                  <td {...celulaDetalhe(rubric, primaryKeys)} className={`p-2 border-r border-gray-100 sticky left-0 bg-white z-10 truncate cursor-pointer hover:text-mcsystem-600 ${center.type === 'RUBRIC' ? 'pl-6 font-medium text-gray-700' : 'pl-10'}`}>{rubric.name}</td>
+                                                  {primaryKeys.map((mk, i) => (<td key={mk} {...celulaDetalhe(rubric, [mk])} className="p-2 text-right cursor-pointer hover:bg-blue-100/50 transition-colors">{renderCellWithComparison(rubric.values[mk], isCompareEnabled && compareKeys[i] ? rubric.prevValues[compareKeys[i]] : 0, rIsExpense)}</td>))}
+                                                  <td {...celulaDetalhe(rubric, primaryKeys)} className="p-2 text-right border-l border-gray-100 bg-gray-50/50 cursor-pointer hover:bg-gray-100 transition-colors">{renderCellWithComparison(rubricTotal, prevRubricTotal, rIsExpense)}</td>
                                               </tr>
                                           )})}
                                       </React.Fragment>
@@ -2862,8 +2931,8 @@ const newRecords: FinancialRecord[] = [];
                           )})}
                           <tr className="bg-mcsystem-50 font-bold text-gray-900 border-t-2 border-mcsystem-100">
                               <td className="p-4 border-r border-mcsystem-100 sticky left-0 bg-mcsystem-50 z-10 uppercase">{bottomLineLabel}</td>
-                              {primaryKeys.map((mk, i) => (<td key={mk} className="p-4 text-right">{renderCellWithComparison(netResult[mk], isCompareEnabled && compareKeys[i] ? prevNetResult[compareKeys[i]] : 0, netResult[mk] < 0)}</td>))}
-                              <td className="p-4 text-right font-black border-l border-mcsystem-200 bg-mcsystem-100">{renderCellWithComparison(netTotal, prevNetTotal, netTotal < 0)}</td>
+                              {primaryKeys.map((mk, i) => (<td key={mk} {...celulaDetalhe(linhaResultado, [mk])} className="p-4 text-right cursor-pointer hover:bg-mcsystem-100 transition-colors">{renderCellWithComparison(netResult[mk], isCompareEnabled && compareKeys[i] ? prevNetResult[compareKeys[i]] : 0, netResult[mk] < 0)}</td>))}
+                              <td {...celulaDetalhe(linhaResultado, primaryKeys)} className="p-4 text-right font-black border-l border-mcsystem-200 bg-mcsystem-100 cursor-pointer hover:bg-mcsystem-200 transition-colors">{renderCellWithComparison(netTotal, prevNetTotal, netTotal < 0)}</td>
                           </tr>
                       </tbody>
                   </table>
@@ -3009,7 +3078,19 @@ const newRecords: FinancialRecord[] = [];
           />
         )}
 
-        {isDrillDownOpen && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[80] p-4 backdrop-blur-sm"><div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col animate-in zoom-in-95 duration-200"><div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center rounded-t-xl"><h3 className="font-bold text-gray-800 flex items-center"><List size={18} className="mr-2 text-mcsystem-500" /> Detalhes: {drillDownTitle}</h3><button onClick={() => setIsDrillDownOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button></div><div className="flex-1 overflow-y-auto p-4 bg-gray-50/50">{renderTransactionTable(drillDownRecords)}</div></div></div>)}
+        <RecordsDrillModal
+          open={isDrillDownOpen}
+          onClose={() => setIsDrillDownOpen(false)}
+          title={drillDownTitle}
+          subtitle={drillDownSubtitle}
+          records={drillDownRecords}
+          expectedTotal={drillDownExpected}
+          companies={companies}
+          suppliers={suppliers}
+          products={products}
+          chartOfAccounts={chartOfAccounts}
+          revenueTypes={revenueTypes}
+        />
         
         
         {editChoiceModal.isOpen && (
@@ -3472,7 +3553,7 @@ const newRecords: FinancialRecord[] = [];
                                     <label className="text-sm font-medium text-gray-700">Vincular à Classificação</label>
                                     <select required value={coaFormData.classificationCode || ''} onChange={e => setCoaFormData({ ...coaFormData, classificationCode: e.target.value })} className="w-full border p-2 rounded bg-white mt-1">
                                         <option value="">Selecione a Classificação-Mãe</option>
-                                        {uniqueClassifications.map(c => <option key={c.code} value={c.code}>{c.code} - {c.name}</option>)}
+                                        {uniqueClassifications.map(c => <option key={c.key} value={c.key}>{c.code} - {c.name}</option>)}
                                     </select>
                                 </div>
                                 <div>
@@ -3491,14 +3572,14 @@ const newRecords: FinancialRecord[] = [];
                                     <label className="text-sm font-medium text-gray-700">Classificação</label>
                                     <select required value={selectedClassificationForCascading} onChange={e => { setSelectedClassificationForCascading(e.target.value); setCoaFormData({ ...coaFormData, centerCode: '' }); }} className="w-full border p-2 rounded bg-white mt-1">
                                         <option value="">Selecione a Classificação</option>
-                                        {uniqueClassifications.map(c => <option key={c.code} value={c.code}>{c.code} - {c.name}</option>)}
+                                        {uniqueClassifications.map(c => <option key={c.key} value={c.key}>{c.code} - {c.name}</option>)}
                                     </select>
                                 </div>
                                 <div>
                                     <label className="text-sm font-medium text-gray-700">Grupo</label>
                                     <select required value={coaFormData.centerCode || ''} onChange={e => setCoaFormData({ ...coaFormData, centerCode: e.target.value })} className="w-full border p-2 rounded bg-white mt-1" disabled={!selectedClassificationForCascading}>
                                         <option value="">Selecione o Grupo</option>
-                                        {uniqueCenters.filter(c => c.classificationCode === selectedClassificationForCascading).map(c => <option key={c.code} value={c.code}>{c.code} - {c.name}</option>)}
+                                        {uniqueCenters.filter(c => c.classificationKey === selectedClassificationForCascading).map(c => <option key={c.code} value={c.code}>{c.code} - {c.name}</option>)}
                                     </select>
                                 </div>
                                 <div>

@@ -1746,15 +1746,18 @@ const newRecords: FinancialRecord[] = [];
           } else if (node.type === 'CENTER') {
               return rubricsOf(r).some(c => c.centerCode === node.code);
           } else if (node.type === 'RUBRIC') {
-              // Receita é linha de Produto só para quem cadastrou produtos; sem
-              // eles a linha é uma rubrica do plano de contas, como a despesa.
-              const isProductRow = r.amount >= 0 && products.some(p => p.active);
-              if (isProductRow) {
-                  const targetProductId = node.code === 'SEM_PRODUTO' ? null : node.code;
+              // A linha de receita segue a mesma dimensão do agrupamento:
+              // Produto, Tipo de Receita, ou — sem nenhum dos dois — rubrica.
+              const dim: 'PRODUCT' | 'REVENUE_TYPE' | 'COA' =
+                products.some(p => p.active) ? 'PRODUCT'
+                : revenueTypes.length > 0 ? 'REVENUE_TYPE'
+                : 'COA';
+              if (r.amount >= 0 && dim !== 'COA') {
+                  const alvo = node.code === 'SEM_PRODUTO' ? null : node.code;
                   if (r.split_revenue && r.split_revenue.length > 0) {
-                      return r.split_revenue.some(sp => (sp.product_id ?? null) === targetProductId);
+                      return r.split_revenue.some(sp => ((dim === 'PRODUCT' ? sp.product_id : sp.revenue_type_id) ?? null) === alvo);
                   }
-                  return (r.product_id ?? null) === targetProductId;
+                  return ((dim === 'PRODUCT' ? r.product_id : r.revenueTypeId) ?? null) === alvo;
               }
               return rubricsOf(r).some(c => c.rubricCode === node.code);
           }
@@ -2018,11 +2021,39 @@ const newRecords: FinancialRecord[] = [];
       };
       
       /**
-       * Agrupar receita por produto só faz sentido para quem cadastrou produtos.
-       * Sem eles, todo lançamento cai em "Sem produto" e a tela perde a
-       * abertura — o caso de quem classifica a receita pelo plano de contas.
+       * Por qual dimensão a receita abre.
+       *
+       * Produto é o cadastro novo, mas quem entrou antes dele classifica a
+       * receita por Tipo de Receita — na Clínica Huk são as clínicas/dentistas
+       * (Clínica Daniel, Clínica Camila...). Agrupar sempre por produto jogava
+       * essas empresas inteiras numa linha "Sem produto". Sem nenhum dos dois,
+       * a receita abre pelo plano de contas, igual à despesa.
        */
-      const temProdutos = products.some(p => p.active);
+      const revenueDim: 'PRODUCT' | 'REVENUE_TYPE' | 'COA' =
+        products.some(p => p.active) ? 'PRODUCT'
+        : revenueTypes.length > 0 ? 'REVENUE_TYPE'
+        : 'COA';
+
+      /** Os "produtos" da linha de receita, conforme a dimensão em uso. */
+      const revenueBuckets: { id: string | null, name: string }[] =
+        revenueDim === 'PRODUCT'
+          ? [...products.filter(p => p.active).map(p => ({ id: p.id as string | null, name: p.name })),
+             { id: null, name: 'Sem produto' }]
+          : [...revenueTypes.map(rt => ({ id: rt.id as string | null, name: rt.name })),
+             { id: null, name: 'Sem tipo de receita' }];
+
+      /** Quanto do lançamento pertence ao balde, respeitando o rateio. */
+      const revenueShare = (record: FinancialRecord, bucketId: string | null): number => {
+        const splits = record.split_revenue;
+        if (splits && splits.length > 0) {
+          // O rateio antigo grava revenue_type_id; o novo, product_id.
+          return splits
+            .filter(sp => ((revenueDim === 'PRODUCT' ? sp.product_id : sp.revenue_type_id) ?? null) === bucketId)
+            .reduce((sum, sp) => sum + sp.amount, 0);
+        }
+        const own = revenueDim === 'PRODUCT' ? (record.product_id ?? null) : (record.revenueTypeId ?? null);
+        return own === bucketId ? record.amount : 0;
+      };
 
       const calculateValueForRevenueType = (productId: string | null, keys: string[]) => {
           const vals: Record<string, number> = {};
@@ -2036,20 +2067,7 @@ const newRecords: FinancialRecord[] = [];
                   return rDate.startsWith(key);
               });
 
-              monthRecords.forEach(record => {
-                  if (record.split_revenue && record.split_revenue.length > 0) {
-                      // Case 1: Record has splits. Sum amounts from splits matching the product.
-                      const relevantSplitAmount = record.split_revenue
-                          .filter(split => (split.product_id ?? null) === productId)
-                          .reduce((sum, split) => sum + split.amount, 0);
-                      totalForMonth += relevantSplitAmount;
-                  } else {
-                      // Case 2: Record has no splits. Match by product.
-                      if ((record.product_id ?? null) === productId) {
-                          totalForMonth += record.amount;
-                      }
-                  }
-              });
+              monthRecords.forEach(record => { totalForMonth += revenueShare(record, productId); });
 
               vals[key] = totalForMonth;
           });
@@ -2072,18 +2090,7 @@ const newRecords: FinancialRecord[] = [];
                   } else { return false; }
                   return rDate.startsWith(key);
               });
-              monthRecords.forEach(record => {
-                  if (record.split_revenue && record.split_revenue.length > 0) {
-                      const relevantSplitAmount = record.split_revenue
-                          .filter(split => (split.product_id ?? null) === productId)
-                          .reduce((sum, split) => sum + split.amount, 0);
-                      totalForMonth += relevantSplitAmount;
-                  } else {
-                      if ((record.product_id ?? null) === productId) {
-                          totalForMonth += record.amount;
-                      }
-                  }
-              });
+              monthRecords.forEach(record => { totalForMonth += revenueShare(record, productId); });
               vals[key] = totalForMonth;
           });
           return vals;
@@ -2095,13 +2102,8 @@ const newRecords: FinancialRecord[] = [];
 
         const outflowCenters = uniqueCenters.filter(c => c.classificationCode !== '1').sort((a,b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 
-        // Entradas por Produto quando há produtos; senão pelo plano de contas.
-        if (temProdutos) {
-          const productBuckets: { id: string | null, name: string }[] = [
-              ...products.filter(p => p.active).map(p => ({ id: p.id as string | null, name: p.name })),
-              { id: null, name: 'Sem produto' },
-          ];
-          productBuckets.forEach(pb => {
+        if (revenueDim !== 'COA') {
+          revenueBuckets.forEach(pb => {
               inflowNode.children.push({
                   code: pb.id || 'SEM_PRODUTO',
                   name: pb.name,
@@ -2166,12 +2168,8 @@ const newRecords: FinancialRecord[] = [];
               const clsNode: any = { code: clsCode, name: clsName, type: 'CLASSIFICATION', values: {}, prevValues: {}, children: [] };
               const isExpense = clsCode !== '1';
               
-              if (clsCode === '1' && temProdutos) { // DRE Receitas são por Produto
-                  const productBuckets: { id: string | null, name: string }[] = [
-                      ...products.filter(p => p.active).map(p => ({ id: p.id as string | null, name: p.name })),
-                      { id: null, name: 'Sem produto' },
-                  ];
-                  productBuckets.forEach(pb => {
+              if (clsCode === '1' && revenueDim !== 'COA') { // Receita por Produto ou Tipo de Receita
+                  revenueBuckets.forEach(pb => {
                       const rtNode = { code: pb.id || 'SEM_PRODUTO', name: pb.name, type: 'RUBRIC', values: calculateValueForRevenueType(pb.id, primaryKeys), prevValues: calculateValueForRevenueType(pb.id, compareKeys) };
                       clsNode.children.push(rtNode);
                   });

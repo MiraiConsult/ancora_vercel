@@ -4,7 +4,8 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine,
 } from 'recharts';
 import { ChevronDown, ChevronRight, TrendingUp, X, Users } from 'lucide-react';
-import { cycleStep, monthlyFactor } from '../lib/cycles';
+import { monthlyFactor } from '../lib/cycles';
+import { projectSubscriptions } from '../lib/subscriptionProjection';
 
 interface BillingProjectionProps {
   /** Cobranças do Asaas (registros com asaas_payment_id). */
@@ -45,22 +46,6 @@ const monthLabel = (key: string) => {
   return `${MONTH_ABBR[m - 1]}/${String(y).slice(2)}`;
 };
 
-const addDays = (iso: string, days: number) => {
-  const d = new Date(iso + 'T00:00:00Z');
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-};
-/** Anda meses preservando o dia — 31/jan + 1 mês vira 28/fev, como no Asaas. */
-const addMonths = (iso: string, months: number) => {
-  const d = new Date(iso + 'T00:00:00Z');
-  const day = d.getUTCDate();
-  d.setUTCDate(1);
-  d.setUTCMonth(d.getUTCMonth() + months);
-  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-  d.setUTCDate(Math.min(day, lastDay));
-  return d.toISOString().slice(0, 10);
-};
-
 type Cell = { recebido: number; aberto: number; previsto: number };
 const emptyCell = (): Cell => ({ recebido: 0, aberto: 0, previsto: 0 });
 const cellTotal = (c: Cell) => c.recebido + c.aberto + c.previsto;
@@ -73,12 +58,6 @@ const splitCharge = (r: FinancialRecord) =>
   r.split_revenue?.length
     ? r.split_revenue.map(s => ({ pid: s.product_id || '', amount: s.amount || 0 }))
     : [{ pid: r.product_id || '', amount: r.amount || 0 }];
-
-/** Fatias por produto de uma assinatura — o rateio é guardado em %. */
-const splitSubscription = (s: Subscription) =>
-  s.split_products?.length
-    ? s.split_products.map(sp => ({ pid: sp.product_id || '', amount: (s.value || 0) * sp.pct / 100 }))
-    : [{ pid: s.product_id || '', amount: s.value || 0 }];
 
 /**
  * Recebimentos por mês e por produto: passado a partir das cobranças emitidas,
@@ -117,17 +96,11 @@ export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, s
       contribs.push({ pid, mk, cid, field, amount: value });
     };
 
-    // Cobranças já emitidas. Guarda quantas existem por assinatura/mês para a
-    // projeção não duplicar o que o Asaas já gerou.
-    const issued = new Map<string, Map<string, number>>();
+    // Cobranças já emitidas. (O que já foi emitido por assinatura/mês é
+    // descontado dentro de projectSubscriptions, para não contar duas vezes.)
     for (const r of charges) {
       if (!r.dueDate) continue;
       const mk = r.dueDate.slice(0, 7);
-      if (r.asaas_subscription_id) {
-        if (!issued.has(r.asaas_subscription_id)) issued.set(r.asaas_subscription_id, new Map());
-        const m = issued.get(r.asaas_subscription_id)!;
-        m.set(mk, (m.get(mk) || 0) + 1);
-      }
       if (mk < first || mk > last) continue;
       const field: keyof Cell = (r.status as string) === 'Pago'
         ? 'recebido'
@@ -136,27 +109,10 @@ export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, s
     }
 
     // Renovações futuras das assinaturas ativas. O passado nunca é projetado —
-    // lá vale só o que foi efetivamente cobrado.
-    for (const sub of subscriptions) {
-      if ((sub.status || 'ACTIVE').toUpperCase() !== 'ACTIVE') continue;
-      const step = cycleStep(sub.cycle);
-      const pending = new Map(issued.get(sub.asaas_id || '') || []);
-      const slices = splitSubscription(sub);
-      // Assinatura com prazo (3x, 12x...) para de gerar receita na última
-      // cobrança. Sem isso ela apareceria rendendo até o fim da janela.
-      const stop = sub.end_date?.slice(0, 10) || null;
-      let d = sub.next_due_date?.slice(0, 10) || today;
-      for (let i = 0; i < 400; i++) {
-        if (stop && d > stop) break;
-        const mk = d.slice(0, 7);
-        if (mk > last) break;
-        if (mk >= curMonth) {
-          const already = pending.get(mk) || 0;
-          if (already > 0) pending.set(mk, already - 1);
-          else for (const s of slices) bump(s.pid, mk, 'previsto', s.amount, sub.client_id || '');
-        }
-        d = step.days ? addDays(d, step.days) : addMonths(d, step.months!);
-      }
+    // lá vale só o que foi efetivamente cobrado. A mesma projeção alimenta o
+    // Fluxo de Caixa; regra duplicada aqui era divergência garantida.
+    for (const r of projectSubscriptions(subscriptions, charges, { fromMonth: curMonth, toMonth: last })) {
+      for (const s of splitCharge(r)) bump(s.pid, r.dueDate.slice(0, 7), 'previsto', s.amount, r.companyId || '');
     }
 
     const rows = Array.from(byProduct.entries())

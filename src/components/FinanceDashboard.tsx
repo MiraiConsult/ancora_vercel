@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { FinancialRecord, TransactionType, TransactionStatus, ChartOfAccount, RevenueType, Bank, Company, User, FinancialRecordSplit, Product, Supplier } from '../types';
+import { FinancialRecord, TransactionType, TransactionStatus, ChartOfAccount, RevenueType, Bank, Company, User, FinancialRecordSplit, Product, Subscription, Supplier } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, AreaChart, Area, Line, PieChart, Pie, ComposedChart, LineChart, ReferenceLine } from 'recharts';
 import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as PieIcon, DollarSign, Plus, X, Save, List, Hash, Tag, Search, Pencil, Trash2, Landmark, Tags, Grid3X3, CalendarRange, FileCheck, Filter, Upload, Download, ChevronDown, TrendingUp, Wallet, ArrowRightLeft, LayoutDashboard, ChevronRight, Eye, EyeOff, Calendar, ArrowUpRight, ArrowDownRight, Minus, Settings2, Check, Copy, RefreshCw, BarChart3, TrendingDown, Sparkles, CreditCard, Clock, CalendarClock, Lock, CheckSquare, Square, CheckCircle2, Calculator, Split, Building, Edit3, Table, BookTemplate, BookOpen, ArrowUp, ArrowDown, ArrowUpDown, Users, Package, Barcode } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabaseClient';
 import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
 import { DateRangeFilter, presetRange, inRange, type DateRange } from './DateRangeFilter';
 import { PayRecordModal } from './PayRecordModal';
+import { isProjected, projectSubscriptions, shiftMonthKey } from '../lib/subscriptionProjection';
 import { isAsaasEnabled } from '../config';
 
 interface FinanceDashboardProps {
@@ -23,6 +24,8 @@ interface FinanceDashboardProps {
   setCompanies: React.Dispatch<React.SetStateAction<Company[]>>;
   products: Product[];
   suppliers?: Supplier[];
+  /** Assinaturas ativas — usadas para projetar o caixa além do que o Asaas já emitiu. */
+  subscriptions?: Subscription[];
   currentUser: User;
   /** Aba inicial quando a navegação vem do menu lateral */
   initialTab?: MainTab;
@@ -114,6 +117,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
     setCompanies,
     products,
     suppliers,
+    subscriptions = [],
     currentUser,
     initialTab,
     hideTabs = false
@@ -1723,7 +1727,12 @@ const newRecords: FinancialRecord[] = [];
   const handleCellClick = (node: any, dateKey: string, mode: 'DRE' | 'CASHFLOW') => {
       if (!node || !node.values || node.values[dateKey] === 0) return;
   
-      const recordsToDisplay = validRecords.filter(r => {
+      // A célula do caixa pode conter renovação prevista; a lista tem que
+      // mostrar as mesmas linhas, senão o detalhe não fecha com o total.
+      const fonte = mode === 'CASHFLOW' && includeProjections
+        ? [...validRecords, ...projectedRecords]
+        : validRecords;
+      const recordsToDisplay = fonte.filter(r => {
           let rDate = '';
           if (mode === 'DRE') {
               rDate = r.competenceDate || '';
@@ -1771,6 +1780,30 @@ const newRecords: FinancialRecord[] = [];
 
   // --- Common Calculations ---
   const validRecords = records.filter(r => !r.needsValidation);
+
+  /**
+   * Renovações previstas das assinaturas ativas.
+   *
+   * O Asaas só emite a cobrança ~30/40 dias antes do vencimento, então o caixa
+   * futuro secava logo à frente do último lote emitido, mesmo com a assinatura
+   * ativa e sem prazo. Aqui o horizonte cobre pelo menos 24 meses e se estica
+   * até onde o usuário estiver olhando — matriz ou resumo.
+   */
+  const projectedRecords = useMemo(() => {
+    if (!subscriptions.length) return [] as FinancialRecord[];
+    const mesAtual = new Date().toISOString().slice(0, 7);
+    const fim = [
+      shiftMonthKey(mesAtual, 24),
+      `${primaryPeriod.year}-12`,
+      isCompareEnabled ? `${comparePeriod.year}-12` : '',
+      cashRange.to?.slice(0, 7) || '',
+    ].filter(Boolean).sort().pop()!;
+    // Depende de `records`, e não de `validRecords`: este último é recalculado
+    // a cada render, o que faria a projeção inteira ser refeita a cada tecla
+    // digitada na busca.
+    return projectSubscriptions(subscriptions, records, { fromMonth: mesAtual, toMonth: fim });
+  }, [subscriptions, records, primaryPeriod.year, comparePeriod.year, isCompareEnabled, cashRange.to]);
+
   
   // --- DASHBOARD CHARTS DATA ---
   const dashboardChartsData = useMemo(() => {
@@ -1966,6 +1999,13 @@ const newRecords: FinancialRecord[] = [];
   const buildHierarchy = (mode: 'DRE' | 'CASHFLOW') => {
       const primaryKeys = primaryPeriod.months.map(m => `${primaryPeriod.year}-${String(m).padStart(2, '0')}`);
       const compareKeys = isCompareEnabled ? comparePeriod.months.map(m => `${comparePeriod.year}-${String(m).padStart(2, '0')}`) : [];
+      /**
+       * As renovações previstas entram só no caixa, e só quando se pede o que
+       * ainda não foi pago. O DRE é competência e vive do que foi lançado.
+       */
+      const baseRecords = mode === 'CASHFLOW' && includeProjections
+        ? [...validRecords, ...projectedRecords]
+        : validRecords;
       const hierarchy: any[] = []; const netResult: Record<string, number> = {}; const prevNetResult: Record<string, number> = {};
       
       /**
@@ -1989,7 +2029,7 @@ const newRecords: FinancialRecord[] = [];
       const calculateValueForNode = (rubricIds: string[], keys: string[], isExpense: boolean) => { 
         const vals: Record<string, number> = {}; 
         keys.forEach(key => { 
-            vals[key] = validRecords.filter(r => {
+            vals[key] = baseRecords.filter(r => {
                 if (mode === 'DRE') { // DRE always includes all statuses
                     // Use competence date first, then due date, then payment date as fallback
                     let rDate = r.competenceDate || r.dueDate || r.paymentDate || '';
@@ -2060,7 +2100,7 @@ const newRecords: FinancialRecord[] = [];
           keys.forEach(key => {
               let totalForMonth = 0;
 
-              const monthRecords = validRecords.filter(r => {
+              const monthRecords = baseRecords.filter(r => {
                   if (r.amount <= 0) return false; // Somente lançamentos positivos (entradas)
                   // DRE is competence based
                   const rDate = r.competenceDate || '';
@@ -2079,7 +2119,7 @@ const newRecords: FinancialRecord[] = [];
           const vals: Record<string, number> = {};
           keys.forEach(key => {
               let totalForMonth = 0;
-              const monthRecords = validRecords.filter(r => {
+              const monthRecords = baseRecords.filter(r => {
                   if (r.amount <= 0) return false; // Somente lançamentos positivos (entradas)
                   if (!includeProjections && r.status !== TransactionStatus.PAID) return false;
                   let rDate = '';
@@ -2228,7 +2268,7 @@ const newRecords: FinancialRecord[] = [];
                                 <td className={`p-4 font-bold ${isPositiveFlow ? 'text-green-600' : 'text-red-500'}`}>{isPositiveFlow ? '+' : ''} R$ {(realValue || 0).toLocaleString('pt-BR')}</td>
                                 <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${r.type === TransactionType.INCOME ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{r.type}</span></td>
                                 <td className="p-4">{r.rubricId ? (<span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs border border-blue-100">{chartOfAccounts.find(c => c.id === r.rubricId)?.rubricName || r.category}</span>) : (r.revenueTypeId ? (<span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs border border-emerald-100">{revenueTypes.find(rt => rt.id === r.revenueTypeId)?.name || 'Receita'}</span>) : (<span className="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs border border-yellow-200 flex items-center w-fit"><AlertCircle size={10} className="mr-1"/> Definir Categoria</span>))}</td>
-                                <td className="p-4 text-center"><div className="flex justify-center space-x-2"><button onClick={(e) => handleEditTransaction(e, r)} className="flex items-center px-3 py-1 bg-mcsystem-500 text-white rounded text-xs hover:bg-mcsystem-600 transition-colors shadow-sm"><Pencil size={12} className="mr-1"/> {isValidationMode ? 'Validar' : 'Editar'}</button><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(e, r.id); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors relative z-10"><Trash2 size={16} className="pointer-events-none"/></button></div></td>
+                                <td className="p-4 text-center">{isProjected(r) ? (<span title="Renovação da assinatura que o Asaas ainda não emitiu" className="inline-flex items-center px-2.5 py-1 bg-blue-50 text-blue-700 rounded text-xs font-medium"><CalendarClock size={12} className="mr-1"/> Previsto</span>) : (<div className="flex justify-center space-x-2"><button onClick={(e) => handleEditTransaction(e, r)} className="flex items-center px-3 py-1 bg-mcsystem-500 text-white rounded text-xs hover:bg-mcsystem-600 transition-colors shadow-sm"><Pencil size={12} className="mr-1"/> {isValidationMode ? 'Validar' : 'Editar'}</button><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(e, r.id); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors relative z-10"><Trash2 size={16} className="pointer-events-none"/></button></div>)}</td>
                             </tr>
                         )})}
                         {recordsToShow.length === 0 && (<tr><td colSpan={isValidationMode ? 7 : 6} className="p-8 text-center text-gray-400">{isValidationMode ? 'Tudo certo! Nenhuma pendência.' : 'Nenhuma transação encontrada.'}</td></tr>)}
@@ -2533,13 +2573,20 @@ const newRecords: FinancialRecord[] = [];
                * lançamentos — e não da matriz, que é presa a ano + meses. É o
                * "bater o olho" antes de abrir o detalhado.
                */
-              const noPeriodo = validRecords.filter(r => {
+              // Com "Incluir Pendentes" ligado o resumo enxerga as renovações
+              // que o Asaas ainda não emitiu — do contrário o mês seguinte ao
+              // último lote emitido aparece vazio.
+              const baseResumo = includeProjections ? [...validRecords, ...projectedRecords] : validRecords;
+              const noPeriodo = baseResumo.filter(r => {
                 if (!includeProjections && r.status !== TransactionStatus.PAID) return false;
                 const d = includeProjections
                   ? (r.dueDate || r.competenceDate)
                   : (r.paymentDate || r.dueDate || r.competenceDate);
                 return inRange(d, cashRange);
               });
+              const previstoNoPeriodo = noPeriodo
+                .filter(r => isProjected(r))
+                .reduce((a, r) => a + r.amount, 0);
               const entradas = noPeriodo.filter(r => r.amount >= 0).reduce((a, r) => a + r.amount, 0);
               const saidas = noPeriodo.filter(r => r.amount < 0).reduce((a, r) => a + r.amount, 0);
               const saldo = entradas + saidas;
@@ -2637,6 +2684,11 @@ const newRecords: FinancialRecord[] = [];
                               <p className="text-[11px] text-green-700 font-bold uppercase tracking-wider">Total de entradas</p>
                               <p className="text-3xl font-bold text-green-700 tabular-nums mt-2">R$ {brlFull(entradas)}</p>
                               <p className="text-xs text-gray-400 mt-1">{noPeriodo.filter(r => r.amount >= 0).length} lançamento(s)</p>
+                              {previstoNoPeriodo > 0 && (
+                                <p className="text-xs text-blue-600 mt-1" title="Assinaturas ativas cuja cobrança o Asaas ainda não emitiu">
+                                  inclui R$ {brlFull(previstoNoPeriodo)} de renovações previstas
+                                </p>
+                              )}
                           </div>
                           <div className="bg-white rounded-2xl border border-red-200 p-6">
                               <p className="text-[11px] text-red-700 font-bold uppercase tracking-wider">Total de saídas</p>

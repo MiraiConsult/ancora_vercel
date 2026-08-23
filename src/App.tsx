@@ -22,6 +22,17 @@ const FINANCE_TABS: Record<string, MainTab> = {
   coa: 'COA',
 };
 
+/**
+ * A página aberta mora na URL (#/lancamentos). Antes era só estado do React:
+ * um F5 — ou o voltar do navegador — devolvia todo mundo para o Dashboard.
+ * Página desconhecida cai no Dashboard em vez de renderizar tela em branco.
+ */
+const pageFromHash = () => {
+  const bruto = window.location.hash.slice(1);
+  const p = decodeURIComponent(bruto.startsWith('/') ? bruto.slice(1) : bruto).trim();
+  return p && PAGE_TITLES[p] ? p : 'dashboard';
+};
+
 const PAGE_TITLES: Record<string, string> = {
   dashboard: 'Dashboard',
   entries: 'Lançamentos & Caixa',
@@ -104,7 +115,18 @@ const App: React.FC = () => {
   const [impersonatedTenantId, setImpersonatedTenantId] = useState<string | null>(null);
   const [impersonatedTenantName, setImpersonatedTenantName] = useState<string | null>(null);
 
-  const [currentPage, setCurrentPage] = useState('dashboard');
+  const [currentPage, setCurrentPage] = useState(pageFromHash);
+  /** Navegar troca a URL; a URL é que manda na página. */
+  const navigate = (page: string) => {
+    setCurrentPage(page);
+    if (window.location.hash !== `#/${page}`) window.location.hash = `#/${page}`;
+  };
+  // Voltar e avançar do navegador passam por aqui.
+  useEffect(() => {
+    const onHash = () => setCurrentPage(pageFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   /** No celular o menu vira gaveta: fora da tela até ser aberto pelo botão. */
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -568,7 +590,7 @@ const handleAddUser = async (newUser: User) => {
             companies={companies}
             subscriptions={subscriptions}
             currentUser={user}
-            onNavigate={setCurrentPage}
+            onNavigate={navigate}
           />
         ) : <AccessDenied />;
 
@@ -848,7 +870,7 @@ const handleAddUser = async (newUser: User) => {
 
         <Sidebar
           currentPage={currentPage}
-          onNavigate={(p) => { setCurrentPage(p); setIsMobileMenuOpen(false); }}
+          onNavigate={(p) => { navigate(p); setIsMobileMenuOpen(false); }}
           currentUser={user}
           onLogout={signOut}
           unreadCount={unreadNotifications}
@@ -878,7 +900,7 @@ const handleAddUser = async (newUser: User) => {
                 <h1 className="text-lg sm:text-xl font-semibold text-gray-800 capitalize truncate">{PAGE_TITLES[currentPage] || currentPage}</h1>
               </div>
               <div className="flex items-center space-x-4">
-                  <div onClick={() => setCurrentPage('alerts')} className="relative cursor-pointer hover:bg-gray-100 p-2 rounded-full transition-colors">
+                  <div onClick={() => navigate('alerts')} className="relative cursor-pointer hover:bg-gray-100 p-2 rounded-full transition-colors">
                        {unreadNotifications > 0 && <span className="absolute top-1 right-1 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white animate-ping"></span>}
                        <Bell size={20} className="text-gray-500" />
                   </div>

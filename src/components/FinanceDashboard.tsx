@@ -207,6 +207,8 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   const [drillDownSubtitle, setDrillDownSubtitle] = useState('');
   /** Valor que a tela mostrava — o modal avisa quando a soma não bate (rateio). */
   const [drillDownExpected, setDrillDownExpected] = useState<number | undefined>(undefined);
+  /** Rubricas do nó clicado — o detalhe mostra só as fatias delas. */
+  const [drillDownRubricIds, setDrillDownRubricIds] = useState<string[] | undefined>(undefined);
 
   // Modal State (Transactions)
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1815,7 +1817,16 @@ const newRecords: FinancialRecord[] = [];
           return false;
       });
   
+      // Quais rubricas formam este número: um lançamento rateado entra na lista
+      // só com as fatias delas, e não inteiro.
+      const rubricasDoNo = node.type === 'ROOT' ? undefined : chartOfAccounts.filter(c =>
+        node.type === 'RUBRIC' ? c.rubricCode === node.code
+        : node.type === 'CENTER' ? c.centerCode === node.code
+        : c.classificationCode === node.code && (!node.key || c.classificationName === node.name),
+      ).map(c => c.id);
+
       setDrillDownRecords(recordsToDisplay);
+      setDrillDownRubricIds(rubricasDoNo?.length ? rubricasDoNo : undefined);
       setDrillDownTitle(node.name);
       setDrillDownSubtitle(
         `${periodoLabel || dateKeys.join(', ')} · ${mode === 'DRE' ? 'por competência' : 'por caixa'}`,
@@ -3085,6 +3096,7 @@ const newRecords: FinancialRecord[] = [];
           subtitle={drillDownSubtitle}
           records={drillDownRecords}
           expectedTotal={drillDownExpected}
+          focusRubricIds={drillDownRubricIds}
           companies={companies}
           suppliers={suppliers}
           products={products}

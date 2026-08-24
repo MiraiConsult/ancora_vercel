@@ -233,7 +233,21 @@ Deno.serve(async (req: Request) => {
     const manualByPayment = new Map<string, any>();
     (manualRows || []).forEach((r: any) => manualByPayment.set(r.asaas_payment_id, r));
 
-    const payments = await asaasList('/payments');
+    /**
+     * Cobranças que passam por esta conta Asaas mas não são desta empresa —
+     * outro negócio dividindo a mesma conta. Sem esta lista elas voltariam a
+     * cada sync, porque o import é um upsert de tudo que a conta tem.
+     *
+     * Consequência assumida: o caixa do sistema deixa de bater com o extrato
+     * do Asaas na medida do que entra por aqui.
+     */
+    const DESCRICOES_IGNORADAS = ['farias advogados'];
+    const ehIgnorada = (descricao: unknown) => {
+      const d = String(descricao || '').toLowerCase();
+      return DESCRICOES_IGNORADAS.some((termo) => d.includes(termo));
+    };
+
+    const payments = (await asaasList('/payments')).filter((p: any) => !ehIgnorada(p.description));
     const paymentRows = payments.map((p: any) => {
       const amount = Number(p.value) || 0;
 
@@ -287,7 +301,9 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---- 3) Subscriptions (assinaturas) ----
-    const subs = await asaasList('/subscriptions');
+    // Mesma regra nas assinaturas: senão a ignorada continua na lista e segue
+    // gerando cobrança visível.
+    const subs = (await asaasList('/subscriptions')).filter((s: any) => !ehIgnorada(s.description));
     const subRows = subs.map((s: any) => {
       // Mesma regra das cobranças: manual manda, depois o rateio, depois a descrição.
       const split = splitBySub.get(s.id);

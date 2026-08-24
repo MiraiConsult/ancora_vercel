@@ -52,7 +52,7 @@ interface RecordsDrillModalProps {
    * voltar. Não aparece em renovação prevista (não existe no banco) nem em
    * linha de rateio (lá o produto está na fatia, não no lançamento).
    */
-  onEditProduct?: (record: FinancialRecord, productId: string | null) => void | Promise<void>;
+  onEditProduct?: (record: FinancialRecord, productId: string | null) => Promise<string[] | void> | void;
 }
 
 type SortKey = 'dueDate' | 'description' | 'party' | 'category' | 'status' | 'amount';
@@ -276,10 +276,19 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
                       {onEditProduct && !isProjected(r) && !key.includes('#') ? (
                         <select
                           value={(produtoEditado[r.id] !== undefined ? produtoEditado[r.id] : r.product_id) || ''}
-                          onChange={e => {
+                          onChange={async e => {
                             const pid = e.target.value || null;
                             setProdutoEditado(m => ({ ...m, [r.id]: pid }));
-                            onEditProduct(r, pid);
+                            // Quem grava devolve tudo que mudou junto — aplicar
+                            // "a todos iguais" tem que aparecer nas outras
+                            // linhas da lista, não só naquela que foi clicada.
+                            const alterados = await onEditProduct(r, pid);
+                            if (Array.isArray(alterados) && alterados.length) {
+                              setProdutoEditado(m => ({
+                                ...m,
+                                ...Object.fromEntries(alterados.map(id => [id, pid])),
+                              }));
+                            }
                           }}
                           className="w-full max-w-[190px] px-2 py-1 rounded-md border border-transparent bg-transparent text-gray-600 hover:border-gray-200 focus:border-mcsystem-500 focus:bg-white outline-none cursor-pointer"
                           title="Trocar o produto deste lançamento"

@@ -1764,14 +1764,42 @@ const newRecords: FinancialRecord[] = [];
    * desfaria a escolha em até uma hora.
    */
   const handleDrillProductChange = async (record: FinancialRecord, productId: string | null) => {
-    setRecords(list => list.map(x => x.id === record.id
-      ? { ...x, product_id: (productId || undefined) as any, product_manual: true }
-      : x));
-    if (isMockUser) return;
-    const { error } = await supabase.from('financial_records')
-      .update({ product_id: productId, product_manual: true })
-      .eq('id', record.id);
-    if (error) alert('Não foi possível trocar o produto: ' + error.message);
+    const gravar = async (ids: string[]) => {
+      setRecords(list => list.map(x => ids.includes(x.id)
+        ? { ...x, product_id: (productId || undefined) as any, product_manual: true }
+        : x));
+      if (isMockUser) return true;
+      const { error } = await supabase.from('financial_records')
+        .update({ product_id: productId, product_manual: true })
+        .in('id', ids);
+      if (error) { alert('Não foi possível trocar o produto: ' + error.message); return false; }
+      return true;
+    };
+
+    if (!await gravar([record.id])) return [];
+
+    // Descrição repetida é a regra, não a exceção: o Asaas manda dezenas de
+    // "Cobrança Asaas" iguais. Classificar uma de cada vez seria o mesmo
+    // trabalho manual que este select veio eliminar.
+    const mesmaDescricao = (a?: string, b?: string) =>
+      (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+    const iguais = records.filter(x => x.id !== record.id
+      && mesmaDescricao(x.description, record.description)
+      && (x.product_id || null) !== (productId || null));
+
+    if (!iguais.length) return [record.id];
+
+    const nome = products.find(p => p.id === productId)?.name || 'Sem produto';
+    const ok = window.confirm(
+      `Aplicar "${nome}" aos outros ${iguais.length} lançamento(s) com a mesma descrição?
+
+` +
+      `"${record.description}"`,
+    );
+    if (!ok) return [record.id];
+
+    const ids = iguais.map(x => x.id);
+    return await gravar(ids) ? [record.id, ...ids] : [record.id];
   };
 
   // --- DRILL DOWN HANDLER (BUG FIX) ---

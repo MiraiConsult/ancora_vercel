@@ -209,6 +209,9 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   const [drillDownExpected, setDrillDownExpected] = useState<number | undefined>(undefined);
   /** Rubricas do nó clicado — o detalhe mostra só as fatias delas. */
   const [drillDownRubricIds, setDrillDownRubricIds] = useState<string[] | undefined>(undefined);
+  /** Idem para a linha de receita, que é agrupada por produto ou tipo de receita. */
+  const [drillDownProductIds, setDrillDownProductIds] = useState<string[] | undefined>(undefined);
+  const [drillDownRevTypeIds, setDrillDownRevTypeIds] = useState<string[] | undefined>(undefined);
 
   // Modal State (Transactions)
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1825,7 +1828,19 @@ const newRecords: FinancialRecord[] = [];
         : c.classificationCode === node.code && (!node.key || c.classificationName === node.name),
       ).map(c => c.id);
 
+      // Linha de receita: o código do nó é o produto (ou o tipo de receita).
+      // Confirmar contra o cadastro evita confundir com rubrica de despesa,
+      // que usa o mesmo tipo de nó.
+      const dimReceita = products.some(p => p.active) ? 'PRODUCT'
+        : revenueTypes.length > 0 ? 'REVENUE_TYPE' : 'COA';
+      const ehNoDeProduto = node.type === 'RUBRIC' && dimReceita === 'PRODUCT'
+        && (node.code === 'SEM_PRODUTO' || products.some(p => p.id === node.code));
+      const ehNoDeTipoReceita = node.type === 'RUBRIC' && dimReceita === 'REVENUE_TYPE'
+        && (node.code === 'SEM_PRODUTO' || revenueTypes.some(t => t.id === node.code));
+
       setDrillDownRecords(recordsToDisplay);
+      setDrillDownProductIds(ehNoDeProduto ? [node.code] : undefined);
+      setDrillDownRevTypeIds(ehNoDeTipoReceita ? [node.code] : undefined);
       setDrillDownRubricIds(rubricasDoNo?.length ? rubricasDoNo : undefined);
       setDrillDownTitle(node.name);
       setDrillDownSubtitle(
@@ -3097,6 +3112,8 @@ const newRecords: FinancialRecord[] = [];
           records={drillDownRecords}
           expectedTotal={drillDownExpected}
           focusRubricIds={drillDownRubricIds}
+          focusProductIds={drillDownProductIds}
+          focusRevenueTypeIds={drillDownRevTypeIds}
           companies={companies}
           suppliers={suppliers}
           products={products}

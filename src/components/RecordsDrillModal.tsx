@@ -39,6 +39,13 @@ interface RecordsDrillModalProps {
    * célula em vez de trazer o lançamento inteiro.
    */
   focusRubricIds?: string[];
+  /**
+   * Produtos (ou tipos de receita) por trás do número clicado. Mesma ideia da
+   * rubrica: a receita rateada entra só com a fatia daquele produto. Use
+   * 'SEM_PRODUTO' para a linha do que não tem produto.
+   */
+  focusProductIds?: string[];
+  focusRevenueTypeIds?: string[];
 }
 
 type SortKey = 'dueDate' | 'description' | 'party' | 'category' | 'status' | 'amount';
@@ -56,7 +63,7 @@ const STATUS_TONE: Record<string, string> = {
 export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
   open, onClose, title, subtitle, records, expectedTotal,
   companies = [], suppliers = [], products = [], chartOfAccounts = [], revenueTypes = [],
-  focusRubricIds,
+  focusRubricIds, focusProductIds, focusRevenueTypeIds,
 }) => {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'dueDate', dir: 1 });
 
@@ -102,6 +109,29 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
     const l = records.flatMap(r => {
       const base = { r, party: partyOf(r), product: productOf(r), status: statusOf(r) };
       const rateio = r.split_rubrics?.length ? r.split_rubrics : null;
+
+      // Receita dividida entre produtos: a fatia do produto clicado é a linha.
+      // Sem isso, "Hello Rating" mostrava a mensalidade inteira de Kaivaa +
+      // HelloGrowth, e a lista somava mais que a célula.
+      const porReceita = !rateio && (focusProductIds || focusRevenueTypeIds) && r.split_revenue?.length
+        ? r.split_revenue : null;
+      if (porReceita) {
+        const chave = (sp: { product_id?: string; revenue_type_id?: string }) =>
+          focusProductIds ? (sp.product_id || 'SEM_PRODUTO') : (sp.revenue_type_id || 'SEM_PRODUTO');
+        const alvos = focusProductIds || focusRevenueTypeIds!;
+        return porReceita
+          .filter(sp => alvos.includes(chave(sp)))
+          .map((sp, i) => ({
+            ...base, key: r.id + '#p' + i,
+            description: r.description || '—', origem: null as string | null,
+            category: categoryOf(r),
+            product: (focusProductIds
+              ? products.find(x => x.id === sp.product_id)?.name
+              : revenueTypes.find(x => x.id === sp.revenue_type_id)?.name) || 'Sem produto',
+            amount: sp.amount || 0,
+          }));
+      }
+
       if (!rateio) {
         return [{
           ...base, key: r.id, description: r.description || '—', origem: null as string | null,
@@ -135,7 +165,8 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
       if (va === vb) return 0;
       return (va > vb ? 1 : -1) * sort.dir;
     });
-  }, [records, sort, focusRubricIds, companies, suppliers, products, chartOfAccounts, revenueTypes]);
+  }, [records, sort, focusRubricIds, focusProductIds, focusRevenueTypeIds,
+      companies, suppliers, products, chartOfAccounts, revenueTypes]);
 
   const total = linhas.reduce((s, x) => s + x.amount, 0);
   const previsto = linhas.filter(x => isProjected(x.r)).reduce((s, x) => s + x.amount, 0);

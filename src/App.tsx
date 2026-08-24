@@ -615,6 +615,7 @@ const handleAddUser = async (newUser: User) => {
             setChartOfAccounts={setChartOfAccounts}
             companies={companies}
             setCompanies={setCompanies}
+            setSubscriptions={setSubscriptions}
             products={products}
             suppliers={suppliers}
             subscriptions={subscriptions}

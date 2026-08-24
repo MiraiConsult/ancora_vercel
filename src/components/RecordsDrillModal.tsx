@@ -273,7 +273,7 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
                     <td className="px-4 py-2.5 text-gray-600">{party}</td>
                     <td className="px-4 py-2.5 text-gray-600">{category}</td>
                     <td className="px-4 py-2.5 text-gray-400">
-                      {onEditProduct && !isProjected(r) && !key.includes('#') ? (
+                      {onEditProduct && !key.includes('#') ? (
                         <select
                           value={(produtoEditado[r.id] !== undefined ? produtoEditado[r.id] : r.product_id) || ''}
                           onChange={async e => {
@@ -291,7 +291,9 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
                             }
                           }}
                           className="w-full max-w-[190px] px-2 py-1 rounded-md border border-transparent bg-transparent text-gray-600 hover:border-gray-200 focus:border-mcsystem-500 focus:bg-white outline-none cursor-pointer"
-                          title="Trocar o produto deste lançamento"
+                          title={isProjected(r)
+                            ? 'Trocar o produto da assinatura — vale para todas as renovações'
+                            : 'Trocar o produto deste lançamento'}
                         >
                           <option value="">Sem produto</option>
                           {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}

@@ -27,6 +27,7 @@ interface FinanceDashboardProps {
   suppliers?: Supplier[];
   /** Assinaturas ativas — usadas para projetar o caixa além do que o Asaas já emitiu. */
   subscriptions?: Subscription[];
+  setSubscriptions?: React.Dispatch<React.SetStateAction<Subscription[]>>;
   currentUser: User;
   /** Aba inicial quando a navegação vem do menu lateral */
   initialTab?: MainTab;
@@ -119,6 +120,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
     products,
     suppliers,
     subscriptions = [],
+    setSubscriptions,
     currentUser,
     initialTab,
     hideTabs = false
@@ -1764,6 +1766,23 @@ const newRecords: FinancialRecord[] = [];
    * desfaria a escolha em até uma hora.
    */
   const handleDrillProductChange = async (record: FinancialRecord, productId: string | null) => {
+    // Renovação prevista não existe no banco: o produto dela vem da assinatura.
+    // Gravar lá acerta todas as renovações futuras de uma vez — e também as
+    // cobranças que o Asaas ainda vai emitir por ela.
+    if (isProjected(record)) {
+      const sub = subscriptions.find(x => x.asaas_id && x.asaas_id === record.asaas_subscription_id);
+      if (!sub) { alert('Não encontrei a assinatura desta renovação.'); return []; }
+      if (isMockUser) return [record.id];
+      const { error } = await supabase.from('subscriptions')
+        .update({ product_id: productId, product_manual: true })
+        .eq('id', sub.id);
+      if (error) { alert('Não foi possível trocar o produto da assinatura: ' + error.message); return []; }
+      setSubscriptions?.(list => list.map(x => x.id === sub.id
+        ? { ...x, product_id: (productId || undefined) as any, product_manual: true }
+        : x));
+      return [record.id];
+    }
+
     const gravar = async (ids: string[]) => {
       setRecords(list => list.map(x => ids.includes(x.id)
         ? { ...x, product_id: (productId || undefined) as any, product_manual: true }

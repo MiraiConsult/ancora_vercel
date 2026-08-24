@@ -242,12 +242,27 @@ Deno.serve(async (req: Request) => {
      * do Asaas na medida do que entra por aqui.
      */
     const DESCRICOES_IGNORADAS = ['farias advogados'];
-    const ehIgnorada = (descricao: unknown) => {
+
+    // Alguns clientes não têm marca na descrição: a cobrança sai como "Pix
+    // recebido", texto que também aparece em cobrança legítima. Aí o corte tem
+    // de ser pelo cliente, nunca pelo texto.
+    const CLIENTES_IGNORADOS = ['nexlex'];
+    const customersIgnorados = new Set(
+      asaasCustomers
+        .filter((c: any) => {
+          const nome = String(c.name || '').toLowerCase();
+          return CLIENTES_IGNORADOS.some((termo) => nome.includes(termo));
+        })
+        .map((c: any) => c.id),
+    );
+
+    const ehIgnorada = (descricao: unknown, customer?: unknown) => {
+      if (customer && customersIgnorados.has(customer as string)) return true;
       const d = String(descricao || '').toLowerCase();
       return DESCRICOES_IGNORADAS.some((termo) => d.includes(termo));
     };
 
-    const payments = (await asaasList('/payments')).filter((p: any) => !ehIgnorada(p.description));
+    const payments = (await asaasList('/payments')).filter((p: any) => !ehIgnorada(p.description, p.customer));
     const paymentRows = payments.map((p: any) => {
       const amount = Number(p.value) || 0;
 
@@ -303,7 +318,7 @@ Deno.serve(async (req: Request) => {
     // ---- 3) Subscriptions (assinaturas) ----
     // Mesma regra nas assinaturas: senão a ignorada continua na lista e segue
     // gerando cobrança visível.
-    const subs = (await asaasList('/subscriptions')).filter((s: any) => !ehIgnorada(s.description));
+    const subs = (await asaasList('/subscriptions')).filter((s: any) => !ehIgnorada(s.description, s.customer));
     const subRows = subs.map((s: any) => {
       // Mesma regra das cobranças: manual manda, depois o rateio, depois a descrição.
       const split = splitBySub.get(s.id);

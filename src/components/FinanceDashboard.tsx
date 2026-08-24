@@ -1758,6 +1758,22 @@ const newRecords: FinancialRecord[] = [];
     return ids.map(id => chartOfAccounts.find(c => c.id === id)).filter(Boolean) as ChartOfAccount[];
   };
 
+  /**
+   * Classificar o produto sem sair do relatório. product_manual trava o
+   * registro contra o sync horário do Asaas, que reclassifica pela descrição e
+   * desfaria a escolha em até uma hora.
+   */
+  const handleDrillProductChange = async (record: FinancialRecord, productId: string | null) => {
+    setRecords(list => list.map(x => x.id === record.id
+      ? { ...x, product_id: (productId || undefined) as any, product_manual: true }
+      : x));
+    if (isMockUser) return;
+    const { error } = await supabase.from('financial_records')
+      .update({ product_id: productId, product_manual: true })
+      .eq('id', record.id);
+    if (error) alert('Não foi possível trocar o produto: ' + error.message);
+  };
+
   // --- DRILL DOWN HANDLER (BUG FIX) ---
   /**
    * Abre o detalhe de um número do relatório.
@@ -3105,6 +3121,7 @@ const newRecords: FinancialRecord[] = [];
         )}
 
         <RecordsDrillModal
+          onEditProduct={handleDrillProductChange}
           open={isDrillDownOpen}
           onClose={() => setIsDrillDownOpen(false)}
           title={drillDownTitle}

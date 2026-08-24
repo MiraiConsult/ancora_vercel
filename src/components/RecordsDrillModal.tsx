@@ -46,6 +46,13 @@ interface RecordsDrillModalProps {
    */
   focusProductIds?: string[];
   focusRevenueTypeIds?: string[];
+  /**
+   * Habilita trocar o produto direto na lista. Sem isso a coluna é só texto —
+   * classificar exigia sair do relatório, achar o lançamento em Lançamentos e
+   * voltar. Não aparece em renovação prevista (não existe no banco) nem em
+   * linha de rateio (lá o produto está na fatia, não no lançamento).
+   */
+  onEditProduct?: (record: FinancialRecord, productId: string | null) => void | Promise<void>;
 }
 
 type SortKey = 'dueDate' | 'description' | 'party' | 'category' | 'status' | 'amount';
@@ -63,9 +70,15 @@ const STATUS_TONE: Record<string, string> = {
 export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
   open, onClose, title, subtitle, records, expectedTotal,
   companies = [], suppliers = [], products = [], chartOfAccounts = [], revenueTypes = [],
-  focusRubricIds, focusProductIds, focusRevenueTypeIds,
+  focusRubricIds, focusProductIds, focusRevenueTypeIds, onEditProduct,
 }) => {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'dueDate', dir: 1 });
+  /**
+   * A lista é um retrato tirado no clique — atualizar os lançamentos lá fora
+   * não a reescreve. Guardar aqui o que foi trocado mantém o select mostrando
+   * a escolha, sem fechar e reabrir o detalhe.
+   */
+  const [produtoEditado, setProdutoEditado] = useState<Record<string, string | null>>({});
 
   const hoje = new Date().toISOString().slice(0, 10);
 
@@ -259,7 +272,23 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
                     </td>
                     <td className="px-4 py-2.5 text-gray-600">{party}</td>
                     <td className="px-4 py-2.5 text-gray-600">{category}</td>
-                    <td className="px-4 py-2.5 text-gray-400">{product}</td>
+                    <td className="px-4 py-2.5 text-gray-400">
+                      {onEditProduct && !isProjected(r) && !key.includes('#') ? (
+                        <select
+                          value={(produtoEditado[r.id] !== undefined ? produtoEditado[r.id] : r.product_id) || ''}
+                          onChange={e => {
+                            const pid = e.target.value || null;
+                            setProdutoEditado(m => ({ ...m, [r.id]: pid }));
+                            onEditProduct(r, pid);
+                          }}
+                          className="w-full max-w-[190px] px-2 py-1 rounded-md border border-transparent bg-transparent text-gray-600 hover:border-gray-200 focus:border-mcsystem-500 focus:bg-white outline-none cursor-pointer"
+                          title="Trocar o produto deste lançamento"
+                        >
+                          <option value="">Sem produto</option>
+                          {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                      ) : product}
+                    </td>
                     <td className="px-4 py-2.5">
                       <span className={`px-2 py-0.5 rounded text-[11px] font-medium border ${STATUS_TONE[status] || 'bg-gray-50 text-gray-600 border-gray-100'}`}>{status}</span>
                     </td>

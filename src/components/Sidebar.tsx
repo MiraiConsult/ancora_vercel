@@ -3,7 +3,7 @@
 import React from 'react';
 import {
   UserCog, LogOut, Bell, Database, ChevronsLeft, Zap, X,
-  LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Tags, FileSignature, Wallet, ShieldCheck,
+  LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Tags, FileSignature, Wallet,
   FileBarChart,
 } from 'lucide-react';
 import { User } from '../types';
@@ -18,7 +18,6 @@ interface SidebarProps {
   unreadCount: number;
   pendingValidationCount?: number;
   overduePayablesCount?: number;
-  pendingApprovalCount?: number;
   isCollapsed: boolean;
   onToggle: () => void;
   /** Gaveta aberta no celular. Acima de lg o menu é fixo e isso não vale. */
@@ -26,7 +25,7 @@ interface SidebarProps {
   onCloseMobile?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, currentUser, onLogout, unreadCount, pendingValidationCount = 0, overduePayablesCount = 0, pendingApprovalCount = 0, isCollapsed, onToggle, mobileOpen = false, onCloseMobile }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, currentUser, onLogout, unreadCount, pendingValidationCount = 0, overduePayablesCount = 0, isCollapsed, onToggle, mobileOpen = false, onCloseMobile }) => {
   const isAdmin = currentUser.role === 'admin';
   // Recolhido é um estado de desktop. Na gaveta o menu é largo, então mostrar
   // só ícones ali deixaria uma faixa de 256px com o conteúdo de 80px.
@@ -47,7 +46,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
         ...(isAsaasEnabled(currentUser.tenant_id) ? [{ id: 'billing', label: 'Cobranças', icon: Zap, perm: 'billing' }] : []),
         { id: 'payables', label: 'Contas a Pagar', icon: Wallet, perm: 'finance', badge: overduePayablesCount },
         { id: 'contracts', label: 'Contratos', icon: FileSignature, perm: 'contracts' },
-        { id: 'approvals', label: 'Autorizações', icon: ShieldCheck, perm: 'finance', badge: pendingApprovalCount },
       ],
     },
     {

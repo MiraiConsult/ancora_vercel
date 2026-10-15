@@ -118,6 +118,13 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
   const rubricName = (id?: string) => chartOfAccounts.find(c => c.id === id)?.rubricName;
 
   /**
+   * Se o valor existe no Asaas. Na renovação prevista, é a assinatura que
+   * decide: sem id do Asaas, ela foi cadastrada à mão e ninguém vai cobrar.
+   */
+  const origemOf = (r: FinancialRecord) =>
+    r.asaas_payment_id || r.asaas_subscription_id || r.asaas_bill_id || r.asaas_transfer_id ? 'Asaas' : 'Manual';
+
+  /**
    * Lançamento rateado entre rubricas vira uma linha por fatia, com a descrição
    * e a rubrica daquela fatia. Antes ele aparecia inteiro, com as rubricas
    * concatenadas e o valor cheio — quem clicou numa rubrica via um número que
@@ -195,12 +202,12 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
   const divergente = expectedTotal !== undefined && Math.abs(total - expectedTotal) > 0.01;
 
   const exportar = () => {
-    const head = ['Vencimento', 'Competência', 'Descrição', 'Cliente/Fornecedor', 'Categoria', 'Produto', 'Status', 'Valor'];
+    const head = ['Vencimento', 'Competência', 'Descrição', 'Cliente/Fornecedor', 'Categoria', 'Produto', 'Status', 'Origem', 'Valor'];
     const body = linhas.map(x => [
       fmtDate(x.r.dueDate), fmtDate(x.r.competenceDate), x.description,
-      x.party, x.category, x.product, x.status, x.amount,
+      x.party, x.category, x.product, x.status, origemOf(x.r), x.amount,
     ]);
-    const ws = XLSX.utils.aoa_to_sheet([[title], subtitle ? [subtitle] : [], head, ...body, [], ['TOTAL', '', '', '', '', '', '', total]]);
+    const ws = XLSX.utils.aoa_to_sheet([[title], subtitle ? [subtitle] : [], head, ...body, [], ['TOTAL', '', '', '', '', '', '', '', total]]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Detalhe');
     XLSX.writeFile(wb, `detalhe-${title.replace(/[^\w]+/g, '-').toLowerCase()}.xlsx`);
@@ -257,6 +264,7 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
                   <Th k="category">Categoria</Th>
                   <th className="px-4 py-2.5 font-semibold text-left">Produto</th>
                   <Th k="status">Status</Th>
+                  <th className="px-4 py-2.5 font-semibold text-left">Origem</th>
                   <Th k="amount" align="text-right">Valor</Th>
                   {onEditRecord && <th className="px-2 py-2.5 w-10" />}
                 </tr>
@@ -309,6 +317,12 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
                     <td className="px-4 py-2.5">
                       <span className={`px-2 py-0.5 rounded text-[11px] font-medium border ${STATUS_TONE[status] || 'bg-gray-50 text-gray-600 border-gray-100'}`}>{status}</span>
                     </td>
+                    <td className="px-4 py-2.5">
+                      {origemOf(r) === 'Asaas'
+                        ? <span className="px-2 py-0.5 rounded text-[11px] font-medium border bg-blue-50 text-blue-700 border-blue-100">Asaas</span>
+                        : <span title="Não existe no Asaas — ninguém vai emitir esta cobrança"
+                            className="px-2 py-0.5 rounded text-[11px] font-medium border bg-gray-50 text-gray-600 border-gray-200">Manual</span>}
+                    </td>
                     <td className={`px-4 py-2.5 text-right font-semibold tabular-nums whitespace-nowrap ${amount >= 0 ? 'text-green-700' : 'text-red-600'}`}>
                       {brl(amount)}
                     </td>
@@ -330,7 +344,7 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
               </tbody>
               <tfoot className="bg-gray-50 sticky bottom-0">
                 <tr className="font-bold text-gray-800">
-                  <td className="px-4 py-3" colSpan={7}>
+                  <td className="px-4 py-3" colSpan={8}>
                     {qtdLancamentos} lançamento(s)
                     {linhas.length > qtdLancamentos && <span className="ml-2 font-normal text-xs text-gray-500">em {linhas.length} linhas de rateio</span>}
                     {previsto !== 0 && <span className="ml-2 font-normal text-xs text-blue-600">inclui {brl(previsto)} de renovações previstas</span>}
@@ -340,7 +354,7 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
                 </tr>
                 {divergente && (
                   <tr className="text-[11px] text-gray-500">
-                    <td className="px-4 pb-3" colSpan={onEditRecord ? 9 : 8}>
+                    <td className="px-4 pb-3" colSpan={onEditRecord ? 10 : 9}>
                       O número clicado é {brl(expectedTotal!)} e a lista soma {brl(total)}. A diferença costuma ser
                       rateio por produto, que divide o valor sem dividir o lançamento.
                     </td>

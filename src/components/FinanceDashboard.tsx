@@ -1854,9 +1854,9 @@ const newRecords: FinancialRecord[] = [];
       const alvo = dateKeys.reduce((a, k) => a + (node.values[k] || 0), 0);
       if (!alvo) return;
   
-      // A célula do caixa pode conter renovação prevista; a lista tem que
-      // mostrar as mesmas linhas, senão o detalhe não fecha com o total.
-      const fonte = mode === 'CASHFLOW' && includeProjections
+      // A célula pode conter renovação prevista; a lista tem que mostrar as
+      // mesmas linhas, senão o detalhe não fecha com o total.
+      const fonte = mode === 'DRE' || includeProjections
         ? [...validRecords, ...projectedRecords]
         : validRecords;
       const recordsToDisplay = fonte.filter(r => {
@@ -2156,10 +2156,12 @@ const newRecords: FinancialRecord[] = [];
       const primaryKeys = primaryPeriod.months.map(m => `${primaryPeriod.year}-${String(m).padStart(2, '0')}`);
       const compareKeys = isCompareEnabled ? comparePeriod.months.map(m => `${comparePeriod.year}-${String(m).padStart(2, '0')}`) : [];
       /**
-       * As renovações previstas entram só no caixa, e só quando se pede o que
-       * ainda não foi pago. O DRE é competência e vive do que foi lançado.
+       * Renovações previstas: no caixa, só quando se pede o que ainda não foi
+       * pago. No DRE sempre — ele já mostra a despesa futura lançada, e sem a
+       * receita das assinaturas os meses à frente do último lote do Asaas
+       * pareciam uma queda de faturamento que não existe.
        */
-      const baseRecords = mode === 'CASHFLOW' && includeProjections
+      const baseRecords = mode === 'DRE' || includeProjections
         ? [...validRecords, ...projectedRecords]
         : validRecords;
       const hierarchy: any[] = []; const netResult: Record<string, number> = {}; const prevNetResult: Record<string, number> = {};

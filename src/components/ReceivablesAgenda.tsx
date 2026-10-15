@@ -3,7 +3,7 @@ import { FinancialRecord, Company, Product } from '../types';
 import { asaasCustomerContacts, AsaasContact } from '../services/asaasService';
 import {
   AlertTriangle, CalendarClock, CheckCircle2, ExternalLink, MessageCircle, Loader2,
-  Search, Copy, Check, Phone, ChevronDown, QrCode,
+  Search, Copy, Check, Phone, ChevronDown, QrCode, Pencil, Trash2,
 } from 'lucide-react';
 import { ChargeShareModal } from './ChargeShareModal';
 
@@ -11,6 +11,9 @@ interface ReceivablesAgendaProps {
   records: FinancialRecord[];
   companies: Company[];
   products: Product[];
+  /** Mesmas ações da aba de assinaturas, para não ter que trocar de aba. */
+  onEditCharge?: (r: FinancialRecord) => void;
+  onDeleteCharge?: (r: FinancialRecord) => void;
 }
 
 const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
@@ -56,7 +59,7 @@ const buildMessage = (clientName: string, r: FinancialRecord, late: number) => {
   ].join('\n');
 };
 
-export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, companies, products }) => {
+export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, companies, products, onEditCharge, onDeleteCharge }) => {
   const [contacts, setContacts] = useState<Record<string, AsaasContact>>({});
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [contactError, setContactError] = useState<string | null>(null);
@@ -185,6 +188,18 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
                 className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
                 <ExternalLink size={15} />
               </a>
+            )}
+            {onEditCharge && (
+              <button onClick={() => onEditCharge(r)} title="Editar cobrança"
+                className="p-2 text-gray-400 hover:text-mcsystem-600 hover:bg-gray-100 rounded-lg">
+                <Pencil size={15} />
+              </button>
+            )}
+            {onDeleteCharge && (
+              <button onClick={() => onDeleteCharge(r)} title="Excluir cobrança (também no Asaas)"
+                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                <Trash2 size={15} />
+              </button>
             )}
           </div>
         </div>

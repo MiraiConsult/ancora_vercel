@@ -397,7 +397,8 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
 
       {/* Content */}
       {tab === 'AGENDA' ? (
-        <ReceivablesAgenda records={financeRecords} companies={companies} products={products} />
+        <ReceivablesAgenda records={financeRecords} companies={companies} products={products}
+          onEditCharge={setEditCharge} onDeleteCharge={handleDeleteCharge} />
       ) : (
         <>
           <BillingProjection charges={charges} subscriptions={subscriptions} products={products} companies={companies} />

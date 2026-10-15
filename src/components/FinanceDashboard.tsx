@@ -1473,7 +1473,13 @@ const newRecords: FinancialRecord[] = [];
         if (editingTransactionId) { 
             const original = records.find(rec => rec.id === editingTransactionId);
             if (!original) return;
-            const finalRecord: FinancialRecord = { ...original, ...transactionToSave };
+            const finalRecord: FinancialRecord = {
+                ...original, ...transactionToSave,
+                // Cobrança do Asaas editada à mão: o sync passa a repetir
+                // produto e rubrica escolhidos, em vez de reclassificar pela
+                // descrição na rodada seguinte.
+                ...(original.asaas_payment_id ? { product_manual: true } : {}),
+            };
 
             console.log('[DEBUG EDIT] newRecord.amount:', newRecord.amount, 'type:', typeof newRecord.amount);
             console.log('[DEBUG EDIT] finalAmount:', finalAmount, 'calculatedAmount:', calculatedAmount);
@@ -1820,6 +1826,21 @@ const newRecords: FinancialRecord[] = [];
     const ids = iguais.map(x => x.id);
     return await gravar(ids) ? [record.id, ...ids] : [record.id];
   };
+
+  /**
+   * O detalhe é um retrato tirado no clique. Editar um lançamento por ele tem
+   * que aparecer na lista na hora, e o número clicado deixa de servir de
+   * referência para o rodapé — o relatório já foi recalculado.
+   */
+  useEffect(() => {
+    if (!isDrillDownOpen) return;
+    const porId = new Map(records.map(r => [r.id, r]));
+    const atual = drillDownRecords.flatMap(r =>
+      isProjected(r) ? [r] : porId.has(r.id) ? [porId.get(r.id)!] : []);
+    if (atual.length === drillDownRecords.length && atual.every((r, i) => r === drillDownRecords[i])) return;
+    setDrillDownRecords(atual);
+    setDrillDownExpected(undefined);
+  }, [records]);
 
   // --- DRILL DOWN HANDLER (BUG FIX) ---
   /**
@@ -3169,6 +3190,7 @@ const newRecords: FinancialRecord[] = [];
 
         <RecordsDrillModal
           onEditProduct={handleDrillProductChange}
+          onEditRecord={r => (r.seriesId ? setEditChoiceModal({ isOpen: true, record: r }) : openSingleRecordEditor(r))}
           open={isDrillDownOpen}
           onClose={() => setIsDrillDownOpen(false)}
           title={drillDownTitle}

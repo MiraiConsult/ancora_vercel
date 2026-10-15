@@ -5,13 +5,13 @@
  * Pagar — antes cada tela tinha (ou não tinha) o seu, e quem clicava num total
  * do DRE via uma lista diferente da do Fluxo para o mesmo lançamento.
  *
- * Aqui é só leitura. Editar um lançamento se faz em Lançamentos, e a lista
- * inclui renovações previstas, que sequer existem no banco.
+ * Quem abre pode passar `onEditRecord` para editar o lançamento sem sair do
+ * relatório. Renovação prevista não tem edição: ela não existe no banco.
  */
 
 import React, { useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { ArrowDown, ArrowUp, ArrowUpDown, CalendarClock, Download, List, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, CalendarClock, Download, List, Pencil, X } from 'lucide-react';
 import { ChartOfAccount, Company, FinancialRecord, Product, RevenueType, Supplier, TransactionStatus } from '../types';
 import { isProjected } from '../lib/subscriptionProjection';
 
@@ -53,6 +53,11 @@ interface RecordsDrillModalProps {
    * linha de rateio (lá o produto está na fatia, não no lançamento).
    */
   onEditProduct?: (record: FinancialRecord, productId: string | null) => Promise<string[] | void> | void;
+  /**
+   * Abre o formulário completo do lançamento. Linha de rateio edita o
+   * lançamento inteiro — a fatia não existe sozinha.
+   */
+  onEditRecord?: (record: FinancialRecord) => void;
 }
 
 type SortKey = 'dueDate' | 'description' | 'party' | 'category' | 'status' | 'amount';
@@ -70,7 +75,7 @@ const STATUS_TONE: Record<string, string> = {
 export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
   open, onClose, title, subtitle, records, expectedTotal,
   companies = [], suppliers = [], products = [], chartOfAccounts = [], revenueTypes = [],
-  focusRubricIds, focusProductIds, focusRevenueTypeIds, onEditProduct,
+  focusRubricIds, focusProductIds, focusRevenueTypeIds, onEditProduct, onEditRecord,
 }) => {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'dueDate', dir: 1 });
   /**
@@ -253,6 +258,7 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
                   <th className="px-4 py-2.5 font-semibold text-left">Produto</th>
                   <Th k="status">Status</Th>
                   <Th k="amount" align="text-right">Valor</Th>
+                  {onEditRecord && <th className="px-2 py-2.5 w-10" />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -306,6 +312,19 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
                     <td className={`px-4 py-2.5 text-right font-semibold tabular-nums whitespace-nowrap ${amount >= 0 ? 'text-green-700' : 'text-red-600'}`}>
                       {brl(amount)}
                     </td>
+                    {onEditRecord && (
+                      <td className="px-2 py-2.5 text-center">
+                        {!isProjected(r) && (
+                          <button
+                            onClick={() => onEditRecord(r)}
+                            title="Editar lançamento"
+                            className="p-1.5 rounded-md text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -317,10 +336,11 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
                     {previsto !== 0 && <span className="ml-2 font-normal text-xs text-blue-600">inclui {brl(previsto)} de renovações previstas</span>}
                   </td>
                   <td className={`px-4 py-3 text-right tabular-nums ${total >= 0 ? 'text-green-700' : 'text-red-600'}`}>{brl(total)}</td>
+                  {onEditRecord && <td />}
                 </tr>
                 {divergente && (
                   <tr className="text-[11px] text-gray-500">
-                    <td className="px-4 pb-3" colSpan={8}>
+                    <td className="px-4 pb-3" colSpan={onEditRecord ? 9 : 8}>
                       O número clicado é {brl(expectedTotal!)} e a lista soma {brl(total)}. A diferença costuma ser
                       rateio por produto, que divide o valor sem dividir o lançamento.
                     </td>

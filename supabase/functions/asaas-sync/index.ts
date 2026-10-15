@@ -78,6 +78,14 @@ function mapBillStatus(s: string): string | null {
   return 'Pendente';
 }
 
+// Apaga em lotes: .in() com centenas de ids estoura o tamanho da URL.
+async function deleteIn(admin: any, table: string, ids: string[]) {
+  for (let i = 0; i < ids.length; i += 100) {
+    const { error } = await admin.from(table).delete().in('id', ids.slice(i, i + 100));
+    if (error) throw new Error(`Erro ao remover de ${table}: ` + error.message);
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -118,7 +126,10 @@ Deno.serve(async (req: Request) => {
       throw new Error('Não autorizado.');
     }
 
-    const counts = { customers_new: 0, customers_linked: 0, payments: 0, subscriptions: 0, bills: 0 };
+    const counts = {
+      customers_new: 0, customers_linked: 0, payments: 0, subscriptions: 0, bills: 0,
+      payments_removed: 0, subscriptions_removed: 0,
+    };
 
     // ---- 1) Customers ----
     const asaasCustomers = await asaasList('/customers');
@@ -256,13 +267,24 @@ Deno.serve(async (req: Request) => {
         .map((c: any) => c.id),
     );
 
-    const ehIgnorada = (descricao: unknown, customer?: unknown) => {
+    // Cobranças e assinaturas tiradas do sistema uma a uma (cliente que saiu,
+    // mês que não vale). Ficam no Asaas, então sem esta lista o upsert as
+    // traria de volta na rodada seguinte.
+    const { data: ignoradosRows } = await admin.from('asaas_ignored')
+      .select('asaas_id').eq('tenant_id', tenantId);
+    const idsIgnorados = new Set((ignoradosRows || []).map((r: any) => r.asaas_id));
+
+    const ehIgnorada = (descricao: unknown, customer?: unknown, asaasId?: unknown) => {
+      if (asaasId && idsIgnorados.has(asaasId as string)) return true;
       if (customer && customersIgnorados.has(customer as string)) return true;
       const d = String(descricao || '').toLowerCase();
       return DESCRICOES_IGNORADAS.some((termo) => d.includes(termo));
     };
 
-    const payments = (await asaasList('/payments')).filter((p: any) => !ehIgnorada(p.description, p.customer));
+    // A listagem completa, antes do filtro, é a referência do que ainda existe
+    // no Asaas. Cobrança apagada lá não vem nela.
+    const allPayments = (await asaasList('/payments')).filter((p: any) => !p.deleted);
+    const payments = allPayments.filter((p: any) => !ehIgnorada(p.description, p.customer, p.id));
     const paymentRows = payments.map((p: any) => {
       const amount = Number(p.value) || 0;
 
@@ -280,6 +302,10 @@ Deno.serve(async (req: Request) => {
         // product_id fica com a maior fatia: os relatórios usam o rateio, mas
         // as listagens caem no product_id quando não olham o split.
         productId = split.reduce((a, b) => (b.amount > a.amount ? b : a), split[0])?.product_id || null;
+      } else if (p.subscription && manualSub.get(p.subscription)) {
+        // Produto escolhido na assinatura vale para as cobranças que ela emite.
+        productId = manualSub.get(p.subscription)!;
+        split = null;
       } else {
         productId = matchProduct(p.description);
         split = null;
@@ -315,10 +341,27 @@ Deno.serve(async (req: Request) => {
       counts.payments = paymentRows.length;
     }
 
+    // Cobrança apagada no Asaas não aparece mais na listagem e o upsert não
+    // tem como tirá-la daqui: ficava "Pendente" para sempre, inflando
+    // faturamento e inadimplência. Remove o que não existe mais lá.
+    // Pago nunca é tocado (o Asaas não deixa apagar cobrança recebida), e
+    // listagem vazia não apaga nada — pode ser falha, não conta zerada.
+    if (allPayments.length) {
+      const vivos = new Set(allPayments.map((p: any) => p.id));
+      const { data: locais } = await admin.from('financial_records')
+        .select('id, asaas_payment_id')
+        .eq('tenant_id', tenantId).eq('type', 'Receita').neq('status', 'Pago')
+        .not('asaas_payment_id', 'is', null);
+      const orfas = (locais || []).filter((r: any) => !vivos.has(r.asaas_payment_id)).map((r: any) => r.id);
+      await deleteIn(admin, 'financial_records', orfas);
+      counts.payments_removed = orfas.length;
+    }
+
     // ---- 3) Subscriptions (assinaturas) ----
     // Mesma regra nas assinaturas: senão a ignorada continua na lista e segue
     // gerando cobrança visível.
-    const subs = (await asaasList('/subscriptions')).filter((s: any) => !ehIgnorada(s.description, s.customer));
+    const allSubs = (await asaasList('/subscriptions')).filter((s: any) => !s.deleted);
+    const subs = allSubs.filter((s: any) => !ehIgnorada(s.description, s.customer, s.id));
     const subRows = subs.map((s: any) => {
       // Mesma regra das cobranças: manual manda, depois o rateio, depois a descrição.
       const split = splitBySub.get(s.id);
@@ -347,6 +390,17 @@ Deno.serve(async (req: Request) => {
       const { error } = await admin.from('subscriptions').upsert(subRows, { onConflict: 'asaas_id' });
       if (error) throw new Error('Erro ao gravar assinaturas: ' + error.message);
       counts.subscriptions = subRows.length;
+    }
+
+    // Assinatura excluída no Asaas ficava ACTIVE aqui e seguia projetando
+    // receita. Mesma regra das cobranças: some o que não existe mais lá.
+    if (allSubs.length) {
+      const vivas = new Set(allSubs.map((s: any) => s.id));
+      const { data: locais } = await admin.from('subscriptions')
+        .select('id, asaas_id').eq('tenant_id', tenantId).not('asaas_id', 'is', null);
+      const orfas = (locais || []).filter((s: any) => !vivas.has(s.asaas_id)).map((s: any) => s.id);
+      await deleteIn(admin, 'subscriptions', orfas);
+      counts.subscriptions_removed = orfas.length;
     }
 
     // ---- 4) Bills (contas pagas pelo Asaas) ----

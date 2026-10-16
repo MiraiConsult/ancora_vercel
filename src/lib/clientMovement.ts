@@ -42,7 +42,8 @@ export const MOVEMENT_SCOPES: MovementScope[] = [
 
 export const normName = (s?: string) => (s || '').toLowerCase().normalize('NFD').replace(/[^a-z0-9]/g, '');
 
-const shift = (key: string, n: number) => {
+/** Soma n meses a uma chave 'YYYY-MM'. */
+export const shiftMes = (key: string, n: number) => {
   const [y, m] = key.split('-').map(Number);
   const t = y * 12 + (m - 1) + n;
   return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`;
@@ -97,9 +98,9 @@ export function computeMovement(
 
   const out: MovementMonth[] = [];
   for (let i = meses - 1; i >= 0; i--) {
-    const mes = shift(atual, -i);
+    const mes = shiftMes(atual, -i);
     const curr = porMes.get(mes) || new Set<string>();
-    const prev = porMes.get(shift(mes, -1)) || new Set<string>();
+    const prev = porMes.get(shiftMes(mes, -1)) || new Set<string>();
     const ativos = [...curr];
     out.push({
       mes,

@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { ChevronDown, Check, ArrowUp, ArrowDown, X, ExternalLink } from 'lucide-react';
 import { ClientMovement } from './ClientMovement';
-import { computeMovement, MOVEMENT_SCOPES } from '../lib/clientMovement';
+import { computeMovement, MOVEMENT_SCOPES, normName, shiftMes } from '../lib/clientMovement';
 
 interface OverviewDashboardProps {
   records: FinancialRecord[];
@@ -319,7 +319,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
   const siglaCli = useMemo(() => buildSiglas(derived.clientProdNames), [derived.clientProdNames]);
 
   // ---- Drill-down dos KPIs ----
-  const [drill, setDrill] = useState<null | { title: string; rows: DrillRow[]; goTo?: string }>(null);
+  const [drill, setDrill] = useState<null | { title: string; rows: DrillRow[]; goTo?: string; semMeses?: boolean }>(null);
 
   const inPeriod = (r: FinancialRecord) => {
     const d = r.dueDate || '';
@@ -339,48 +339,38 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     validRecords.filter(r => r.amount >= 0 && inPeriod(r) && incomeUnderFilter(r) !== 0 && (!extra || extra(r)))
       .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '')).map(toRow);
 
-  const openDrill = (title: string, rows: DrillRow[], goTo?: string) => setDrill({ title, rows, goTo });
+  /** semMeses: a data da linha não é competência (ex.: próximo vencimento), então não vira evolução mensal. */
+  const openDrill = (title: string, rows: DrillRow[], goTo?: string, semMeses?: boolean) => setDrill({ title, rows, goTo, semMeses });
 
   // Receita por cliente por mês — base para o drill de churn
-  const clientRevByMonth = useMemo(() => {
-    const map = new Map<string, Map<string, number>>();
-    validRecords.forEach(r => {
-      if (r.amount < 0 || !r.companyId) return;
-      const val = incomeUnderFilter(r);
-      if (val === 0) return;
-      const mk = (r.dueDate || '').slice(0, 7);
-      if (!mk) return;
-      if (!map.has(mk)) map.set(mk, new Map());
-      const inner = map.get(mk)!;
-      inner.set(r.companyId, (inner.get(r.companyId) || 0) + val);
-    });
-    return map;
-  }, [validRecords, productSet, products]);
-
-  // Clientes perdidos no período + quanto de receita saiu com eles
+  /**
+   * Clientes que saíram + quanto faturavam no último mês antes de sair.
+   * Mesma regra da seção "Clientes: entradas e saídas" (movGeral): devedor de
+   * acordo não é cliente, e mês é competência.
+   */
   const churnedRows = useMemo((): DrillRow[] => {
-    const now = new Date();
-    const nowKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const out: DrillRow[] = [];
-    monthsSorted.forEach(mi => {
-      const mk = `${year}-${String(mi).padStart(2, '0')}`;
-      if (mk > nowKey) return;
-      const prevDate = new Date(year, mi - 2, 1);
-      const prevKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
-      const prev = clientsByMonth.get(prevKey) || new Set<string>();
-      const curr = clientsByMonth.get(mk) || new Set<string>();
-      Array.from(prev).filter(c => !curr.has(c)).forEach(cid => {
-        out.push({
-          id: `${mk}-${cid}`,
-          label: companyName(cid),
-          sub: `Última cobrança em ${MONTHS[parseInt(prevKey.slice(5, 7)) - 1]}`,
-          date: `${mk}-01`,
-          value: clientRevByMonth.get(prevKey)?.get(cid) || 0,
-        });
-      });
+    const acordo = new Set(products.filter(p => normName(p.name) === 'acordo').map(p => p.id));
+    const receita = new Map<string, number>();
+    validRecords.forEach(r => {
+      if (r.amount <= 0 || !r.companyId) return;
+      const val = r.split_revenue?.length
+        ? r.split_revenue.filter(sp => !(sp.product_id && acordo.has(sp.product_id))).reduce((a, sp) => a + (sp.amount || 0), 0)
+        : (r.product_id && acordo.has(r.product_id) ? 0 : r.amount);
+      if (!val) return;
+      const k = `${(r.competenceDate || r.dueDate || '').slice(0, 7)}|${r.companyId}`;
+      receita.set(k, (receita.get(k) || 0) + val);
     });
-    return out.sort((a, b) => b.value - a.value);
-  }, [monthsSorted, year, clientsByMonth, clientRevByMonth, companies]);
+    return movGeral.flatMap(m => {
+      const anterior = shiftMes(m.mes, -1);
+      return m.sairam.map(cid => ({
+        id: `${m.mes}-${cid}`,
+        label: companyName(cid),
+        sub: `Última cobrança em ${MONTHS[parseInt(anterior.slice(5, 7)) - 1]}/${anterior.slice(2, 4)}`,
+        date: `${m.mes}-01`,
+        value: receita.get(`${anterior}|${cid}`) || 0,
+      }));
+    }).sort((a, b) => b.value - a.value);
+  }, [movGeral, validRecords, products, companies]);
 
   const monthsLabel = monthsSorted.length === 12 ? 'Ano cheio'
     : monthsSorted.length === 1 ? MONTHS[monthsSorted[0] - 1]
@@ -497,7 +487,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
                   id: s.id, label: s.description || 'Assinatura', sub: companyName(s.client_id),
                   tag: productName(s.product_id) || undefined, date: s.next_due_date,
                   value: s.value || 0, status: s.cycle,
-                })), 'billing')} />
+                })), 'billing', true)} />
             <Kpi label="Clientes ativos" value={String(recurring.activeSubscribers)} hint={`+${derived.newLastMonth} no último mês`}
               onClick={() => openDrill('Clientes com assinatura ativa', recurring.activeClientList, 'companies')} />
           </div>
@@ -596,6 +586,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
         <DrillModal
           title={drill.title}
           rows={drill.rows}
+          semMeses={drill.semMeses}
           onClose={() => setDrill(null)}
           onGoTo={drill.goTo && onNavigate ? () => { onNavigate(drill.goTo!); setDrill(null); } : undefined}
         />
@@ -626,10 +617,12 @@ const statusChip = (s?: string) => {
   return <span className={`text-[11px] font-medium px-2 py-0.5 rounded-md ${map[s] || 'text-gray-500 bg-gray-100'}`}>{s}</span>;
 };
 
-const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => void; onGoTo?: () => void }> = ({ title, rows, onClose, onGoTo }) => {
+const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => void; onGoTo?: () => void; semMeses?: boolean }> = ({ title, rows, onClose, onGoTo, semMeses }) => {
   const [tab, setTab] = useState<'CHART' | 'LIST'>('CHART');
   /** Produto clicado no gráfico: abre a tabela de clientes ao lado. */
   const [produtoSel, setProdutoSel] = useState<string | null>(null);
+  /** Mês clicado na evolução mensal: lista as linhas dele logo abaixo. */
+  const [mesSel, setMesSel] = useState<string | null>(null);
   const total = rows.reduce((s, r) => s + r.value, 0);
 
   useEffect(() => {
@@ -647,8 +640,12 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
       m.set(k, (m.get(k) || 0) + r.value);
     });
     return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([k, v]) => ({ month: MONTHS[parseInt(k.slice(5, 7)) - 1] || k, value: v }));
+      .map(([k, v]) => ({ key: k, month: MONTHS[parseInt(k.slice(5, 7)) - 1] || k, value: v }));
   }, [rows]);
+
+  const linhasDoMes = useMemo(() => (mesSel
+    ? rows.filter(r => (r.date || '').startsWith(mesSel)).sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+    : []), [rows, mesSel]);
 
   // Quebra por produto
   const byTag = useMemo(() => {
@@ -682,7 +679,7 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
       .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
   }, [rows, produtoSel]);
 
-  const hasMonth = byMonth.length > 1;
+  const hasMonth = !semMeses && byMonth.length > 1;
   const hasTag = byTag.length > 1;
   const hasCharts = hasMonth || hasTag;
 
@@ -729,7 +726,7 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
               {hasMonth && (
                 <div>
                   <h4 className="text-sm font-semibold text-gray-800 mb-1">Evolução mensal</h4>
-                  <p className="text-xs text-gray-400 mb-3">Distribuição do valor ao longo dos meses</p>
+                  <p className="text-xs text-gray-400 mb-3">Distribuição do valor ao longo dos meses · clique num mês para ver o detalhe</p>
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={byMonth} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
@@ -737,13 +734,51 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
                         <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
                         <YAxis tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} width={54} />
                         <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
-                        <Bar dataKey="value" name="Valor" radius={[4, 4, 0, 0]} maxBarSize={34}
+                        <Bar dataKey="value" name="Valor" radius={[4, 4, 0, 0]} maxBarSize={34} cursor="pointer"
+                          onClick={(d: any) => setMesSel(m => (m === d?.key ? null : d?.key ?? null))}
                           label={{ position: 'top', formatter: (v: any) => brlShort(v), fontSize: 10, fill: INK.muted }}>
-                          {byMonth.map((d, i) => <Cell key={i} fill={d.value < 0 ? STATUS.critical : SERIES[0]} />)}
+                          {byMonth.map((d, i) => (
+                            <Cell key={i} fill={d.value < 0 ? STATUS.critical : SERIES[0]}
+                              fillOpacity={mesSel && mesSel !== d.key ? 0.3 : 1} />
+                          ))}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
+                  {mesSel && (
+                    <div className="mt-4 border border-gray-100 rounded-xl overflow-hidden">
+                      <div className="px-4 py-2.5 bg-gray-50 flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-gray-800">
+                          {MONTHS[parseInt(mesSel.slice(5, 7)) - 1]}/{mesSel.slice(2, 4)} · {linhasDoMes.length} registro(s) · {brlExact(linhasDoMes.reduce((a, r) => a + r.value, 0))}
+                        </span>
+                        <button onClick={() => setMesSel(null)} title="Fechar"
+                          className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-md"><X size={14} /></button>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto">
+                        <table className="w-full text-sm">
+                          <tbody className="divide-y divide-gray-100">
+                            {linhasDoMes.map(r => (
+                              <tr key={r.id} className="hover:bg-gray-50">
+                                <td className="px-4 py-2">
+                                  <div className="font-medium text-gray-800">{r.label}</div>
+                                  {(r.sub || r.tag) && (
+                                    <div className="text-xs text-gray-400 flex items-center gap-2 mt-0.5">
+                                      {r.sub}
+                                      {r.tag && <span className="text-[11px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{r.tag}</span>}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2 w-24">{statusChip(r.status)}</td>
+                                <td className={`px-4 py-2 text-right tabular-nums font-semibold whitespace-nowrap ${r.value < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                                  {brlExact(r.value)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -7,6 +7,9 @@
  *
  * MDT: a receita dos acordos não é toda da Mirai. Do que o devedor paga, 80%
  * vai para o cliente credor e 2% para o Diego da BR Clin; fica 18%.
+ *
+ * Desde a competência set/2026 (pago em out) o Diego da BR Clin também recebe
+ * 10% das mensalidades do Hello Growth e do MDT Cobranças.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -28,12 +31,18 @@ const REPASSE_BRCLIN = 0.02;
 
 type SistemaKey = 'HG' | 'KAIVAA' | 'MDT';
 
-const SISTEMAS: { key: SistemaKey; nome: string; produtos: string[]; acordo?: string[] }[] = [
+/** Parte das mensalidades que vai ao Diego da BR Clin, a partir de um mês. */
+interface RepasseMensalidade { pct: number; desde: string }
+// Competência: o pago em out/2026 é o de set/2026 — o repasse de cada mês sai
+// no mês seguinte.
+const BRCLIN_MENSALIDADE: RepasseMensalidade = { pct: 0.10, desde: '2026-09' };
+
+const SISTEMAS: { key: SistemaKey; nome: string; produtos: string[]; acordo?: string[]; repasse?: RepasseMensalidade }[] = [
   // Hello Rating foi absorvido pelo Hello Growth; o que sobrar com o nome
   // antigo continua contando aqui.
-  { key: 'HG', nome: 'Hello Growth', produtos: ['hellogrowth', 'hellorating'] },
+  { key: 'HG', nome: 'Hello Growth', produtos: ['hellogrowth', 'hellorating'], repasse: BRCLIN_MENSALIDADE },
   { key: 'KAIVAA', nome: 'Kaivaa', produtos: ['kaivaa'] },
-  { key: 'MDT', nome: 'MDT Cobranças', produtos: ['mdtcobrancas'], acordo: ['acordo'] },
+  { key: 'MDT', nome: 'MDT Cobranças', produtos: ['mdtcobrancas'], acordo: ['acordo'], repasse: BRCLIN_MENSALIDADE },
 ];
 
 const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
@@ -122,7 +131,8 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
     const credor = zero(), brclin = zero(), liquida = zero(), resultado = zero();
     chaves.forEach(k => {
       credor[k] = -acordos[k] * REPASSE_CREDOR;
-      brclin[k] = -acordos[k] * REPASSE_BRCLIN;
+      const sobreMensalidade = cfg.repasse && k >= cfg.repasse.desde ? mensal[k] * cfg.repasse.pct : 0;
+      brclin[k] = -(acordos[k] * REPASSE_BRCLIN + sobreMensalidade);
       liquida[k] = mensal[k] + acordos[k] + credor[k] + brclin[k];
       resultado[k] = liquida[k] + custos[k];
     });
@@ -135,7 +145,7 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
         .sort((a, b) => b.receita - a.receita),
       rubricas: [...porRubrica.entries()].sort((a, b) => a[1] - b[1]),
     };
-  }, [base, idsProduto, idsAcordo, idsTodos, companies, chartOfAccounts, ano]);
+  }, [base, idsProduto, idsAcordo, idsTodos, companies, chartOfAccounts, ano, sistema]);
 
   /** Assinaturas ativas hoje: a receita recorrente que o sistema tem contratada. */
   const recorrente = useMemo(() => {
@@ -157,7 +167,9 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
   }, [subscriptions, idsProduto]);
 
   const ehMDT = sistema === 'MDT';
-  const receitaAno = dados.soma(ehMDT ? dados.liquida : dados.mensal);
+  /** Sistema em que parte da receita sai para terceiros. */
+  const temRepasse = ehMDT || !!cfg.repasse;
+  const receitaAno = dados.soma(temRepasse ? dados.liquida : dados.mensal);
   const custoAno = dados.soma(dados.custos);
   const resultadoAno = dados.soma(dados.resultado);
   const margem = receitaAno > 0 ? resultadoAno / receitaAno : 0;
@@ -168,7 +180,14 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
         { nome: 'Mensalidades MDT', valores: dados.mensal, sub: true },
         { nome: 'Acordos recebidos', valores: dados.acordos, sub: true },
         { nome: 'Repasse ao credor (80%)', valores: dados.credor, sub: true, tom: 'neg' },
-        { nome: 'Diego BR Clin (2%)', valores: dados.brclin, sub: true, tom: 'neg' },
+        { nome: 'Diego BR Clin (2% acordos + 10% mensal.)', valores: dados.brclin, sub: true, tom: 'neg' },
+        { nome: 'RECEITA LÍQUIDA MIRAI', valores: dados.liquida, destaque: true },
+        { nome: 'CUSTOS DO SISTEMA', valores: dados.custos, destaque: true, tom: 'neg' },
+        { nome: 'RESULTADO', valores: dados.resultado, destaque: true },
+      ]
+    : cfg.repasse ? [
+        { nome: 'FATURAMENTO', valores: dados.mensal, destaque: true },
+        { nome: 'Repasse Diego BR Clin (10%)', valores: dados.brclin, sub: true, tom: 'neg' },
         { nome: 'RECEITA LÍQUIDA MIRAI', valores: dados.liquida, destaque: true },
         { nome: 'CUSTOS DO SISTEMA', valores: dados.custos, destaque: true, tom: 'neg' },
         { nome: 'RESULTADO', valores: dados.resultado, destaque: true },
@@ -216,7 +235,7 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <Kpi label="Recorrente hoje" valor={brl(recorrente.mrr)} icon={<Wallet size={16} />}
           extra={`${recorrente.clientes} cliente(s) com assinatura ativa${recorrente.manuais ? ` · ${recorrente.manuais} fora do Asaas` : ''}`} />
-        <Kpi label={ehMDT ? `Receita líquida ${ano}` : `Faturamento ${ano}`} valor={brl(receitaAno)} icon={<TrendingUp size={16} />}
+        <Kpi label={temRepasse ? `Receita líquida ${ano}` : `Faturamento ${ano}`} valor={brl(receitaAno)} icon={<TrendingUp size={16} />}
           extra={dados.previsto ? `inclui ${brl(dados.previsto)} previsto` : undefined} />
         <Kpi label={`Custos ${ano}`} valor={brl(custoAno)} icon={<TrendingDown size={16} />} tom="text-red-600"
           extra={custoAno === 0 ? 'nenhuma despesa marcada com este sistema' : undefined} />
@@ -261,7 +280,8 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
           <Info size={14} className="mt-0.5 flex-shrink-0 text-gray-400" />
           <span>
             Por competência, como no DRE. Meses em azul são previsão.
-            {ehMDT && ' Repasse calculado sobre o valor dos acordos: 80% ao credor, 2% ao Diego da BR Clin, 18% Mirai.'}
+            {ehMDT && ' Acordos: 80% ao credor, 2% ao Diego da BR Clin, 18% Mirai.'}
+            {cfg.repasse && ` Mensalidades: 10% ao Diego da BR Clin desde a competência ${MESES[Number(cfg.repasse.desde.slice(5)) - 1].toLowerCase()}/${cfg.repasse.desde.slice(0, 4)} (pago no mês seguinte).`}
             {compartilhadoAno < 0 && ` Há ${brl(-compartilhadoAno)} de despesas sem sistema em ${ano} (custo compartilhado), que não entram aqui — marque o sistema na despesa para atribuir.`}
           </span>
         </div>

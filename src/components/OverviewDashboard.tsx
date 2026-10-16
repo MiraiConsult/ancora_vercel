@@ -5,6 +5,8 @@ import {
   BarChart, LineChart, Cell,
 } from 'recharts';
 import { ChevronDown, Check, ArrowUp, ArrowDown, X, ExternalLink } from 'lucide-react';
+import { ClientMovement } from './ClientMovement';
+import { computeMovement, MOVEMENT_SCOPES } from '../lib/clientMovement';
 
 interface OverviewDashboardProps {
   records: FinancialRecord[];
@@ -203,7 +205,12 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     return map;
   }, [validRecords, productSet, products]);
 
-  const primary = useMemo(() => aggregate(year), [validRecords, year, monthsSorted, productSet, products, companies]);
+  const movGeral = useMemo(
+    () => computeMovement(records, subscriptions, products, MOVEMENT_SCOPES[0]),
+    [records, subscriptions, products],
+  );
+
+  const primary = useMemo(() => aggregate(year),[validRecords, year, monthsSorted, productSet, products, companies]);
   const compare = useMemo(() => compareEnabled ? aggregate(compareYear) : null,
     [validRecords, compareYear, compareEnabled, monthsSorted, productSet, products, companies]);
 
@@ -220,23 +227,14 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
       return entry;
     });
 
-    const churnSeries: { month: string; churnPct: number; novos: number; perdidos: number }[] = [];
-    let churnSum = 0, churnCount = 0;
-    monthsSorted.forEach(mi => {
-      const mk = `${year}-${String(mi).padStart(2, '0')}`;
-      if (mk > nowKey) return;
-      const prevDate = new Date(year, mi - 2, 1);
-      const prevKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
-      const prev = clientsByMonth.get(prevKey) || new Set<string>();
-      const curr = clientsByMonth.get(mk) || new Set<string>();
-      const perdidos = Array.from(prev).filter(c => !curr.has(c)).length;
-      const novos = Array.from(curr).filter(c => !prev.has(c)).length;
-      const churnPct = prev.size ? (perdidos / prev.size) * 100 : 0;
-      if (prev.size) { churnSum += churnPct; churnCount++; }
-      churnSeries.push({ month: MONTHS[mi - 1], churnPct, novos, perdidos });
-    });
-    const avgChurn = churnCount ? churnSum / churnCount : 0;
-    const newLastMonth = churnSeries.length ? churnSeries[churnSeries.length - 1].novos : 0;
+    // Churn e novos vêm do movimento de clientes, o mesmo da seção "Entradas e
+    // saídas" — a conta antiga chamava de novo quem só voltou e contava
+    // devedor de acordo como cliente.
+    const comBase = movGeral.filter(m => m.renovaram.length + m.sairam.length > 0);
+    const avgChurn = comBase.length
+      ? comBase.reduce((a, m) => a + (m.sairam.length / (m.renovaram.length + m.sairam.length)) * 100, 0) / comBase.length
+      : 0;
+    const newLastMonth = movGeral.length ? movGeral[movGeral.length - 1].novos.length : 0;
 
     const clientProdNames = Object.entries(primary.clientsProdMonth)
       .map(([name, months]) => ({ name, total: new Set(Object.values(months).flatMap(s => Array.from(s))).size }))
@@ -282,10 +280,10 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     }));
 
     return {
-      productData, topProductNames, prodMonthlyData, churnSeries, avgChurn, newLastMonth,
+      productData, topProductNames, prodMonthlyData, avgChurn, newLastMonth,
       clientProdNames, activeClientsSeries, agingData, statusRows, topClients, evolution,
     };
-  }, [primary, compare, monthsSorted, year, clientsByMonth, validRecords, productSet]);
+  }, [primary, compare, monthsSorted, year, clientsByMonth, validRecords, productSet, movGeral]);
 
   const recurring = useMemo(() => {
     const active = subscriptions.filter(s =>
@@ -520,6 +518,12 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
           )}
         </section>
 
+        {/* Entradas e saídas de clientes */}
+        <section className="space-y-4">
+          <SectionTitle title="Clientes: entradas e saídas" context="últimos 12 meses, geral e por sistema" />
+          <ClientMovement records={records} subscriptions={subscriptions} products={products} companies={companies} />
+        </section>
+
         {/* Receita */}
         <section className="space-y-4">
           <SectionTitle title="Receita" context="evolução, produtos e mix" />
@@ -608,35 +612,6 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
               </LineChart>
             </ChartBox>
           </Panel>
-
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <Panel title="Novos e perdidos" subtitle="Clientes por mês" className="xl:col-span-2">
-              <ChartBox empty={derived.churnSeries.length === 0}>
-                <BarChart data={derived.churnSeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke={INK.grid} vertical={false} />
-                  <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
-                  <YAxis allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} width={40} />
-                  <Tooltip {...tooltipProps} />
-                  <Legend {...legendProps} />
-                  <Bar dataKey="novos" name="Novos" fill={SERIES[0]} radius={[4, 4, 0, 0]} maxBarSize={18} />
-                  <Bar dataKey="perdidos" name="Perdidos" fill={SERIES[1]} radius={[4, 4, 0, 0]} maxBarSize={18} />
-                </BarChart>
-              </ChartBox>
-            </Panel>
-
-            <Panel title="Churn mensal" subtitle={`Média ${pct(derived.avgChurn)}`}>
-              <ChartBox empty={derived.churnSeries.length === 0}>
-                <LineChart data={derived.churnSeries} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke={INK.grid} vertical={false} />
-                  <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
-                  <YAxis tickFormatter={(v: any) => `${v}%`} tick={axisTick} axisLine={false} tickLine={false} width={42} />
-                  <Tooltip {...tooltipProps} formatter={(v: any) => pct(v)} />
-                  <Line dataKey="churnPct" name="Churn" stroke={SERIES[1]} strokeWidth={2}
-                    dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }} />
-                </LineChart>
-              </ChartBox>
-            </Panel>
-          </div>
 
           <Panel title="Base ativa por produto" subtitle="Assinaturas ativas hoje">
             <ChartBox height="h-64" empty={recurring.activeClientsByProduct.length === 0}>

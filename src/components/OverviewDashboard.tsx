@@ -628,6 +628,8 @@ const statusChip = (s?: string) => {
 
 const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => void; onGoTo?: () => void }> = ({ title, rows, onClose, onGoTo }) => {
   const [tab, setTab] = useState<'CHART' | 'LIST'>('CHART');
+  /** Produto clicado no gráfico: abre a tabela de clientes ao lado. */
+  const [produtoSel, setProdutoSel] = useState<string | null>(null);
   const total = rows.reduce((s, r) => s + r.value, 0);
 
   useEffect(() => {
@@ -665,6 +667,20 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
     rows.forEach(r => { if (r.status) m.set(r.status, (m.get(r.status) || 0) + r.value); });
     return Array.from(m.entries()).map(([name, value]) => ({ name, value }));
   }, [rows]);
+
+  // Clientes do produto clicado, do maior valor para o menor
+  const clientesDoProduto = useMemo(() => {
+    if (!produtoSel) return [];
+    const m = new Map<string, { value: number; n: number }>();
+    rows.filter(r => (r.tag || 'Sem produto') === produtoSel).forEach(r => {
+      const k = r.sub || 'Sem cliente';
+      const c = m.get(k) || { value: 0, n: 0 };
+      c.value += r.value; c.n += 1;
+      m.set(k, c);
+    });
+    return Array.from(m.entries()).map(([name, c]) => ({ name, ...c }))
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  }, [rows, produtoSel]);
 
   const hasMonth = byMonth.length > 1;
   const hasTag = byTag.length > 1;
@@ -735,7 +751,7 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
                 {hasTag && (
                   <div>
                     <h4 className="text-sm font-semibold text-gray-800 mb-1">Por produto</h4>
-                    <p className="text-xs text-gray-400 mb-3">Composição do total</p>
+                    <p className="text-xs text-gray-400 mb-3">Composição do total · clique num produto para ver os clientes</p>
                     <div className="h-56">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart layout="vertical" data={byTag} margin={{ top: 4, right: 64, left: 8, bottom: 4 }}>
@@ -743,9 +759,13 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
                           <XAxis type="number" tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} />
                           <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11, fill: INK.secondary }} axisLine={false} tickLine={false} />
                           <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
-                          <Bar dataKey="value" name="Valor" radius={[0, 4, 4, 0]} maxBarSize={18}
+                          <Bar dataKey="value" name="Valor" radius={[0, 4, 4, 0]} maxBarSize={18} cursor="pointer"
+                            onClick={(d: any) => setProdutoSel(p => (p === d?.name ? null : d?.name ?? null))}
                             label={{ position: 'right', formatter: (v: any) => brlShort(v), fontSize: 10, fill: INK.muted }}>
-                            {byTag.map((_, i) => <Cell key={i} fill={SERIES[i % SERIES.length]} />)}
+                            {byTag.map((d, i) => (
+                              <Cell key={i} fill={SERIES[i % SERIES.length]}
+                                fillOpacity={produtoSel && produtoSel !== d.name ? 0.3 : 1} />
+                            ))}
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -753,7 +773,37 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
                   </div>
                 )}
 
-                {byStatus.length > 1 && (
+                {produtoSel ? (
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-gray-800 mb-1">Clientes · {produtoSel}</h4>
+                        <p className="text-xs text-gray-400">
+                          {clientesDoProduto.length} cliente(s) · {brlExact(clientesDoProduto.reduce((a, c) => a + c.value, 0))}
+                        </p>
+                      </div>
+                      <button onClick={() => setProdutoSel(null)} title="Fechar"
+                        className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-md"><X size={14} /></button>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto border border-gray-100 rounded-xl">
+                      <table className="w-full text-sm">
+                        <tbody className="divide-y divide-gray-100">
+                          {clientesDoProduto.map(c => (
+                            <tr key={c.name} className="hover:bg-gray-50">
+                              <td className="px-3 py-2 text-gray-800">
+                                {c.name}
+                                {c.n > 1 && <span className="ml-1.5 text-[11px] text-gray-400">{c.n} lanç.</span>}
+                              </td>
+                              <td className={`px-3 py-2 text-right tabular-nums font-semibold whitespace-nowrap ${c.value < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                                {brlExact(c.value)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : byStatus.length > 1 && (
                   <div>
                     <h4 className="text-sm font-semibold text-gray-800 mb-1">Por situação</h4>
                     <p className="text-xs text-gray-400 mb-3">Distribuição por status</p>

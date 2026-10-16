@@ -524,106 +524,17 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
           <ClientMovement records={records} subscriptions={subscriptions} products={products} companies={companies} />
         </section>
 
-        {/* Receita */}
+        {/* Top clientes */}
         <section className="space-y-4">
-          <SectionTitle title="Receita" context="evolução, produtos e mix" />
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <Panel title="Receita mensal" subtitle={compare ? `${year} contra ${compareYear}` : 'Receita, despesa e saldo'}>
-              <ChartBox>
-                <ComposedChart data={derived.evolution} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke={INK.grid} vertical={false} />
-                  <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
-                  <YAxis tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} width={54} />
-                  <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
-                  <Legend {...legendProps} />
-                  <Bar dataKey="receita" name="Receita" fill={SERIES[0]} radius={[4, 4, 0, 0]} maxBarSize={18} />
-                  <Bar dataKey="despesa" name="Despesa" fill={SERIES[1]} radius={[4, 4, 0, 0]} maxBarSize={18} />
-                  <Line dataKey="saldo" name="Saldo" stroke={SERIES[2]} strokeWidth={2} dot={false} />
-                  {compare && <Line dataKey="receitaCmp" name={`Receita ${compareYear}`} stroke={SERIES[0]} strokeWidth={2} strokeDasharray="4 4" dot={false} />}
-                </ComposedChart>
-              </ChartBox>
-            </Panel>
-
-            <Panel title="Faturamento por produto" subtitle={`Mensal · ${siglaLegend(siglaFat, derived.topProductNames)}`}>
-              <ChartBox empty={derived.topProductNames.length === 0}>
-                <LineChart data={derived.prodMonthlyData} margin={{ top: 8, right: 52, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke={INK.grid} vertical={false} />
-                  <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
-                  <YAxis tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} width={54} />
-                  <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
-                  <Legend {...legendProps} />
-                  {derived.topProductNames.map((pn, i) => (
-                    <Line key={pn} type="monotone" dataKey={pn} stroke={SERIES[i]} strokeWidth={2}
-                      dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }} connectNulls
-                      label={endLabel(siglaFat[pn], SERIES[i], derived.prodMonthlyData.length - 1)} />
-                  ))}
-                </LineChart>
-              </ChartBox>
-            </Panel>
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <Panel title="Receita por produto" subtitle={`Total do período · ${year}`}>
-              <ChartBox empty={derived.productData.length === 0}>
-                <BarChart layout="vertical" data={derived.productData} margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
-                  <CartesianGrid stroke={INK.grid} horizontal={false} />
-                  <XAxis type="number" tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12, fill: INK.secondary }} axisLine={false} tickLine={false} />
-                  <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
-                  <Bar dataKey="value" name="Receita" radius={[0, 4, 4, 0]} maxBarSize={20}
-                    label={{ position: 'right', formatter: (v: any) => brl(v), fontSize: 11, fill: INK.secondary }}>
-                    {derived.productData.map((_, i) => <Cell key={i} fill={SERIES[i % SERIES.length]} />)}
-                  </Bar>
-                </BarChart>
-              </ChartBox>
-            </Panel>
-
-            <Panel title="Top clientes" subtitle={`Receita no período · ${year}`}>
-              <ChartBox empty={derived.topClients.length === 0}>
-                <BarChart layout="vertical" data={derived.topClients} margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
-                  <CartesianGrid stroke={INK.grid} horizontal={false} />
-                  <XAxis type="number" tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11, fill: INK.secondary }} axisLine={false} tickLine={false} />
-                  <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
-                  <Bar dataKey="value" name="Receita" fill={SERIES[4]} radius={[0, 4, 4, 0]} maxBarSize={18}
-                    label={{ position: 'right', formatter: (v: any) => brl(v), fontSize: 11, fill: INK.secondary }} />
-                </BarChart>
-              </ChartBox>
-            </Panel>
-          </div>
-        </section>
-
-        {/* Clientes & retenção */}
-        <section className="space-y-4">
-          <SectionTitle title="Clientes & retenção" context="base ativa, entradas e saídas" />
-          <Panel title="Clientes ativos por produto" subtitle={`Evolução mensal · ${siglaLegend(siglaCli, derived.clientProdNames)}`}>
-            <ChartBox height="h-80" empty={derived.clientProdNames.length === 0}>
-              <LineChart data={derived.activeClientsSeries} margin={{ top: 8, right: 52, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke={INK.grid} vertical={false} />
-                <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
-                <YAxis allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} width={40} />
-                <Tooltip {...tooltipProps} />
-                <Legend {...legendProps} />
-                {derived.clientProdNames.map((pn, i) => (
-                  <Line key={pn} type="monotone" dataKey={pn} stroke={SERIES[i]} strokeWidth={2}
-                    dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }} connectNulls
-                    label={endLabel(siglaCli[pn], SERIES[i], derived.activeClientsSeries.length - 1)} />
-                ))}
-              </LineChart>
-            </ChartBox>
-          </Panel>
-
-          <Panel title="Base ativa por produto" subtitle="Assinaturas ativas hoje">
-            <ChartBox height="h-64" empty={recurring.activeClientsByProduct.length === 0}>
-              <BarChart layout="vertical" data={recurring.activeClientsByProduct} margin={{ top: 4, right: 48, left: 8, bottom: 4 }}>
+          <Panel title="Top clientes" subtitle={`Receita no período · ${year}`}>
+            <ChartBox empty={derived.topClients.length === 0}>
+              <BarChart layout="vertical" data={derived.topClients} margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
                 <CartesianGrid stroke={INK.grid} horizontal={false} />
-                <XAxis type="number" allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12, fill: INK.secondary }} axisLine={false} tickLine={false} />
-                <Tooltip {...tooltipProps} />
-                <Bar dataKey="value" name="Clientes" radius={[0, 4, 4, 0]} maxBarSize={20}
-                  label={{ position: 'right', fontSize: 11, fill: INK.secondary }}>
-                  {recurring.activeClientsByProduct.map((_, i) => <Cell key={i} fill={SERIES[i % SERIES.length]} />)}
-                </Bar>
+                <XAxis type="number" tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11, fill: INK.secondary }} axisLine={false} tickLine={false} />
+                <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
+                <Bar dataKey="value" name="Receita" fill={SERIES[4]} radius={[0, 4, 4, 0]} maxBarSize={18}
+                  label={{ position: 'right', formatter: (v: any) => brl(v), fontSize: 11, fill: INK.secondary }} />
               </BarChart>
             </ChartBox>
           </Panel>

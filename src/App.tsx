@@ -40,6 +40,7 @@ const PAGE_TITLES: Record<string, string> = {
   payables: 'Contas a Pagar',
   contracts: 'Contratos',
   reports: 'Relatórios',
+  systems: 'Sistemas',
   dre: 'DRE Gerencial',
   cashflow: 'Fluxo de Caixa',
   'cash-evolution': 'Evolução do Caixa',
@@ -56,6 +57,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { LandingPage } from './components/LandingPage';
 import { SettingsModule } from './components/SettingsModule';
 import { ReportsModule } from './components/ReportsModule';
+import { SystemsReport } from './components/SystemsReport';
 import { ListsModule } from './components/ListsModule';
 import { AlertsModule } from './components/AlertsModule';
 import { DataExportModule } from './components/DataExportModule';
@@ -618,6 +620,12 @@ const handleAddUser = async (newUser: User) => {
       case 'reports':
         return hasPermission('finance') ? (
           <ReportsModule records={financeRecords} companies={companies} products={products} chartOfAccounts={chartOfAccounts} />
+        ) : <AccessDenied />;
+
+      case 'systems':
+        return hasPermission('finance') ? (
+          <SystemsReport records={financeRecords} subscriptions={subscriptions} products={products}
+            companies={companies} chartOfAccounts={chartOfAccounts} />
         ) : <AccessDenied />;
 
       case 'companies':

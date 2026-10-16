@@ -1468,6 +1468,9 @@ const newRecords: FinancialRecord[] = [];
             paymentDate: finalStatus === TransactionStatus.PAID ? (newRecord.paymentDate || finalDueDate) : undefined,
             revenueTypeId: splitPayload ? undefined : newRecord.revenueTypeId,
             split_revenue: splitPayload || undefined,
+            // null explícito: "compartilhado" numa despesa precisa limpar o
+            // sistema gravado — undefined some do JSON e o update não mexe.
+            product_id: (newRecord.product_id || null) as any,
         };
 
         if (editingTransactionId) { 
@@ -3378,6 +3381,23 @@ const newRecords: FinancialRecord[] = [];
                                           </button>
                                         </div>
                                         ))}
+                                        {/* Despesa também pode ser de um sistema: é o que a tela
+                                            Sistemas usa para o custo de cada um. Sem sistema, a
+                                            despesa é compartilhada. */}
+                                        {newRecord.type !== TransactionType.INCOME && (
+                                        <div className="flex items-center gap-2">
+                                            <div className="p-1.5 rounded-md bg-white border"><Package size={16} className="text-gray-400"/></div>
+                                            <select
+                                              value={newRecord.product_id || ''}
+                                              onChange={e => setNewRecord({ ...newRecord, product_id: (e.target.value || undefined) as any })}
+                                              className="flex-1 px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white text-gray-700"
+                                              title="Sistema a que esta despesa pertence"
+                                            >
+                                              <option value="">Sistema: compartilhado (nenhum)</option>
+                                              {products.filter(p => p.active).map(p => <option key={p.id} value={p.id}>Sistema: {p.name}</option>)}
+                                            </select>
+                                        </div>
+                                        )}
                                     </div>
                                 </div>
 

@@ -104,16 +104,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onBack, conne
           <div className="relative z-10">
             {onBack && <button onClick={onBack} className="flex items-center text-sm text-mcsystem-300 hover:text-white mb-8 transition-colors"><ArrowLeft size={16} className="mr-2"/> Voltar ao Site</button>}
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 bg-mcsystem-500 rounded-lg flex-shrink-0 shadow-lg shadow-mcsystem-500/30 flex items-center justify-center font-bold text-lg">⚓</div>
+              <div className="h-10 w-10 bg-mcsystem-500 rounded-lg flex-shrink-0 shadow-lg shadow-mcsystem-500/30 flex items-center justify-center font-bold text-lg">M</div>
               <div>
-                 <h1 className="text-xl font-bold tracking-tight text-white leading-none">Ancóra</h1>
+                 <h1 className="text-xl font-bold tracking-tight text-white leading-none">Mirai Finance</h1>
               </div>
             </div>
             <h2 className="text-3xl font-bold mt-12 leading-tight">Solidez para o seu Crescimento.</h2>
             <p className="text-mcsystem-100 mt-4 opacity-80">Plataforma integrada para gestão financeira, CRM e análises preditivas com tecnologia de ponta.</p>
           </div>
           <div className="relative z-10">
-            <p className="text-xs text-mcsystem-300 opacity-60">&copy; {new Date().getFullYear()} Ancóra.</p>
+            <p className="text-xs text-mcsystem-300 opacity-60">&copy; {new Date().getFullYear()} Mirai Consult.</p>
           </div>
         </div>
 

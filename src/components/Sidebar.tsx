@@ -101,10 +101,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
           <X size={18} />
         </button>
         <div className="cursor-pointer flex items-center gap-3 mb-1 relative z-10 w-full" onClick={() => onNavigate('dashboard')}>
-          <div className="h-9 w-9 bg-mcsystem-500 rounded-lg flex-shrink-0 shadow-lg shadow-mcsystem-500/30 flex items-center justify-center font-bold text-lg">⚓</div>
+          <div className="h-9 w-9 bg-mcsystem-500 rounded-lg flex-shrink-0 shadow-lg shadow-mcsystem-500/30 flex items-center justify-center font-bold text-lg">M</div>
           {!collapsed && (
           <div className="transition-opacity duration-200">
-             <h1 className="text-xl font-bold tracking-tight text-white leading-none">Ancóra</h1>
+             <h1 className="text-xl font-bold tracking-tight text-white leading-none">Mirai Finance</h1>
           </div>
           )}
         </div>

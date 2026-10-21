@@ -126,7 +126,7 @@ const App: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [currentTenant, setCurrentTenant] = useState<Tenant | null>({
       id: 'default',
-      name: 'Ancóra Demo',
+      name: 'Mirai Finance Demo',
       plan: 'Premium',
       description: 'Plataforma de gestão financeira.'
   });
@@ -288,7 +288,7 @@ const App: React.FC = () => {
         setGeneralNotes([]);
         setCurrentTenant({
           id: 'default',
-          name: 'Ancóra Demo',
+          name: 'Mirai Finance Demo',
           plan: 'Premium',
           website: 'https://mcsystem.com.br/',
           email: 'contato@mcsystem.com',
@@ -545,7 +545,7 @@ const handleAddUser = async (newUser: User) => {
       <div className="h-screen w-full flex items-center justify-center bg-slate-50">
           <div className="flex flex-col items-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-mcsystem-500 mb-4"></div>
-              <p className="text-gray-500 font-medium">Carregando Ancóra...</p>
+              <p className="text-gray-500 font-medium">Carregando Mirai Finance...</p>
               <p className="text-xs text-gray-400 mt-2">Se demorar, verificaremos a conexão automaticamente.</p>
           </div>
       </div>

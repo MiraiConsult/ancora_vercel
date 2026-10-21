@@ -45,7 +45,6 @@ const PAGE_TITLES: Record<string, string> = {
   coa: 'Plano de Contas',
   lists: 'Cadastros Auxiliares',
   registrations: 'Cadastros',
-  alerts: 'Alertas',
   database: 'Exportar Dados',
   settings: 'Configurações',
 };
@@ -55,12 +54,11 @@ import { SettingsModule } from './components/SettingsModule';
 import { ReportsModule } from './components/ReportsModule';
 import { SystemsReport } from './components/SystemsReport';
 import { ListsModule } from './components/ListsModule';
-import { AlertsModule } from './components/AlertsModule';
 import { DataExportModule } from './components/DataExportModule';
 import { TenantSelector } from './components/TenantSelector';
 import { AuthCallback } from './components/AuthCallback';
 import { User, RevenueType, Bank, Company, FinancialRecord, Tenant, SystemNotification, ChartOfAccount, GeneralNote, Product, Subscription, Supplier } from './types';
-import { ShieldAlert, Bell, Wifi, WifiOff, AlertTriangle, HelpCircle, X, Database, Building2, Menu } from 'lucide-react';
+import { ShieldAlert, Wifi, WifiOff, AlertTriangle, HelpCircle, X, Database, Building2, Menu } from 'lucide-react';
 import { supabase, supabaseUrl, supabaseKey } from './lib/supabaseClient'; // Import credentials
 import { isAsaasEnabled } from './config';
 import {
@@ -559,7 +557,6 @@ const handleAddUser = async (newUser: User) => {
   }
 
   const isAdmin = user.role === 'admin';
-  const unreadNotifications = notifications.filter(n => !n.read).length;
 
   const renderContent = () => {
     // Função auxiliar para verificar permissões
@@ -748,16 +745,6 @@ const handleAddUser = async (newUser: User) => {
           />
         ) : <AccessDenied />;
 
-      case 'alerts':
-        return hasPermission('alerts') ? (
-          <AlertsModule
-            notifications={notifications}
-            setNotifications={setNotifications}
-            users={allUsers}
-            currentUser={user}
-          />
-        ) : <AccessDenied />;
-
       case 'lists':
         return hasPermission('lists') ? (
           <ListsModule
@@ -841,7 +828,6 @@ const handleAddUser = async (newUser: User) => {
           onNavigate={(p) => { navigate(p); setIsMobileMenuOpen(false); }}
           currentUser={user}
           onLogout={signOut}
-          unreadCount={unreadNotifications}
           pendingValidationCount={financeRecords.filter(r => r.needsValidation).length}
           isCollapsed={isSidebarCollapsed}
           onToggle={toggleSidebar}
@@ -866,10 +852,6 @@ const handleAddUser = async (newUser: User) => {
                 <h1 className="text-lg sm:text-xl font-semibold text-gray-800 capitalize truncate">{PAGE_TITLES[currentPage] || currentPage}</h1>
               </div>
               <div className="flex items-center space-x-4">
-                  <div onClick={() => navigate('alerts')} className="relative cursor-pointer hover:bg-gray-100 p-2 rounded-full transition-colors">
-                       {unreadNotifications > 0 && <span className="absolute top-1 right-1 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white animate-ping"></span>}
-                       <Bell size={20} className="text-gray-500" />
-                  </div>
                   <div className={`hidden md:flex items-center space-x-2 px-3 py-1 rounded-full border shadow-sm ${connectionStatus === 'connected' ? 'bg-white border-gray-200' : connectionStatus === 'missing_tables' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'}`} title="Status da Conexão">
                       {connectionStatus === 'connected' && <Wifi size={14} className="text-green-500" />}
                       {connectionStatus === 'missing_tables' && <AlertTriangle size={14} className="text-yellow-500" />}

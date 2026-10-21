@@ -2,7 +2,7 @@
 
 import React from 'react';
 import {
-  UserCog, LogOut, Bell, Database, ChevronsLeft, Zap, X,
+  UserCog, LogOut, Database, ChevronsLeft, Zap, X,
   LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Tags, Boxes,
   FileBarChart,
 } from 'lucide-react';
@@ -15,7 +15,6 @@ interface SidebarProps {
   onNavigate: (page: string) => void;
   currentUser: User;
   onLogout: () => void;
-  unreadCount: number;
   pendingValidationCount?: number;
   isCollapsed: boolean;
   onToggle: () => void;
@@ -24,7 +23,7 @@ interface SidebarProps {
   onCloseMobile?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, currentUser, onLogout, unreadCount, pendingValidationCount = 0, isCollapsed, onToggle, mobileOpen = false, onCloseMobile }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, currentUser, onLogout, pendingValidationCount = 0, isCollapsed, onToggle, mobileOpen = false, onCloseMobile }) => {
   const isAdmin = currentUser.role === 'admin';
   // Recolhido é um estado de desktop. Na gaveta o menu é largo, então mostrar
   // só ícones ali deixaria uma faixa de 256px com o conteúdo de 80px.
@@ -66,7 +65,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
     {
       section: 'Sistema',
       items: [
-        { id: 'alerts', label: 'Alertas', icon: Bell, perm: 'alerts', badge: unreadCount > 0 ? unreadCount : 0 },
         { id: 'database', label: 'Exportar Dados', icon: Database, perm: 'database' },
         { id: 'settings', label: 'Configurações', icon: UserCog, perm: 'settings', adminOnly: true },
       ],

@@ -52,7 +52,6 @@ const permissionableModules = [
   { id: 'billing', label: 'Cobranças' },
   { id: 'companies', label: 'Clientes' },
   { id: 'products', label: 'Produtos' },
-  { id: 'alerts', label: 'Alertas' },
   { id: 'lists', label: 'Bancos & Receitas' },
   { id: 'database', label: 'Exportar Dados' },
 ];

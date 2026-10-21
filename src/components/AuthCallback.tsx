@@ -81,9 +81,9 @@ export const AuthCallback: React.FC<AuthCallbackProps> = ({ supabase }) => {
             <h2 className="text-2xl font-bold text-gray-800">Confirmando email...</h2>
             <p className="text-gray-600">{message}</p>
             <div className="flex items-center justify-center gap-2 text-sm text-gray-500 mt-6">
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse delay-75"></div>
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse delay-150"></div>
+              <div className="w-2 h-2 bg-mcsystem-500 rounded-full animate-pulse"></div>
+              <div className="w-2 h-2 bg-mcsystem-500 rounded-full animate-pulse delay-75"></div>
+              <div className="w-2 h-2 bg-mcsystem-500 rounded-full animate-pulse delay-150"></div>
             </div>
           </div>
         )}
@@ -131,7 +131,7 @@ export const AuthCallback: React.FC<AuthCallbackProps> = ({ supabase }) => {
             </div>
             <button
               onClick={() => window.location.href = '/'}
-              className="mt-4 bg-blue-500 text-white px-8 py-3 rounded-lg hover:bg-blue-600 transition-all duration-200 font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+              className="mt-4 bg-mcsystem-500 text-white px-8 py-3 rounded-lg hover:bg-mcsystem-400 transition-all duration-200 font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
             >
               Voltar para Login
             </button>

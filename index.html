@@ -10,25 +10,38 @@
         theme: {
           extend: {
             colors: {
+              // Paleta da Mirai (guia de marca). O nome "mcsystem" ficou por
+              // compatibilidade: são centenas de classes pelo sistema.
               mcsystem: {
-                900: '#00204E', // Deepest Navy (Sidebar)
-                800: '#002B49', // Hover states on dark
-                700: '#007AB8', // Darker blue accent
-                600: '#00A3E0', // Main accent blue
-                500: '#00A3E0', // Primary action blue
-                400: '#33B5E5', // Lighter blue for hover/accent
-                100: '#F0F9FD', // Light background tint (blueish)
-                50: '#F7FCFF',  // Very light tint
+                900: '#101510', // painel escuro (menu lateral)
+                800: '#1c241c', // hover sobre o escuro
+                700: '#2f6f0b', // verde escuro, texto pequeno sobre claro
+                600: '#3c8d10', // verde da marca, texto e linhas
+                500: '#3c8d10', // ação principal (aguenta texto branco)
+                400: '#4fa61a', // hover da ação principal
+                300: '#9fd46b',
+                200: '#cfe8b4',
+                100: '#eef5e4', // fundo alternativo
+                50: '#f6faf1',  // fundo principal
+              },
+              // Lime de destaque: sempre com texto escuro por cima, nunca branco.
+              mirai: {
+                lime: '#84e80e',
+                ink: '#0c140c',
+                ink2: '#38453a',
+                muted: '#5e6c61',
+                panel: '#101510',
               }
             },
             fontFamily: {
               sans: ['Inter', 'system-ui', 'sans-serif'],
+              display: ['Space Grotesk', 'Inter', 'system-ui', 'sans-serif'],
             }
           }
         }
       }
     </script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   html {
     font-size: 100%; /* Garantir 100% do tamanho padrão do navegador */
@@ -36,7 +49,7 @@
   
   body { 
     font-family: 'Inter', system-ui, sans-serif; 
-    background-color: #f1f5f9;
+    background-color: #f6faf1;
     font-size: 14px; /* Tamanho padrão de sistemas web */
     line-height: 1.5;
     margin: 0;
@@ -47,6 +60,12 @@
   
   * {
     box-sizing: border-box;
+  }
+
+  /* Títulos na fonte da marca */
+  h1, h2, h3 {
+    font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+    letter-spacing: -0.01em;
   }
   
   /* Custom Scrollbar for Kanban */

@@ -22,7 +22,7 @@ const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 const NO_PRODUCT = 'Sem produto';
 
 // Paleta categórica validada (CVD-safe, ordem fixa — nunca ciclar)
-const SERIES = ['#2a9d8f', '#e76f51', '#7c5ce0', '#eda100', '#2a78d6', '#e87ba4'];
+const SERIES = ['#3c8d10', '#e8833a', '#7c5ce0', '#eda100', '#2a78d6', '#e87ba4'];
 // Paleta de status (reservada — nunca usada como série)
 const STATUS = { good: '#0ca30c', warning: '#fab219', critical: '#d03b3b' };
 
@@ -316,6 +316,52 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
   }, [subscriptions, productSet, products]);
 
   const arpu = recurring.activeSubscribers > 0 ? recurring.mrr / recurring.activeSubscribers : 0;
+
+  /**
+   * Um card por sistema: recorrente contratado hoje, clientes com assinatura,
+   * receita dos últimos 5 meses (competência) e o total do ano escolhido.
+   * MDT soma mensalidades e acordos, que são as duas receitas dele.
+   */
+  const sistemasResumo = useMemo(() => {
+    const mesAtual = new Date().toISOString().slice(0, 7);
+    const ultimos = Array.from({ length: 5 }, (_, i) => shiftMes(mesAtual, i - 4));
+    const defs = [
+      { key: 'HG', nome: 'Hello Growth', produtos: ['hellogrowth', 'hellorating'], nota: 'Faturamento' },
+      { key: 'KAIVAA', nome: 'Kaivaa', produtos: ['kaivaa'], nota: 'Faturamento' },
+      { key: 'MDT', nome: 'MDT Cobranças', produtos: ['mdtcobrancas', 'acordo'], nota: 'Mensalidades + acordos' },
+    ];
+    return defs.map(d => {
+      const ids = new Set(products.filter(p => d.produtos.includes(normName(p.name))).map(p => p.id));
+      const recorrente = new Set(products.filter(p => d.produtos.includes(normName(p.name)) && normName(p.name) !== 'acordo').map(p => p.id));
+      const fatia = (r: FinancialRecord) => r.split_revenue?.length
+        ? r.split_revenue.filter(sp => sp.product_id && ids.has(sp.product_id)).reduce((a, sp) => a + (sp.amount || 0), 0)
+        : (r.product_id && ids.has(r.product_id) ? r.amount : 0);
+      const porMes = new Map<string, number>();
+      let ano = 0;
+      validRecords.forEach(r => {
+        if (r.amount <= 0) return;
+        const v = fatia(r);
+        if (!v) return;
+        const mk = (r.competenceDate || r.dueDate || '').slice(0, 7);
+        porMes.set(mk, (porMes.get(mk) || 0) + v);
+        if (mk.startsWith(String(year))) ano += v;
+      });
+      const ativas = subscriptions.filter(sub => (sub.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
+      let mrr = 0;
+      const clientes = new Set<string>();
+      ativas.forEach(sub => {
+        const v = sub.split_products?.length
+          ? sub.split_products.filter(sp => sp.product_id && recorrente.has(sp.product_id)).reduce((a, sp) => a + (sub.value || 0) * sp.pct / 100, 0)
+          : (sub.product_id && recorrente.has(sub.product_id) ? sub.value || 0 : 0);
+        if (!v) return;
+        mrr += v;
+        if (sub.client_id) clientes.add(sub.client_id);
+      });
+      const barras = ultimos.map(mk => ({ mes: MONTHS[parseInt(mk.slice(5, 7)) - 1], valor: porMes.get(mk) || 0 }));
+      const max = Math.max(1, ...barras.map(b => b.valor));
+      return { ...d, mrr, clientes: clientes.size, ano, barras: barras.map(b => ({ ...b, h: b.valor ? Math.max(4, Math.round(b.valor / max * 64)) : 2 })) };
+    });
+  }, [validRecords, subscriptions, products, year]);
   const ltv = derived.avgChurn > 0 ? arpu / (derived.avgChurn / 100) : null;
 
   const siglaFat = useMemo(() => buildSiglas(derived.topProductNames), [derived.topProductNames]);
@@ -385,12 +431,11 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
   return (
     <div className="-m-8">
       {/* Barra de filtros */}
-      <div className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-gray-200/70 px-8 py-4">
+      <div className="sticky top-0 z-30 bg-mcsystem-50/95 backdrop-blur px-8 py-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Faturamento</h1>
-            <p className="text-sm text-gray-500">Receita, produtos, clientes e retenção</p>
-          </div>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-mcsystem-700">
+            Visão geral · {scopeLabel}{compare ? ` contra ${compareYear}` : ''}
+          </p>
           <div className="flex flex-wrap items-center gap-2">
             <Pill label="Ano" value={String(year)}>
               {close => (
@@ -469,20 +514,8 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
       <div className="px-8 py-8 space-y-10">
         {/* Resumo */}
         <section className="space-y-4">
-          <SectionTitle title="Resumo" context={`${scopeLabel}${compare ? ` contra ${compareYear}` : ''}`} />
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <Kpi label="Receita total" value={brl(primary.totalIncome)}
-              delta={compare ? deltaOf(primary.totalIncome, compare.totalIncome) : null} compareYear={compareYear}
-              onClick={() => openDrill('Receita total', incomeRows(), 'entries')} />
-            <Kpi label="Recebido" value={brl(primary.receivedIncome)}
-              delta={compare ? deltaOf(primary.receivedIncome, compare.receivedIncome) : null} compareYear={compareYear}
-              onClick={() => openDrill('Recebido', incomeRows(r => (r.status as string) === 'Pago'), 'entries')} />
-            <Kpi label="Saldo" value={brl(primary.balance)} hint={`Margem ${pct(primary.margin)}`}
-              delta={compare ? deltaOf(primary.balance, compare.balance) : null} compareYear={compareYear}
-              onClick={() => openDrill('Despesas do período',
-                validRecords.filter(r => r.amount < 0 && inPeriod(r))
-                  .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '')).map(toRow), 'entries')} />
-            <Kpi label="MRR" value={brl(recurring.mrr)} hint={`ARR ${brl(recurring.arr)}`}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+            <Kpi dark label="Recorrente (MRR)" value={brl(recurring.mrr)} hint={`ARR ${brl(recurring.arr)}`}
               onClick={() => openDrill('Assinaturas ativas', subscriptions
                 .filter(s => (s.status || 'ACTIVE') === 'ACTIVE' && productSet.has(productName(s.product_id) || NO_PRODUCT))
                 .sort((a, b) => (b.value || 0) - (a.value || 0))
@@ -491,45 +524,104 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
                   tag: productName(s.product_id) || undefined, date: s.next_due_date,
                   value: s.value || 0, status: s.cycle,
                 })), 'billing', true)} />
-            <Kpi label="Clientes ativos" value={String(recurring.activeSubscribers)} hint={`+${derived.newLastMonth} no último mês`}
+            <Kpi label="Receita total" value={brl(primary.totalIncome)}
+              delta={compare ? deltaOf(primary.totalIncome, compare.totalIncome) : null} compareYear={compareYear}
+              onClick={() => openDrill('Receita total', incomeRows(), 'entries')} />
+            <Kpi label="Clientes ativos" value={String(recurring.activeSubscribers)}
+              hint={`+${derived.newLastMonth} novos · ${movGeral.length ? movGeral[movGeral.length - 1].sairam.length : 0} saíram no mês`}
               onClick={() => openDrill('Clientes com assinatura ativa', recurring.activeClientList, 'companies')} />
+            <Kpi label="Retenção" value={pct(100 - derived.avgChurn)} tone="text-mcsystem-700" hint={`média mensal · churn ${pct(derived.avgChurn)}`}
+              onClick={() => openDrill('Clientes perdidos e receita que saiu', churnedRows, 'companies')} />
+            <Kpi label="Em atraso" value={brl(primary.overdueIncome)} tone="text-[#a3470f]" hint={`${pct(primary.overdueRate)} da receita`}
+              onClick={() => openDrill('Cobranças em atraso', incomeRows(r => (r.status as string) === 'Atrasado'), 'entries')} />
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Kpi label="Em atraso" value={brl(primary.overdueIncome)} hint={`${pct(primary.overdueRate)} da receita`}
-              onClick={() => openDrill('Cobranças em atraso', incomeRows(r => (r.status as string) === 'Atrasado'), 'entries')} />
-            <Kpi label="A receber" value={brl(primary.pendingIncome)}
+            <Kpi compact label="Recebido" value={brl(primary.receivedIncome)}
+              delta={compare ? deltaOf(primary.receivedIncome, compare.receivedIncome) : null} compareYear={compareYear}
+              onClick={() => openDrill('Recebido', incomeRows(r => (r.status as string) === 'Pago'), 'entries')} />
+            <Kpi compact label="A receber" value={brl(primary.pendingIncome)}
               onClick={() => openDrill('A receber', incomeRows(r => (r.status as string) === 'Pendente'), 'entries')} />
-            <Kpi label="ARPU" value={brl(arpu)} hint={ltv !== null ? `LTV ${brl(ltv)}` : undefined}
+            <Kpi compact label="Saldo" value={brl(primary.balance)} hint={`Margem ${pct(primary.margin)}`}
+              delta={compare ? deltaOf(primary.balance, compare.balance) : null} compareYear={compareYear}
+              onClick={() => openDrill('Despesas do período',
+                validRecords.filter(r => r.amount < 0 && inPeriod(r))
+                  .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '')).map(toRow), 'entries')} />
+            <Kpi compact label="ARPU" value={brl(arpu)} hint={ltv !== null ? `LTV ${brl(ltv)}` : undefined}
               onClick={() => openDrill('Receita recorrente por cliente', recurring.activeClientList, 'companies')} />
-            <Kpi label="Churn médio" value={pct(derived.avgChurn)} hint={`Retenção ${pct(100 - derived.avgChurn)}`}
-              onClick={() => openDrill('Clientes perdidos e receita que saiu', churnedRows, 'companies')} />
           </div>
           {isProductFiltered && (
-            <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+            <p className="text-xs text-mirai-muted bg-white border border-[rgba(11,20,11,0.08)] rounded-xl px-4 py-2.5">
               Filtro de produto ativo — despesas não são classificadas por produto, então Saldo considera a despesa total do período.
             </p>
           )}
         </section>
 
         {/* Entradas e saídas de clientes */}
-        <section className="space-y-4">
-          <SectionTitle title="Clientes: entradas e saídas" context="últimos 12 meses, geral e por sistema" />
+        <section>
           <ClientMovement records={records} subscriptions={subscriptions} products={products} companies={companies} />
         </section>
 
-        {/* Top clientes */}
+        {/* Sistemas */}
         <section className="space-y-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <SectionTitle title="Sistemas" context="recorrente hoje e receita dos últimos 5 meses" />
+            {onNavigate && (
+              <button onClick={() => onNavigate('systems')} className="text-[13px] font-semibold text-mcsystem-700 hover:text-mirai-ink">
+                Abrir detalhe por sistema →
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {sistemasResumo.map(sis => (
+              <button key={sis.key} type="button" onClick={() => onNavigate?.('systems')}
+                className="text-left bg-white border border-[rgba(11,20,11,0.08)] rounded-[22px] p-5 flex flex-col gap-4 hover:border-[rgba(11,20,11,0.18)] hover:shadow-sm transition-all">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-display text-lg font-semibold text-mirai-ink">{sis.nome}</span>
+                  <span className="text-xs text-mirai-muted">{sis.clientes} clientes</span>
+                </div>
+                <div>
+                  <p className="text-xs text-mirai-muted">Recorrente hoje</p>
+                  <p className="font-display text-[26px] font-semibold tracking-tight text-mirai-ink tabular-nums">{brlExact(sis.mrr)}</p>
+                </div>
+                <div className="space-y-1.5">
+                  <div aria-hidden="true" className="grid grid-cols-5 gap-1.5 items-end h-16">
+                    {sis.barras.map((b, i) => (
+                      <div key={i} title={`${b.mes}: ${brlExact(b.valor)}`} className="rounded-md"
+                        style={{ height: b.h, background: i === sis.barras.length - 1 ? '#3c8d10' : '#cfe8b4' }} />
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5 text-[11px] text-mirai-muted text-center">
+                    {sis.barras.map((b, i) => <span key={i}>{b.mes}</span>)}
+                  </div>
+                </div>
+                <div className="flex justify-between gap-2 pt-3 border-t border-[rgba(11,20,11,0.08)] text-[13px]">
+                  <span className="text-mirai-muted">{sis.nota} {year}</span>
+                  <span className="font-bold text-mirai-ink tabular-nums">{brl(sis.ano)}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Top clientes */}
+        <section>
           <Panel title="Top clientes" subtitle={`Receita no período · ${year}`}>
-            <ChartBox empty={derived.topClients.length === 0}>
-              <BarChart layout="vertical" data={derived.topClients} margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
-                <CartesianGrid stroke={INK.grid} horizontal={false} />
-                <XAxis type="number" tickFormatter={brlShort} tick={axisTick} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11, fill: INK.secondary }} axisLine={false} tickLine={false} />
-                <Tooltip {...tooltipProps} formatter={(v: any) => brlExact(v)} />
-                <Bar dataKey="value" name="Receita" fill={SERIES[4]} radius={[0, 4, 4, 0]} maxBarSize={18}
-                  label={{ position: 'right', formatter: (v: any) => brl(v), fontSize: 11, fill: INK.secondary }} />
-              </BarChart>
-            </ChartBox>
+            {derived.topClients.length === 0 ? (
+              <p className="py-10 text-center text-sm text-mirai-muted">Sem receita no período</p>
+            ) : (
+              <ol className="space-y-3">
+                {derived.topClients.map((c, i) => (
+                  <li key={c.name} className="grid grid-cols-[24px_minmax(120px,260px)_minmax(0,1fr)_110px] gap-3 items-center text-sm">
+                    <span className="font-bold text-[#8a978c] tabular-nums">{i + 1}</span>
+                    <span className="truncate text-mirai-ink" title={c.name}>{c.name}</span>
+                    <span aria-hidden="true" className="h-2.5 rounded-full bg-mcsystem-100 block">
+                      <span className="block h-2.5 rounded-full bg-mcsystem-600" style={{ width: `${(c.value / derived.topClients[0].value) * 100}%` }} />
+                    </span>
+                    <span className="text-right font-bold tabular-nums text-mirai-ink">{brl(c.value)}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
           </Panel>
         </section>
 
@@ -916,42 +1008,51 @@ const deltaOf = (curr: number, prev: number) => {
 };
 
 const SectionTitle: React.FC<{ title: string; context?: string }> = ({ title, context }) => (
-  <div className="flex items-baseline gap-2">
-    <h2 className="text-lg font-bold text-gray-900">{title}</h2>
-    {context && <span className="text-sm text-gray-400">· {context}</span>}
+  <div className="flex flex-wrap items-baseline gap-2">
+    <h2 className="text-[22px] font-semibold text-mirai-ink">{title}</h2>
+    {context && <span className="text-[13px] text-mirai-muted">· {context}</span>}
   </div>
 );
 
-const Kpi: React.FC<{ label: string; value: string; hint?: string; delta?: number | null; compareYear?: number; onClick?: () => void }> = ({ label, value, hint, delta, compareYear, onClick }) => {
+/**
+ * Card de indicador. `dark` é o destaque da linha (painel escuro da marca com o
+ * valor em lime); `compact` é a linha secundária, menor.
+ */
+const Kpi: React.FC<{
+  label: string; value: string; hint?: string; delta?: number | null; compareYear?: number;
+  onClick?: () => void; dark?: boolean; compact?: boolean; tone?: string;
+}> = ({ label, value, hint, delta, compareYear, onClick, dark, compact, tone }) => {
   const up = (delta ?? 0) >= 0;
   const Tag: any = onClick ? 'button' : 'div';
   return (
     <Tag onClick={onClick}
-      className={`bg-white rounded-2xl border border-gray-200/80 p-5 text-left w-full transition-all ${onClick ? 'cursor-pointer hover:border-gray-300 hover:shadow-md hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-gray-900/10' : ''}`}>
+      className={`text-left w-full transition-all rounded-[22px] ${compact ? 'p-4' : 'p-5'} ${dark
+        ? 'bg-mirai-panel text-white'
+        : 'bg-white border border-[rgba(11,20,11,0.08)]'} ${onClick ? `cursor-pointer hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-mirai-lime/60 ${dark ? '' : 'hover:border-[rgba(11,20,11,0.18)] hover:shadow-sm'}` : ''}`}>
       <div className="flex items-center justify-between">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{label}</div>
-        {onClick && <ChevronDown size={13} className="text-gray-300 -rotate-90" />}
+        <div className={`text-[11px] font-semibold uppercase tracking-[0.06em] ${dark ? 'text-[#b9c6ba]' : 'text-mirai-muted'}`}>{label}</div>
+        {onClick && <ChevronDown size={13} className={`-rotate-90 ${dark ? 'text-[#8a978c]' : 'text-gray-300'}`} />}
       </div>
-      <div className="mt-2 text-2xl font-bold text-gray-900 tracking-tight tabular-nums">{value}</div>
-      <div className="mt-2 flex items-center gap-2 min-h-[22px]">
+      <div className={`mt-2 font-display font-semibold tracking-tight tabular-nums ${compact ? 'text-xl' : 'text-[28px] leading-tight'} ${dark ? 'text-mirai-lime' : tone || 'text-mirai-ink'}`}>{value}</div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 min-h-[22px]">
         {delta !== null && delta !== undefined && (
-          <span className={`inline-flex items-center gap-0.5 text-xs font-semibold px-1.5 py-0.5 rounded-md ${up ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50'}`}>
+          <span className={`inline-flex items-center gap-0.5 text-xs font-semibold px-1.5 py-0.5 rounded-md ${up ? 'text-mcsystem-700 bg-mcsystem-100' : 'text-red-700 bg-red-50'}`}>
             {up ? <ArrowUp size={11} strokeWidth={3} /> : <ArrowDown size={11} strokeWidth={3} />}
             {Math.abs(delta).toFixed(1)}%
           </span>
         )}
-        {delta !== null && delta !== undefined && compareYear && <span className="text-xs text-gray-400">vs. {compareYear}</span>}
-        {hint && <span className="text-xs text-gray-500">{hint}</span>}
+        {delta !== null && delta !== undefined && compareYear && <span className={`text-xs ${dark ? 'text-[#b9c6ba]' : 'text-mirai-muted'}`}>vs. {compareYear}</span>}
+        {hint && <span className={`text-xs ${dark ? 'text-[#b9c6ba]' : 'text-mirai-muted'}`}>{hint}</span>}
       </div>
     </Tag>
   );
 };
 
 const Panel: React.FC<{ title: string; subtitle?: string; className?: string; children: React.ReactNode }> = ({ title, subtitle, className = '', children }) => (
-  <div className={`bg-white rounded-2xl border border-gray-200/80 p-6 ${className}`}>
+  <div className={`bg-white rounded-[28px] border border-[rgba(11,20,11,0.08)] p-5 sm:p-7 ${className}`}>
     <div className="mb-5">
-      <h3 className="font-semibold text-gray-900">{title}</h3>
-      {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
+      <h3 className="text-lg font-semibold text-mirai-ink">{title}</h3>
+      {subtitle && <p className="text-[13px] text-mirai-muted mt-0.5">{subtitle}</p>}
     </div>
     {children}
   </div>

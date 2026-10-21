@@ -542,7 +542,7 @@ const handleAddUser = async (newUser: User) => {
   };
 
   if (loading) return (
-      <div className="h-screen w-full flex items-center justify-center bg-slate-50">
+      <div className="h-screen w-full flex items-center justify-center bg-mcsystem-50">
           <div className="flex flex-col items-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-mcsystem-500 mb-4"></div>
               <p className="text-gray-500 font-medium">Carregando Mirai Finance...</p>
@@ -801,7 +801,7 @@ const handleAddUser = async (newUser: User) => {
 
   return (
     <>
-      <div className="flex min-h-screen bg-slate-50 font-sans">
+      <div className="flex min-h-screen bg-mcsystem-50 font-sans text-mirai-ink">
         {/* Banner de Impersonação */}
         {isSuperAdmin && impersonatedTenantName && (
           <div className="fixed top-0 left-0 right-0 bg-gradient-to-r from-orange-500 to-red-500 text-white px-6 py-3 z-[100] shadow-lg">
@@ -849,7 +849,7 @@ const handleAddUser = async (newUser: User) => {
                 >
                   <Menu size={22} />
                 </button>
-                <h1 className="text-lg sm:text-xl font-semibold text-gray-800 capitalize truncate">{PAGE_TITLES[currentPage] || currentPage}</h1>
+                <h1 className="font-display text-2xl sm:text-[28px] font-semibold text-mirai-ink truncate">{PAGE_TITLES[currentPage] || currentPage}</h1>
               </div>
               <div className="flex items-center space-x-4">
                   <div className={`hidden md:flex items-center space-x-2 px-3 py-1 rounded-full border shadow-sm ${connectionStatus === 'connected' ? 'bg-white border-gray-200' : connectionStatus === 'missing_tables' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'}`} title="Status da Conexão">
@@ -860,7 +860,7 @@ const handleAddUser = async (newUser: User) => {
                       <span className={`text-xs font-medium ${connectionStatus === 'connected' ? 'text-gray-500' : connectionStatus === 'missing_tables' ? 'text-yellow-700' : 'text-red-700'}`}>{connectionStatus === 'connected' ? 'Sistema Online' : connectionStatus === 'missing_tables' ? 'Configuração Pendente' : 'Desconectado'}</span>
                   </div>
                   <div className="text-right hidden md:block"><p className="text-sm font-bold text-gray-800">{user.name}</p><p className="text-xs text-gray-500">{user.email}</p></div>
-                  <div className="h-10 w-10 bg-mcsystem-500 rounded-full flex items-center justify-center text-white font-bold shadow-md">{user.avatar || user.name.substring(0,2).toUpperCase()}</div>
+                  <div className="h-10 w-10 bg-mirai-panel rounded-full flex items-center justify-center text-mirai-lime text-sm font-semibold">{user.avatar || user.name.substring(0,2).toUpperCase()}</div>
               </div>
            </header>
            <div className="flex-1 relative min-h-0">

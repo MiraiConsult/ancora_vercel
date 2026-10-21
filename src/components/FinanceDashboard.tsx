@@ -3121,7 +3121,7 @@ const newRecords: FinancialRecord[] = [];
                             {isBulkEditingCOA ? 'Cancelar Edição' : 'Edição em Massa'}
                         </button>
                          <div className="h-6 w-px bg-blue-200 mx-2 hidden md:block"></div>
-                        <button onClick={() => { setCoaFormType('classification'); setCoaFormData({}); setIsCOAModalOpen(true); }} className="bg-blue-600 text-white px-3 py-1 rounded text-sm font-bold hover:bg-blue-500 flex items-center shadow-sm">
+                        <button onClick={() => { setCoaFormType('classification'); setCoaFormData({}); setIsCOAModalOpen(true); }} className="bg-mcsystem-500 text-white px-3 py-1 rounded text-sm font-bold hover:bg-mcsystem-400 flex items-center shadow-sm">
                             <Plus size={14} className="mr-1"/> Novo Item
                         </button>
                       </>
@@ -3759,7 +3759,7 @@ const newRecords: FinancialRecord[] = [];
                         
                         <div className="flex justify-end gap-2 pt-2">
                             <button type="button" onClick={() => setIsCOAModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancelar</button>
-                            <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded font-bold">Salvar Item</button>
+                            <button type="submit" className="bg-mcsystem-500 hover:bg-mcsystem-400 text-white px-4 py-2 rounded font-bold">Salvar Item</button>
                         </div>
                     </form>
                 </div>

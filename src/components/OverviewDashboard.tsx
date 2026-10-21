@@ -88,10 +88,11 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
   );
 
   const availableYears = useMemo(() => {
-    const years = new Set<number>();
+    // O ano corrente está sempre na lista, mesmo sem lançamento — é nele que
+    // a tela abre.
+    const years = new Set<number>([new Date().getFullYear()]);
     validRecords.forEach(r => { const y = (r.dueDate || '').slice(0, 4); if (y) years.add(parseInt(y)); });
-    const arr = Array.from(years).filter(Boolean).sort((a, b) => b - a);
-    return arr.length ? arr : [new Date().getFullYear()];
+    return Array.from(years).filter(Boolean).sort((a, b) => b - a);
   }, [validRecords]);
 
   const productOptions = useMemo(() => {
@@ -100,11 +101,13 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [products]);
 
-  const [year, setYear] = useState<number>(availableYears[0]);
+  // Abre sempre no ano corrente. O maior ano com lançamento podia ser 2028,
+  // por causa de parcela de acordo longa.
+  const [year, setYear] = useState<number>(new Date().getFullYear());
   const [selectedMonths, setSelectedMonths] = useState<number[]>(ALL_MONTHS);
   const [selectedProducts, setSelectedProducts] = useState<string[] | null>(null);
   const [compareEnabled, setCompareEnabled] = useState(true);
-  const [compareYear, setCompareYear] = useState<number>(availableYears[0] - 1);
+  const [compareYear, setCompareYear] = useState<number>(new Date().getFullYear() - 1);
 
   const activeProducts = selectedProducts ?? productOptions;
   const productSet = useMemo(() => new Set(activeProducts), [activeProducts]);

@@ -66,6 +66,8 @@ export function computeMovement(
     alvo ? !!pid && alvo.has(pid) : !(pid && acordo.has(pid));
 
   const atual = new Date().toISOString().slice(0, 7);
+  // O mês seguinte entra só para olhar à frente (regra do mês pulado, abaixo).
+  const limite = shiftMes(atual, 1);
   const porMes = new Map<string, Set<string>>();
   const add = (mes: string, cid: string) => {
     if (!porMes.has(mes)) porMes.set(mes, new Set());
@@ -75,7 +77,7 @@ export function computeMovement(
   for (const r of records) {
     if (r.amount <= 0 || !r.companyId || r.needsValidation || r.non_operating) continue;
     const mes = (r.competenceDate || r.dueDate || '').slice(0, 7);
-    if (!mes || mes > atual) continue;
+    if (!mes || mes > limite) continue;
     const ok = r.split_revenue?.length
       ? r.split_revenue.some(sp => (sp.amount || 0) > 0 && conta(sp.product_id))
       : conta(r.product_id);
@@ -88,6 +90,20 @@ export function computeMovement(
       ? s.split_products.some(sp => conta(sp.product_id))
       : conta(s.product_id);
     if (ok) add(atual, s.client_id);
+  }
+
+  // Mês pulado não é saída: cliente que estava no mês anterior e está no
+  // seguinte conta como ativo no do meio. Cobre isenção de um mês (Boteco do
+  // Tala, set/26) e cobrança que atrasou para o mês seguinte — sem isso ele
+  // aparecia como "saiu" e, no mês seguinte, como "voltou".
+  const meses0 = [...porMes.keys()].sort();
+  if (meses0.length) {
+    for (let mes = shiftMes(meses0[0], 1); mes <= atual; mes = shiftMes(mes, 1)) {
+      const antes = porMes.get(shiftMes(mes, -1));
+      const depois = porMes.get(shiftMes(mes, 1));
+      if (!antes || !depois) continue;
+      antes.forEach(cid => { if (depois.has(cid)) add(mes, cid); });
+    }
   }
 
   // Primeira aparição de cada cliente, olhando o histórico inteiro — é o que

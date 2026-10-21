@@ -5,8 +5,6 @@ import { CompaniesModule } from './components/CompaniesModule';
 import { ProductsModule } from './components/ProductsModule';
 import { BillingModule } from './components/BillingModule';
 import { OverviewDashboard } from './components/OverviewDashboard';
-import { ContractsModule } from './components/ContractsModule';
-import { PayablesAgenda } from './components/PayablesAgenda';
 import { RegistrationsModule } from './components/RegistrationsModule';
 import { SuppliersModule } from './components/SuppliersModule';
 import type { MainTab } from './components/FinanceDashboard';
@@ -37,8 +35,6 @@ const PAGE_TITLES: Record<string, string> = {
   entries: 'Lançamentos & Caixa',
   finance: 'Lançamentos & Caixa',
   billing: 'Cobranças',
-  payables: 'Contas a Pagar',
-  contracts: 'Contratos',
   reports: 'Relatórios',
   systems: 'Sistemas',
   dre: 'DRE Gerencial',
@@ -722,30 +718,6 @@ const handleAddUser = async (newUser: User) => {
           />
         );
 
-      case 'payables':
-        return hasPermission('finance') ? (
-          <PayablesAgenda
-            suppliers={suppliers}
-            setSuppliers={setSuppliers}
-            records={financeRecords}
-            setRecords={setFinanceRecords}
-            companies={companies}
-            chartOfAccounts={chartOfAccounts}
-            banks={banks}
-            currentUser={user}
-          />
-        ) : <AccessDenied />;
-
-      case 'contracts':
-        return hasPermission('contracts') ? (
-          <ContractsModule
-            companies={companies}
-            products={products}
-            tenant={currentTenant}
-            currentUser={user}
-          />
-        ) : <AccessDenied />;
-
       case 'billing':
         return (hasPermission('billing') && isAsaasEnabled(user.tenant_id)) ? (
           <BillingModule
@@ -871,7 +843,6 @@ const handleAddUser = async (newUser: User) => {
           onLogout={signOut}
           unreadCount={unreadNotifications}
           pendingValidationCount={financeRecords.filter(r => r.needsValidation).length}
-          overduePayablesCount={financeRecords.filter(r => r.amount < 0 && (r.status as string) !== 'Pago' && r.dueDate && r.dueDate < new Date().toISOString().slice(0, 10)).length}
           isCollapsed={isSidebarCollapsed}
           onToggle={toggleSidebar}
           mobileOpen={isMobileMenuOpen}

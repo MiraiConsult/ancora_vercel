@@ -50,7 +50,6 @@ const permissionableModules = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'finance', label: 'Financeiro (lançamentos, relatórios e plano de contas)' },
   { id: 'billing', label: 'Cobranças' },
-  { id: 'contracts', label: 'Contratos' },
   { id: 'companies', label: 'Clientes' },
   { id: 'products', label: 'Produtos' },
   { id: 'alerts', label: 'Alertas' },

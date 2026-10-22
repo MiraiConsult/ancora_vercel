@@ -98,6 +98,8 @@ interface BillingRow {
   client: string;
   description: string;
   productLabel: string;
+  /** Produtos da linha (com rateio, mais de um) — base do filtro de produto. */
+  productIds: string[];
   value: number;
   cycle: string;
   date: string;
@@ -119,6 +121,8 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   const [sortField, setSortField] = useState('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [rowFilter, setRowFilter] = useState<RowFilter>('all');
+  /** Filtro de produto das duas abas: '' = todos, SEM_PRODUTO = sem produto. */
+  const [productFilter, setProductFilter] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const toggleExpand = (id: string) => setExpanded(prev => {
@@ -215,6 +219,17 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   const clientName = (id?: string) => companies.find(c => c.id === id)?.name || '—';
   const productName = (id?: string) => products.find(p => p.id === id)?.name || null;
 
+  /** A linha (ou o lançamento) entra no filtro de produto escolhido? */
+  const casaProduto = (ids: (string | undefined | null)[]) => {
+    if (!productFilter) return true;
+    const limpos = ids.filter(Boolean) as string[];
+    return productFilter === 'SEM_PRODUTO' ? limpos.length === 0 : limpos.includes(productFilter);
+  };
+  const idsDoLancamento = (r: FinancialRecord) =>
+    r.split_revenue?.length ? r.split_revenue.map(sp => sp.product_id) : [r.product_id];
+  const idsDaAssinatura = (s: Subscription) =>
+    s.split_products?.length ? s.split_products.map(sp => sp.product_id) : [s.product_id];
+
   const charges = useMemo(
     () => financeRecords
       .filter(r => r.asaas_payment_id)
@@ -255,6 +270,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         productLabel: productLabelOf(s.split_products?.length
           ? s.split_products.map(p => p.product_id)
           : [s.product_id]),
+        productIds: (s.split_products?.length ? s.split_products.map(p => p.product_id) : [s.product_id]).filter(Boolean) as string[],
         value: s.value || 0,
         cycle: cycleLabel(s.cycle),
         date: s.next_due_date || '',
@@ -279,6 +295,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         productLabel: productLabelOf(r.split_revenue?.length
           ? r.split_revenue.map(s => s.product_id)
           : [r.product_id]),
+        productIds: (r.split_revenue?.length ? r.split_revenue.map(s => s.product_id) : [r.product_id]).filter(Boolean) as string[],
         value: r.amount || 0,
         cycle: 'Avulsa',
         date: r.dueDate || '',
@@ -294,6 +311,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = rows.filter(row => {
+      if (!casaProduto(row.productIds)) return false;
       if (rowFilter === 'sub' && row.kind !== 'sub') return false;
       if (rowFilter === 'avulsa' && row.kind !== 'charge') return false;
       if (rowFilter === 'overdue' && row.overdue === 0) return false;
@@ -315,7 +333,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
       }
     };
     return [...list].sort((a, b) => { const ka = key(a), kb = key(b); return ka < kb ? -dir : ka > kb ? dir : 0; });
-  }, [rows, search, rowFilter, sortField, sortDir]);
+  }, [rows, search, rowFilter, sortField, sortDir, productFilter]);
 
   const listTotals = useMemo(() => filteredRows.reduce(
     (acc, row) => ({
@@ -379,8 +397,8 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-2">
+      {/* Tabs + filtro de produto */}
+      <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={() => setTab('AGENDA')}
           className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${tab === 'AGENDA' ? 'bg-mcsystem-900 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
@@ -393,15 +411,28 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         >
           <Repeat size={16} /> Assinaturas e cobranças
         </button>
+        <label className="ml-auto flex items-center gap-2 text-sm text-gray-600">
+          <span className="hidden sm:inline">Produto</span>
+          <select value={productFilter} onChange={e => { setProductFilter(e.target.value); setExpanded(new Set()); }}
+            className={`px-3 py-2 rounded-lg border text-sm bg-white focus:border-mcsystem-500 outline-none ${productFilter ? 'border-mcsystem-500 text-mcsystem-700 font-semibold' : 'border-gray-200 text-gray-700'}`}
+            title="Filtra a agenda, a lista e a projeção">
+            <option value="">Todos os produtos</option>
+            {activeProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            <option value="SEM_PRODUTO">Sem produto</option>
+          </select>
+        </label>
       </div>
 
       {/* Content */}
       {tab === 'AGENDA' ? (
-        <ReceivablesAgenda records={financeRecords} companies={companies} products={products}
+        <ReceivablesAgenda records={financeRecords.filter(r => casaProduto(idsDoLancamento(r)))} companies={companies} products={products}
           onEditCharge={setEditCharge} onDeleteCharge={handleDeleteCharge} />
       ) : (
         <>
-          <BillingProjection charges={charges} subscriptions={subscriptions} products={products} companies={companies} />
+          <BillingProjection
+            charges={charges.filter(r => casaProduto(idsDoLancamento(r)))}
+            subscriptions={subscriptions.filter(s => casaProduto(idsDaAssinatura(s)))}
+            products={products} companies={companies} />
 
           <div className="flex flex-col md:flex-row gap-3">
             <div className="relative flex-1">

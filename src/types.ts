@@ -220,6 +220,9 @@ export interface Bank {
   agency: string;
   account: string;
   initialBalance: number;
+  /** Conta do Asaas: saldo lá na última sincronização e quando foi lido. */
+  asaas_balance?: number | null;
+  asaas_balance_at?: string | null;
 }
 
 export interface Product {

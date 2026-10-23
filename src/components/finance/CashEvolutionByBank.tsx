@@ -21,14 +21,14 @@ const parseDateUTC = (dateString: string | undefined): Date => {
 export const CashEvolutionByBank: React.FC<CashEvolutionByBankProps> = ({ records, banks }) => {
   const [selectedBankId, setSelectedBankId] = useState<string>(banks[0]?.id || '');
 
-  const { chartData, fullStatementData, selectedBank } = useMemo(() => {
+  const { chartData, fullStatementData, selectedBank, saldoHoje } = useMemo(() => {
     if (!selectedBankId || banks.length === 0) {
-      return { chartData: [], fullStatementData: [], selectedBank: null };
+      return { chartData: [], fullStatementData: [], selectedBank: null, saldoHoje: 0 };
     }
 
     const currentBank = banks.find(b => b.id === selectedBankId);
     if (!currentBank) {
-      return { chartData: [], fullStatementData: [], selectedBank: null };
+      return { chartData: [], fullStatementData: [], selectedBank: null, saldoHoje: 0 };
     }
     
     const bankTransactions = records
@@ -37,7 +37,9 @@ export const CashEvolutionByBank: React.FC<CashEvolutionByBankProps> = ({ record
 
     let projectedRunningBalance = currentBank.initialBalance || 0;
     const statementWithProjectedBalance = bankTransactions.map(t => {
-      projectedRunningBalance += (t.type === TransactionType.INCOME ? t.amount : -t.amount);
+      // O valor já vem com sinal (saída é negativa). Inverter de novo pelo tipo
+      // somava a despesa ao saldo.
+      projectedRunningBalance += t.amount || 0;
       return { ...t, balance: projectedRunningBalance };
     });
     
@@ -69,7 +71,7 @@ export const CashEvolutionByBank: React.FC<CashEvolutionByBankProps> = ({ record
       
       if (isRealizedTransaction && item.id !== 'initial_balance_record') {
         // FIX: Replaced 't.amount' with 'item.amount' as 't' is not defined in this scope.
-        lastRealizedBalance += (item.type === TransactionType.INCOME ? item.amount : -item.amount);
+        lastRealizedBalance += item.amount || 0;
       }
       
       return {
@@ -86,10 +88,14 @@ export const CashEvolutionByBank: React.FC<CashEvolutionByBankProps> = ({ record
         }
     }
 
-    return { 
-      chartData: finalChartData, 
+    return {
+      chartData: finalChartData,
       fullStatementData: statementWithInitialBalance,
-      selectedBank: currentBank 
+      selectedBank: currentBank,
+      // Mesma conta do sync do Asaas (saldo inicial + tudo que está pago na
+      // conta), para o número bater com o extrato de lá logo após sincronizar.
+      saldoHoje: (currentBank.initialBalance || 0)
+        + bankTransactions.filter(t => t.status === TransactionStatus.PAID).reduce((acc, t) => acc + (t.amount || 0), 0),
     };
 
   }, [records, banks, selectedBankId]);
@@ -125,6 +131,24 @@ export const CashEvolutionByBank: React.FC<CashEvolutionByBankProps> = ({ record
           </select>
         </div>
       </div>
+
+      {selectedBank && (
+        <div className="flex flex-wrap items-end justify-between gap-3 px-1">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Saldo hoje · {selectedBank.name}</p>
+            <p className={`font-display text-3xl font-semibold tabular-nums ${saldoHoje < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+              R$ {saldoHoje.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          </div>
+          {selectedBank.asaas_balance_at && (
+            <p className="text-xs text-gray-500 max-w-md text-right">
+              Conferido com o Asaas em {new Date(selectedBank.asaas_balance_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+              {' '}(saldo lá: R$ {Number(selectedBank.asaas_balance || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).
+              Taxas e ajustes do Asaas ficam no saldo inicial.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="bg-white p-4 sm:p-6 rounded-lg border border-gray-100 shadow-sm h-80">
         <ResponsiveContainer width="100%" height="100%">
@@ -173,7 +197,7 @@ export const CashEvolutionByBank: React.FC<CashEvolutionByBankProps> = ({ record
                       {t.type === TransactionType.INCOME ? t.amount.toLocaleString('pt-BR', {minimumFractionDigits: 2}) : '-'}
                     </td>
                     <td className={`p-3 text-right font-medium ${t.type === TransactionType.EXPENSE ? 'text-red-600' : ''}`}>
-                      {t.type === TransactionType.EXPENSE ? t.amount.toLocaleString('pt-BR', {minimumFractionDigits: 2}) : '-'}
+                      {t.type === TransactionType.EXPENSE ? Math.abs(t.amount).toLocaleString('pt-BR', {minimumFractionDigits: 2}) : '-'}
                     </td>
                     <td className={`p-3 text-right font-bold ${t.balance < 0 ? 'text-red-700' : 'text-gray-900'}`}>{t.balance.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</td>
                   </tr>

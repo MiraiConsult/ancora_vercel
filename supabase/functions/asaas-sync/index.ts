@@ -129,6 +129,7 @@ Deno.serve(async (req: Request) => {
     const counts = {
       customers_new: 0, customers_linked: 0, payments: 0, subscriptions: 0, bills: 0,
       payments_removed: 0, subscriptions_removed: 0,
+      asaas_balance: null as number | null,
     };
 
     // ---- 1) Customers ----
@@ -175,6 +176,18 @@ Deno.serve(async (req: Request) => {
       for (const p of productList) { if (d.includes(p.key)) return p.id; }
       return null;
     };
+
+    // Conta bancária "Asaas" do tenant: tudo que entra e sai pelo Asaas fica
+    // nela, senão o saldo da conta não tem como bater com o do Asaas.
+    const { data: bancos } = await admin.from('banks').select('id, name').eq('tenant_id', tenantId);
+    let asaasBankId: string | null = (bancos || []).find((b: any) => normalize(b.name) === 'asaas')?.id || null;
+    if (!asaasBankId) {
+      asaasBankId = `b_asaas_${Date.now()}`;
+      const { error } = await admin.from('banks').insert({
+        id: asaasBankId, tenant_id: tenantId, name: 'Asaas', agency: '', account: '', initialBalance: 0,
+      });
+      if (error) { console.warn('banco asaas:', error.message); asaasBankId = null; }
+    }
 
     const custToClient = new Map<string, string>();
     const newClients: any[] = [];
@@ -330,6 +343,7 @@ Deno.serve(async (req: Request) => {
         companyId: custToClient.get(p.customer) || byAsaas.get(p.customer)?.id || null,
         product_id: productId,
         split_revenue: split && split.length ? split : null,
+        bankId: p.status === 'RECEIVED_IN_CASH' ? null : asaasBankId,
         asaas_payment_id: p.id,
         asaas_invoice_url: p.invoiceUrl || null,
         asaas_subscription_id: p.subscription || null,
@@ -431,6 +445,7 @@ Deno.serve(async (req: Request) => {
         paymentDate: b.paymentDate || null,
         category: 'A CLASSIFICAR',
         needsValidation: true,
+        bankId: asaasBankId,
         asaas_bill_id: b.id,
       };
     }).filter(Boolean);
@@ -459,6 +474,50 @@ Deno.serve(async (req: Request) => {
         }
       }
       counts.bills = billRows.length;
+    }
+
+    // ---- 5) Saldo da conta Asaas ----
+    // Pagamento feito pelo Asaas (PIX, TED, boleto) nasce de um lançamento que
+    // pode estar em outra conta: ele saiu do Asaas, então fica na conta Asaas.
+    if (asaasBankId) {
+      // Duas rodadas: `neq` não pega a conta vazia (null <> x não é verdadeiro).
+      for (const semConta of [true, false]) {
+        let q = admin.from('financial_records').update({ bankId: asaasBankId })
+          .eq('tenant_id', tenantId)
+          .or('asaas_bill_id.not.is.null,asaas_transfer_id.not.is.null');
+        q = semConta ? q.is('bankId', null) : q.neq('bankId', asaasBankId);
+        const { error } = await q;
+        if (error) console.warn('conta asaas:', error.message);
+      }
+
+      // O saldo da conta no sistema é saldo inicial + lançamentos pagos dela.
+      // Taxa do Asaas, antecipação e estorno não viram lançamento, então ele
+      // nunca fechava. O saldo inicial passa a ser o que faz o saldo de hoje
+      // bater com o do Asaas — a diferença acumulada fica nele.
+      try {
+        const bal = await asaas('/finance/balance');
+        const saldoAsaas = Number(bal?.balance);
+        if (Number.isFinite(saldoAsaas)) {
+          let soma = 0;
+          for (let from = 0; ; from += 1000) {
+            const { data, error } = await admin.from('financial_records').select('amount')
+              .eq('tenant_id', tenantId).eq('bankId', asaasBankId).eq('status', 'Pago')
+              .order('id').range(from, from + 999);
+            if (error) throw new Error(error.message);
+            soma += (data || []).reduce((a: number, r: any) => a + (Number(r.amount) || 0), 0);
+            if (!data || data.length < 1000) break;
+          }
+          const inicial = Math.round((saldoAsaas - soma) * 100) / 100;
+          const { error } = await admin.from('banks')
+            .update({ initialBalance: inicial, asaas_balance: saldoAsaas, asaas_balance_at: new Date().toISOString() })
+            .eq('id', asaasBankId);
+          if (error) throw new Error(error.message);
+          counts.asaas_balance = saldoAsaas;
+        }
+      } catch (e) {
+        // Sem saldo, o resto do sync continua valendo.
+        console.warn('saldo asaas:', String((e as Error)?.message || e));
+      }
     }
 
     return new Response(JSON.stringify({ success: true, ...counts }), {

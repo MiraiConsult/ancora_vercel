@@ -2523,6 +2523,7 @@ const newRecords: FinancialRecord[] = [];
         : [...filtered].sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
       let acc = 0;
       chronological.forEach(r => { acc += (r.amount || 0); runningBalance.set(r.id, acc); });
+      const chronoPos = new Map(chronological.map((r, i) => [r.id, i]));
       const finalBalance = acc;
 
       const allSelected = filtered.length > 0 && selectedRecordIds.size === filtered.length;
@@ -2725,18 +2726,18 @@ const newRecords: FinancialRecord[] = [];
                   {/* Larguras fixas: sem elas o navegador encolhia a Descrição até
                       sobrar uma letra, enquanto Cliente e Categoria ficavam largas.
                       A Descrição fica com todo o espaço que sobra. */}
-                  <table className="w-full table-fixed text-left text-[13px] text-gray-700 min-w-[1180px] border-collapse">
+                  <table className="w-full table-fixed text-left text-[13px] text-gray-700 min-w-[1100px] border-collapse">
                       <colgroup>
                         <col style={{ width: 36 }} />
-                        <col style={{ width: 100 }} />
-                        <col style={{ width: 76 }} />
+                        <col style={{ width: 92 }} />
+                        <col style={{ width: 68 }} />
                         <col />
-                        <col style={{ width: 210 }} />
-                        <col style={{ width: 160 }} />
-                        <col style={{ width: 118 }} />
-                        <col style={{ width: 118 }} />
-                        <col style={{ width: 124 }} />
-                        <col style={{ width: 96 }} />
+                        <col style={{ width: 170 }} />
+                        <col style={{ width: 140 }} />
+                        <col style={{ width: 106 }} />
+                        <col style={{ width: 108 }} />
+                        <col style={{ width: 112 }} />
+                        <col style={{ width: 84 }} />
                       </colgroup>
                       <thead className="sticky top-0 z-10 bg-gray-100 text-gray-600 text-[12px] font-semibold">
                           <tr className="[&>th]:border-b [&>th]:border-r [&>th]:border-gray-300 [&>th]:px-2.5 [&>th]:py-2 [&>th]:whitespace-nowrap">
@@ -2775,31 +2776,46 @@ const newRecords: FinancialRecord[] = [];
                               const pagos = g.rows.filter(r => r.status === TransactionStatus.PAID).length;
                               const clientes = new Set(g.rows.map(r => r.companyId).filter(Boolean)).size;
                               const todosSel = g.rows.every(r => selectedRecordIds.has(r.id));
+                              const todosPagos = pagos === g.rows.length;
+                              const comp = g.rows[0]?.competenceDate
+                                ? new Date(g.rows[0].competenceDate).toLocaleDateString('pt-BR', { month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-';
+                              const ultima = g.rows.reduce((a, r) => ((chronoPos.get(r.id) ?? -1) > (chronoPos.get(a.id) ?? -1) ? r : a), g.rows[0]);
+                              const saldoGrupo = runningBalance.get(ultima.id) ?? 0;
+                              const fmtG = (v: number) => Math.abs(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                              const alternar = () => setOpenIncomeGroups(prev => { const n = new Set(prev); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; });
                               return (
                                 <React.Fragment key={'g:' + g.key}>
-                                  <tr onClick={() => setOpenIncomeGroups(prev => { const n = new Set(prev); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; })}
-                                    className="cursor-pointer bg-mcsystem-100/70 hover:bg-mcsystem-100 [&>td]:border-b [&>td]:border-r [&>td]:border-gray-200 [&>td]:px-2.5 [&>td]:py-2 [&>td]:whitespace-nowrap">
+                                  <tr onClick={alternar}
+                                    className={`group cursor-pointer [&>td]:border-b [&>td]:border-r [&>td]:border-gray-200 [&>td]:px-2.5 [&>td]:py-1.5 [&>td]:whitespace-nowrap ${aberto ? 'bg-mcsystem-50/80' : gi % 2 ? 'bg-gray-50/60 hover:bg-yellow-50/60' : 'bg-white hover:bg-yellow-50/60'}`}>
                                     <td className="text-center" onClick={e => e.stopPropagation()}>
                                       <div onClick={() => setSelectedRecordIds(prev => { const n = new Set(prev); g.rows.forEach(r => todosSel ? n.delete(r.id) : n.add(r.id)); return n; })}
-                                        className="cursor-pointer text-gray-400 hover:text-mcsystem-500 inline-flex" title="Selecionar as receitas deste produto">
+                                        className="cursor-pointer text-gray-300 hover:text-mcsystem-500 inline-flex" title="Selecionar as receitas deste grupo">
                                         {todosSel ? <CheckSquare size={15} className="text-mcsystem-500" /> : <Square size={15} />}
                                       </div>
                                     </td>
-                                    <td className="tabular-nums text-gray-700">{dt(datas[0])}</td>
-                                    <td className="text-gray-400">—</td>
-                                    <td className="overflow-hidden">
-                                      <div className="flex items-center gap-2 truncate">
-                                        <ChevronDown size={14} className={`flex-shrink-0 text-gray-500 transition-transform ${aberto ? '' : '-rotate-90'}`} />
-                                        <span className="font-semibold text-gray-900 truncate min-w-0" title={g.nome}>{g.nome}</span>
-                                        <span className="text-gray-500 flex-shrink-0">· {g.rows.length} receitas</span>
+                                    <td className="tabular-nums">{dt(datas[0])}</td>
+                                    <td className="tabular-nums text-gray-500">{comp}</td>
+                                    <td colSpan={3} className="overflow-hidden">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="flex-shrink-0 inline-flex items-center justify-center min-w-[22px] h-5 px-1.5 rounded-full bg-mcsystem-100 text-mcsystem-700 text-[11px] font-bold tabular-nums">{g.rows.length}</span>
+                                        <span className="font-semibold text-gray-900 truncate" title={g.nome}>{g.nome}</span>
+                                        <span className="text-gray-500 truncate">receitas de {clientes} cliente{clientes === 1 ? '' : 's'}</span>
                                       </div>
                                     </td>
-                                    <td className="text-gray-600">{clientes} cliente{clientes === 1 ? '' : 's'}</td>
-                                    <td className="text-gray-400">—</td>
-                                    <td className="text-gray-600 text-[12px]">{pagos} pago{pagos === 1 ? '' : 's'} · {g.rows.length - pagos} em aberto</td>
-                                    <td className="text-right tabular-nums font-bold text-green-700">{Math.abs(total).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                    <td></td>
-                                    <td className="text-center text-[12px] text-mcsystem-700 font-semibold">{aberto ? 'Fechar' : 'Abrir'}</td>
+                                    <td>
+                                      <span className="inline-flex items-center gap-1.5 text-[13px]">
+                                        <span className={`h-2 w-2 rounded-full ${todosPagos ? 'bg-green-500' : 'bg-yellow-400'}`} />
+                                        {todosPagos ? 'Pagas' : `${pagos} de ${g.rows.length} pagas`}
+                                      </span>
+                                    </td>
+                                    <td className="text-right tabular-nums font-semibold text-green-700">{fmtG(total)}</td>
+                                    <td className={`text-right tabular-nums ${saldoGrupo < 0 ? 'text-red-600' : 'text-gray-700'}`}>{saldoGrupo < 0 ? '−' : ''}{fmtG(saldoGrupo)}</td>
+                                    <td className="text-center" onClick={e => e.stopPropagation()}>
+                                      <button type="button" onClick={alternar} aria-label={aberto ? 'Fechar grupo' : 'Abrir grupo'} title={aberto ? 'Fechar' : 'Ver as receitas'}
+                                        className="p-1 rounded text-gray-500 hover:text-mcsystem-700 hover:bg-mcsystem-50">
+                                        <ChevronDown size={16} className={`transition-transform ${aberto ? 'rotate-180' : ''}`} />
+                                      </button>
+                                    </td>
                                   </tr>
                                   {aberto && g.rows.map((r, j) => renderRow(r, j, true))}
                                 </React.Fragment>

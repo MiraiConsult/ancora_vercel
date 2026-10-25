@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { FinancialRecord, Product, Company, Subscription, User } from '../types';
+import { FinancialRecord, Product, Company, Subscription, User, Bank } from '../types';
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   BarChart, LineChart, Cell,
@@ -13,6 +13,8 @@ interface OverviewDashboardProps {
   products: Product[];
   companies: Company[];
   subscriptions: Subscription[];
+  /** Contas bancárias: o card Saldo segue a conta do Asaas. */
+  banks?: Bank[];
   currentUser: User;
   onNavigate?: (page: string) => void;
 }
@@ -77,7 +79,7 @@ const monthlyFactor = (cycle?: string) => {
   }
 };
 
-export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, products, companies, subscriptions, onNavigate }) => {
+export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, products, companies, subscriptions, banks = [], onNavigate }) => {
   const productName = (id?: string | null) => products.find(p => p.id === id)?.name || null;
   const companyName = (id?: string) => companies.find(c => c.id === id)?.name || 'Sem cliente';
 
@@ -318,6 +320,25 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
   const arpu = recurring.activeSubscribers > 0 ? recurring.mrr / recurring.activeSubscribers : 0;
 
   /**
+   * Saldo em conta = o do Asaas. O sync lê o saldo lá a cada hora e grava na
+   * conta "Asaas"; é esse número que vale. Sem leitura ainda, cai na conta do
+   * sistema (saldo inicial + lançamentos pagos da conta).
+   */
+  const saldoAsaas = useMemo(() => {
+    const conta = banks.find(b => b.asaas_balance_at) || banks.find(b => (b.name || '').trim().toLowerCase() === 'asaas');
+    if (!conta) return null;
+    const movimentos = records.filter(r => r.bankId === conta.id);
+    const calculado = (conta.initialBalance || 0)
+      + movimentos.filter(r => (r.status as string) === 'Pago').reduce((a, r) => a + (r.amount || 0), 0);
+    return {
+      conta,
+      valor: conta.asaas_balance ?? calculado,
+      lidoEm: conta.asaas_balance_at || null,
+      movimentos,
+    };
+  }, [banks, records]);
+
+  /**
    * Um card por sistema: recorrente contratado hoje, clientes com assinatura,
    * receita dos últimos 5 meses (competência) e o total do ano escolhido.
    * MDT soma mensalidades e acordos, que são as duas receitas dele.
@@ -541,11 +562,23 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
               onClick={() => openDrill('Recebido', incomeRows(r => (r.status as string) === 'Pago'), 'entries')} />
             <Kpi compact label="A receber" value={brl(primary.pendingIncome)}
               onClick={() => openDrill('A receber', incomeRows(r => (r.status as string) === 'Pendente'), 'entries')} />
-            <Kpi compact label="Saldo" value={brl(primary.balance)} hint={`Margem ${pct(primary.margin)}`}
-              delta={compare ? deltaOf(primary.balance, compare.balance) : null} compareYear={compareYear}
-              onClick={() => openDrill('Despesas do período',
-                validRecords.filter(r => r.amount < 0 && inPeriod(r))
-                  .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '')).map(toRow), 'entries')} />
+            {saldoAsaas ? (
+              <Kpi compact label="Saldo no Asaas" value={brlExact(saldoAsaas.valor)}
+                tone={saldoAsaas.valor < 0 ? 'text-red-600' : undefined}
+                hint={`${saldoAsaas.lidoEm
+                  ? `conferido ${new Date(saldoAsaas.lidoEm).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`
+                  : 'ainda não conferido'} · resultado ${brl(primary.balance)} (${pct(primary.margin)})`}
+                onClick={() => openDrill('Movimentações da conta Asaas',
+                  saldoAsaas.movimentos.filter(r => (r.status as string) === 'Pago')
+                    .sort((a, b) => (b.paymentDate || b.dueDate || '').localeCompare(a.paymentDate || a.dueDate || ''))
+                    .map(r => ({ ...toRow(r), value: r.amount, date: r.paymentDate || r.dueDate })), 'entries')} />
+            ) : (
+              <Kpi compact label="Saldo" value={brl(primary.balance)} hint={`Margem ${pct(primary.margin)}`}
+                delta={compare ? deltaOf(primary.balance, compare.balance) : null} compareYear={compareYear}
+                onClick={() => openDrill('Despesas do período',
+                  validRecords.filter(r => r.amount < 0 && inPeriod(r))
+                    .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '')).map(toRow), 'entries')} />
+            )}
             <Kpi compact label="ARPU" value={brl(arpu)} hint={ltv !== null ? `LTV ${brl(ltv)}` : undefined}
               onClick={() => openDrill('Receita recorrente por cliente', recurring.activeClientList, 'companies')} />
           </div>

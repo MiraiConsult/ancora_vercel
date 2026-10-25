@@ -576,6 +576,7 @@ const handleAddUser = async (newUser: User) => {
             products={products}
             companies={companies}
             subscriptions={subscriptions}
+            banks={banks}
             currentUser={user}
             onNavigate={navigate}
           />

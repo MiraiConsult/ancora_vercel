@@ -2579,7 +2579,7 @@ const newRecords: FinancialRecord[] = [];
                                   <td className="text-center" onClick={e => e.stopPropagation()}><div onClick={() => handleSelectOne(r.id)} className="cursor-pointer text-gray-300 hover:text-mcsystem-500 inline-flex">{isSelected ? <CheckSquare size={15} className="text-mcsystem-500" /> : <Square size={15} />}</div></td>
                                   <td className="tabular-nums">{new Date(r.dueDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</td>
                                   <td className="tabular-nums text-gray-500">{r.competenceDate ? new Date(r.competenceDate).toLocaleDateString('pt-BR', {month: '2-digit', year: 'numeric', timeZone: 'UTC'}) : '-'}</td>
-                                  <td className="max-w-0 w-full"><div className="truncate text-gray-900" title={r.description}>{r.description}</div></td>
+                                  <td className="overflow-hidden"><div className="truncate text-gray-900" title={r.description}>{r.description}</div></td>
                                   <td className="max-w-[200px]"><div className="truncate text-gray-600" title={parte}>{parte || <span className="text-gray-300">—</span>}</div></td>
                                   <td className="max-w-[170px]"><div className="truncate text-gray-600" title={categoria}>{categoria}{(r.split_rubrics?.length || 0) > 1 && (<span className="ml-1 text-[11px] font-bold text-mcsystem-700" title={r.split_rubrics!.map(sp => `${chartOfAccounts.find(c => c.id === sp.rubric_id)?.rubricName || 'Rubrica'}: ${sp.description || ''} ${sp.amount}`).join('\n')}>+{r.split_rubrics!.length - 1}</span>)}</div></td>
                                   <td onClick={e => e.stopPropagation()}><div className="relative inline-flex items-center"><span className={`absolute left-1.5 h-2 w-2 rounded-full pointer-events-none ${r.status === TransactionStatus.PAID ? 'bg-green-500' : r.status === TransactionStatus.OVERDUE ? 'bg-red-500' : 'bg-yellow-400'}`} /><select value={r.status} onChange={(e) => handleStatusChange(r.id, e.target.value as TransactionStatus)} className="appearance-none bg-transparent pl-5 pr-5 py-0.5 rounded text-[13px] cursor-pointer outline-none hover:bg-gray-100 focus:ring-1 focus:ring-mcsystem-500"><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.PAID}>Pago</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select><ChevronDown size={11} className="absolute right-1 pointer-events-none text-gray-400" /></div></td>
@@ -2722,7 +2722,22 @@ const newRecords: FinancialRecord[] = [];
               {/* Tabela no jeito de planilha: grade, uma linha por lançamento, cabeçalho
                   fixo ao rolar e totais no rodapé. O clique na linha abre o detalhe. */}
               <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-auto max-h-[72vh]">
-                  <table className="w-full text-left text-[13px] text-gray-700 min-w-[1100px] border-collapse">
+                  {/* Larguras fixas: sem elas o navegador encolhia a Descrição até
+                      sobrar uma letra, enquanto Cliente e Categoria ficavam largas.
+                      A Descrição fica com todo o espaço que sobra. */}
+                  <table className="w-full table-fixed text-left text-[13px] text-gray-700 min-w-[1180px] border-collapse">
+                      <colgroup>
+                        <col style={{ width: 36 }} />
+                        <col style={{ width: 100 }} />
+                        <col style={{ width: 76 }} />
+                        <col />
+                        <col style={{ width: 210 }} />
+                        <col style={{ width: 160 }} />
+                        <col style={{ width: 118 }} />
+                        <col style={{ width: 118 }} />
+                        <col style={{ width: 124 }} />
+                        <col style={{ width: 96 }} />
+                      </colgroup>
                       <thead className="sticky top-0 z-10 bg-gray-100 text-gray-600 text-[12px] font-semibold">
                           <tr className="[&>th]:border-b [&>th]:border-r [&>th]:border-gray-300 [&>th]:px-2.5 [&>th]:py-2 [&>th]:whitespace-nowrap">
                             <th className="w-9 text-center"><div onClick={() => handleSelectAll(filtered)} className="cursor-pointer text-gray-400 hover:text-mcsystem-500 inline-flex">{allSelected ? <CheckSquare size={15} className="text-mcsystem-500" /> : <Square size={15} />}</div></th>
@@ -2770,12 +2785,13 @@ const newRecords: FinancialRecord[] = [];
                                         {todosSel ? <CheckSquare size={15} className="text-mcsystem-500" /> : <Square size={15} />}
                                       </div>
                                     </td>
-                                    <td colSpan={2} className="tabular-nums text-gray-600">{datas.length > 1 && datas[0] !== datas[datas.length - 1] ? `${dt(datas[0])} – ${dt(datas[datas.length - 1])}` : dt(datas[0])}</td>
-                                    <td className="max-w-0 w-full">
+                                    <td className="tabular-nums text-gray-700">{dt(datas[0])}</td>
+                                    <td className="text-gray-400">—</td>
+                                    <td className="overflow-hidden">
                                       <div className="flex items-center gap-2 truncate">
                                         <ChevronDown size={14} className={`flex-shrink-0 text-gray-500 transition-transform ${aberto ? '' : '-rotate-90'}`} />
-                                        <span className="font-semibold text-gray-900 truncate">{g.nome}</span>
-                                        <span className="text-gray-500">· {g.rows.length} receita{g.rows.length === 1 ? '' : 's'}</span>
+                                        <span className="font-semibold text-gray-900 truncate min-w-0" title={g.nome}>{g.nome}</span>
+                                        <span className="text-gray-500 flex-shrink-0">· {g.rows.length} receitas</span>
                                       </div>
                                     </td>
                                     <td className="text-gray-600">{clientes} cliente{clientes === 1 ? '' : 's'}</td>

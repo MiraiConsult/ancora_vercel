@@ -3,7 +3,7 @@ import { FinancialRecord, Company, Product } from '../types';
 import { asaasCustomerContacts, AsaasContact } from '../services/asaasService';
 import {
   AlertTriangle, CalendarClock, CheckCircle2, ExternalLink, MessageCircle, Loader2,
-  Search, Copy, Check, Phone, ChevronDown, QrCode, Pencil, Trash2,
+  Search, Copy, Check, Phone, ChevronDown, QrCode, Pencil, Trash2, X,
 } from 'lucide-react';
 import { ChargeShareModal } from './ChargeShareModal';
 
@@ -14,6 +14,8 @@ interface ReceivablesAgendaProps {
   /** Mesmas ações da aba de assinaturas, para não ter que trocar de aba. */
   onEditCharge?: (r: FinancialRecord) => void;
   onDeleteCharge?: (r: FinancialRecord) => void;
+  /** Exclusão em massa; devolve os ids que de fato saíram. */
+  onDeleteCharges?: (rs: FinancialRecord[]) => Promise<string[]>;
 }
 
 const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
@@ -59,7 +61,7 @@ const buildMessage = (clientName: string, r: FinancialRecord, late: number) => {
   ].join('\n');
 };
 
-export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, companies, products, onEditCharge, onDeleteCharge }) => {
+export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, companies, products, onEditCharge, onDeleteCharge, onDeleteCharges }) => {
   const [contacts, setContacts] = useState<Record<string, AsaasContact>>({});
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [contactError, setContactError] = useState<string | null>(null);
@@ -67,6 +69,16 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [horizon, setHorizon] = useState(30);
   const [shareCharge, setShareCharge] = useState<FinancialRecord | null>(null);
+  /** Cobranças marcadas para agir em grupo (cobrar ou excluir). */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  /**
+   * Fila de cobrança: o navegador só deixa abrir uma janela do WhatsApp por
+   * clique, então o disparo em massa passa cliente a cliente, cada um com o
+   * seu clique.
+   */
+  const [fila, setFila] = useState<FinancialRecord[] | null>(null);
+  const [filaPos, setFilaPos] = useState(0);
+  const [copiouTodas, setCopiouTodas] = useState(false);
 
   const companyById = useMemo(() => new Map(companies.map(c => [c.id, c])), [companies]);
   const clientName = (id?: string) => companyById.get(id || '')?.name || 'Sem cliente';
@@ -108,6 +120,28 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate)), [open, today, horizon]);
 
   const sum = (list: FinancialRecord[]) => list.reduce((s, r) => s + r.amount, 0);
+
+  // Na ordem da tela (atrasados, depois próximos). Some sozinho da seleção o
+  // que saiu da lista — paga, excluída ou fora do filtro.
+  const selecionadas = useMemo(
+    () => [...overdue, ...upcoming].filter(r => selected.has(r.id)),
+    [overdue, upcoming, selected],
+  );
+  const alternar = (id: string) => setSelected(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
+  const alternarTodos = (list: FinancialRecord[]) => setSelected(prev => {
+    const n = new Set(prev);
+    const todos = list.every(r => n.has(r.id));
+    list.forEach(r => (todos ? n.delete(r.id) : n.add(r.id)));
+    return n;
+  });
+  const CheckTodos: React.FC<{ list: FinancialRecord[]; label: string }> = ({ list, label }) => (
+    <input type="checkbox" aria-label={label} title={label}
+      checked={list.length > 0 && list.every(r => selected.has(r.id))}
+      onChange={() => alternarTodos(list)}
+      className="h-4 w-4 rounded border-gray-300 accent-[#3c8d10] cursor-pointer" />
+  );
   const dueToday = open.filter(r => r.dueDate === today);
   const next7 = open.filter(r => r.dueDate >= today && daysBetween(r.dueDate) <= 7);
 
@@ -146,8 +180,12 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
     const lateDays = Math.max(0, -daysBetween(r.dueDate));
     const pn = productName(r.product_id);
     return (
-      <div className="flex flex-col md:flex-row md:items-center gap-3 px-5 py-3.5 hover:bg-gray-50 transition-colors">
-        <div className="flex-1 min-w-0">
+      <div className={`flex flex-col md:flex-row md:items-center gap-3 px-5 py-3.5 transition-colors ${selected.has(r.id) ? 'bg-mcsystem-50' : 'hover:bg-gray-50'}`}>
+        <div className="flex-1 min-w-0 flex items-start gap-3">
+          <input type="checkbox" checked={selected.has(r.id)} onChange={() => alternar(r.id)}
+            aria-label={`Selecionar cobrança de ${clientName(r.companyId)}`}
+            className="mt-1 h-4 w-4 rounded border-gray-300 accent-[#3c8d10] cursor-pointer flex-shrink-0" />
+          <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-gray-900 truncate">{clientName(r.companyId)}</span>
             {pn && <span className="text-[11px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{pn}</span>}
@@ -158,6 +196,7 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
             )}
           </div>
           <div className="text-xs text-gray-400 truncate mt-0.5">{r.description}</div>
+          </div>
         </div>
 
         <div className="flex items-center gap-4 flex-shrink-0">
@@ -256,6 +295,7 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
       <div className="bg-white rounded-2xl border border-gray-200/80 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
+            {overdue.length > 0 && <CheckTodos list={overdue} label="Selecionar todos os atrasados" />}
             <AlertTriangle size={17} className="text-red-500" />
             <h3 className="font-semibold text-gray-900">Atrasados</h3>
             <span className="text-xs text-gray-400">{overdue.length} · {brl(sum(overdue))}</span>
@@ -291,7 +331,10 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
               return (
                 <div key={date}>
                   <div className="px-5 py-2 bg-gray-50/80 border-y border-gray-100 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-600">{fmtDate(date)} · {label}</span>
+                    <span className="flex items-center gap-2.5 text-xs font-semibold text-gray-600">
+                      <CheckTodos list={list} label={`Selecionar as cobranças de ${fmtDate(date)}`} />
+                      {fmtDate(date)} · {label}
+                    </span>
                     <span className="text-xs text-gray-400 tabular-nums">{brl(list.reduce((s, r) => s + r.amount, 0))}</span>
                   </div>
                   <div className="divide-y divide-gray-100">
@@ -303,6 +346,91 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
           </div>
         )}
       </div>
+
+      {selecionadas.length > 0 && (
+        <div className="sticky bottom-4 z-20 flex flex-wrap items-center gap-3 rounded-2xl bg-mirai-panel text-white px-5 py-3.5 shadow-xl">
+          <span className="text-sm">
+            <b>{selecionadas.length}</b> selecionada{selecionadas.length === 1 ? '' : 's'} · <span className="tabular-nums">{brl(sum(selecionadas))}</span>
+          </span>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button onClick={() => { setFila(selecionadas); setFilaPos(0); }}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-mirai-lime text-mirai-ink hover:brightness-95">
+              <MessageCircle size={15} /> Cobrar no WhatsApp
+            </button>
+            <button onClick={() => {
+                const txt = selecionadas.map(r => buildMessage(clientName(r.companyId), r, Math.max(0, -daysBetween(r.dueDate)))).join('\n\n———\n\n');
+                navigator.clipboard?.writeText(txt);
+                setCopiouTodas(true); setTimeout(() => setCopiouTodas(false), 1600);
+              }}
+              className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15">
+              {copiouTodas ? <Check size={15} /> : <Copy size={15} />} Copiar mensagens
+            </button>
+            {onDeleteCharges && (
+              <button onClick={async () => {
+                  const saiu = await onDeleteCharges(selecionadas);
+                  if (saiu.length) setSelected(prev => { const n = new Set(prev); saiu.forEach(id => n.delete(id)); return n; });
+                }}
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl bg-white/10 hover:bg-red-500/80">
+                <Trash2 size={15} /> Excluir
+              </button>
+            )}
+            <button onClick={() => setSelected(new Set())} aria-label="Limpar seleção"
+              className="p-2 rounded-xl text-[#b9c6ba] hover:text-white hover:bg-white/10"><X size={16} /></button>
+          </div>
+        </div>
+      )}
+
+      {fila && (() => {
+        const r = fila[filaPos];
+        const fechar = () => setFila(null);
+        if (!r) {
+          return (
+            <div className="fixed inset-0 z-[90] bg-black/40 flex items-center justify-center p-4" onClick={fechar}>
+              <div className="bg-white rounded-2xl p-6 w-full max-w-md text-center space-y-3" onClick={e => e.stopPropagation()}>
+                <CheckCircle2 size={36} className="mx-auto text-mcsystem-600" />
+                <p className="font-semibold text-gray-900">Fila concluída</p>
+                <p className="text-sm text-gray-500">{fila.length} cobrança(s) passadas pelo WhatsApp.</p>
+                <button onClick={() => { fechar(); setSelected(new Set()); }}
+                  className="mt-2 px-4 py-2 rounded-xl bg-mcsystem-500 text-white text-sm font-semibold hover:bg-mcsystem-400">Fechar</button>
+              </div>
+            </div>
+          );
+        }
+        const tel = waPhone(contactFor(r.companyId)?.phone);
+        const atraso = Math.max(0, -daysBetween(r.dueDate));
+        const msg = buildMessage(clientName(r.companyId), r, atraso);
+        return (
+          <div className="fixed inset-0 z-[90] bg-black/40 flex items-center justify-center p-4" onClick={fechar}>
+            <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-mcsystem-700">Cobrança {filaPos + 1} de {fila.length}</p>
+                  <p className="font-semibold text-gray-900">{clientName(r.companyId)}</p>
+                </div>
+                <button onClick={fechar} aria-label="Fechar fila" className="p-1.5 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100"><X size={18} /></button>
+              </div>
+              <div className="px-6 py-4 space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">{r.description}</span>
+                  <span className="font-semibold tabular-nums">{brl(r.amount)}</span>
+                </div>
+                <p className={`text-xs ${atraso ? 'text-red-600' : 'text-gray-500'}`}>
+                  {atraso ? `${atraso} dia(s) em atraso · venceu em ${fmtDate(r.dueDate)}` : `Vence em ${fmtDate(r.dueDate)}`}
+                  {!tel && ' · sem telefone no Asaas (a mensagem será copiada)'}
+                </p>
+                <pre className="whitespace-pre-wrap text-xs text-gray-700 bg-gray-50 rounded-xl p-3 max-h-48 overflow-auto font-sans">{msg}</pre>
+              </div>
+              <div className="px-6 py-4 bg-gray-50 flex items-center justify-between gap-2">
+                <button onClick={() => setFilaPos(p => p + 1)} className="text-sm text-gray-500 hover:text-gray-800">Pular</button>
+                <button onClick={() => { sendWhatsApp(r); setFilaPos(p => p + 1); }}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-[#25D366] text-[#073b1c] hover:brightness-95">
+                  <MessageCircle size={15} /> {tel ? 'Abrir WhatsApp e ir para o próximo' : 'Copiar e ir para o próximo'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

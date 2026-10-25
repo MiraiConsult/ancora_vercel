@@ -205,6 +205,30 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
     }
   };
 
+  /**
+   * Exclusão em massa (agenda): uma confirmação só, uma chamada por cobrança.
+   * O Asaas recusa apagar cobrança paga — as que falharem são listadas no fim
+   * e continuam na tela.
+   */
+  const handleDeleteCharges = async (rs: FinancialRecord[]): Promise<string[]> => {
+    if (!rs.length) return [];
+    const total = rs.reduce((a, r) => a + (r.amount || 0), 0);
+    if (!window.confirm(`Excluir ${rs.length} cobrança(s), somando ${formatBRL(total)}?\nIsso também remove no Asaas (só funciona nas que não foram pagas).`)) return [];
+    const ok: string[] = [];
+    const falhas: string[] = [];
+    for (const r of rs) {
+      try {
+        await asaasDeleteCharge({ recordId: r.id, paymentId: r.asaas_payment_id });
+        ok.push(r.id);
+      } catch (e: any) {
+        falhas.push(`${clientName(r.companyId)} (${formatBRL(r.amount)}): ${e.message}`);
+      }
+    }
+    if (ok.length) setFinanceRecords(prev => prev.filter(x => !ok.includes(x.id)));
+    if (falhas.length) alert(`${ok.length} excluída(s). Não foi possível excluir ${falhas.length}:\n\n${falhas.join('\n')}`);
+    return ok;
+  };
+
   const handleDeleteSub = async (s: Subscription) => {
     if (!window.confirm(`Excluir a assinatura de ${clientName(s.client_id)} (${formatBRL(s.value)})?\nIsso também remove no Asaas.`)) return;
     try {
@@ -426,7 +450,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
       {/* Content */}
       {tab === 'AGENDA' ? (
         <ReceivablesAgenda records={financeRecords.filter(r => casaProduto(idsDoLancamento(r)))} companies={companies} products={products}
-          onEditCharge={setEditCharge} onDeleteCharge={handleDeleteCharge} />
+          onEditCharge={setEditCharge} onDeleteCharge={handleDeleteCharge} onDeleteCharges={handleDeleteCharges} />
       ) : (
         <>
           <BillingProjection

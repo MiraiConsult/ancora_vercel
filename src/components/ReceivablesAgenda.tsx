@@ -250,7 +250,7 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
   };
 
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 ${selecionadas.length > 0 ? 'pb-24' : ''}`}>
       {shareCharge && (
         <ChargeShareModal
           charge={shareCharge}
@@ -351,14 +351,17 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
       </div>
 
       {selecionadas.length > 0 && (
-        <div className="sticky bottom-4 z-20 flex flex-wrap items-center gap-3 rounded-2xl bg-mirai-panel text-white px-5 py-3.5 shadow-xl">
+        // Fixa na tela, e não "sticky": o <main> do app tem overflow-x-hidden,
+        // o que anula o sticky — a barra ficava lá no fim da página.
+        <div role="toolbar" aria-label="Ações nas cobranças selecionadas"
+          className="fixed bottom-6 left-4 right-4 lg:left-auto lg:right-8 z-40 flex flex-wrap items-center gap-3 rounded-2xl bg-mirai-panel text-white px-5 py-3.5 shadow-2xl">
           <span className="text-sm">
             <b>{selecionadas.length}</b> selecionada{selecionadas.length === 1 ? '' : 's'} · <span className="tabular-nums">{brl(sum(selecionadas))}</span>
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <button onClick={() => { setFila(selecionadas); setFilaPos(0); }}
               className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-mirai-lime text-mirai-ink hover:brightness-95">
-              <MessageCircle size={15} /> Cobrar no WhatsApp
+              <MessageCircle size={15} /> Reenviar no WhatsApp
             </button>
             <button onClick={() => {
                 const txt = selecionadas.map(r => buildMessage(clientName(r.companyId), r, Math.max(0, -daysBetween(r.dueDate)))).join('\n\n———\n\n');
@@ -374,7 +377,7 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
                   if (saiu.length) setSelected(prev => { const n = new Set(prev); saiu.forEach(id => n.delete(id)); return n; });
                 }}
                 className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl bg-white/10 hover:bg-red-500/80">
-                <Trash2 size={15} /> Excluir
+                <Trash2 size={15} /> Cancelar cobranças
               </button>
             )}
             <button onClick={() => setSelected(new Set())} aria-label="Limpar seleção"

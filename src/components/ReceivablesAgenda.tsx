@@ -136,7 +136,10 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
     list.forEach(r => (todos ? n.delete(r.id) : n.add(r.id)));
     return n;
   });
-  const CheckTodos: React.FC<{ list: FinancialRecord[]; label: string }> = ({ list, label }) => (
+  // Funções que devolvem JSX, e não componentes: componente declarado aqui
+  // dentro é um tipo novo a cada render, e o React remontava a lista inteira a
+  // cada clique na caixinha — a tela voltava para o topo.
+  const checkTodos = (list: FinancialRecord[], label: string) => (
     <input type="checkbox" aria-label={label} title={label}
       checked={list.length > 0 && list.every(r => selected.has(r.id))}
       onChange={() => alternarTodos(list)}
@@ -174,13 +177,13 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
     setTimeout(() => setCopiedId(null), 1600);
   };
 
-  const Row: React.FC<{ r: FinancialRecord; late?: boolean }> = ({ r, late }) => {
+  const renderRow = (r: FinancialRecord, late?: boolean) => {
     const c = contactFor(r.companyId);
     const hasPhone = !!waPhone(c?.phone);
     const lateDays = Math.max(0, -daysBetween(r.dueDate));
     const pn = productName(r.product_id);
     return (
-      <div className={`flex flex-col md:flex-row md:items-center gap-3 px-5 py-3.5 transition-colors ${selected.has(r.id) ? 'bg-mcsystem-50' : 'hover:bg-gray-50'}`}>
+      <div key={r.id} className={`flex flex-col md:flex-row md:items-center gap-3 px-5 py-3.5 transition-colors ${selected.has(r.id) ? 'bg-mcsystem-50' : 'hover:bg-gray-50'}`}>
         <div className="flex-1 min-w-0 flex items-start gap-3">
           <input type="checkbox" checked={selected.has(r.id)} onChange={() => alternar(r.id)}
             aria-label={`Selecionar cobrança de ${clientName(r.companyId)}`}
@@ -295,7 +298,7 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
       <div className="bg-white rounded-2xl border border-gray-200/80 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {overdue.length > 0 && <CheckTodos list={overdue} label="Selecionar todos os atrasados" />}
+            {overdue.length > 0 && checkTodos(overdue, 'Selecionar todos os atrasados')}
             <AlertTriangle size={17} className="text-red-500" />
             <h3 className="font-semibold text-gray-900">Atrasados</h3>
             <span className="text-xs text-gray-400">{overdue.length} · {brl(sum(overdue))}</span>
@@ -309,7 +312,7 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {overdue.map(r => <Row key={r.id} r={r} late />)}
+            {overdue.map(r => renderRow(r, true))}
           </div>
         )}
       </div>
@@ -332,13 +335,13 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
                 <div key={date}>
                   <div className="px-5 py-2 bg-gray-50/80 border-y border-gray-100 flex items-center justify-between">
                     <span className="flex items-center gap-2.5 text-xs font-semibold text-gray-600">
-                      <CheckTodos list={list} label={`Selecionar as cobranças de ${fmtDate(date)}`} />
+                      {checkTodos(list, `Selecionar as cobranças de ${fmtDate(date)}`)}
                       {fmtDate(date)} · {label}
                     </span>
                     <span className="text-xs text-gray-400 tabular-nums">{brl(list.reduce((s, r) => s + r.amount, 0))}</span>
                   </div>
                   <div className="divide-y divide-gray-100">
-                    {list.map(r => <Row key={r.id} r={r} />)}
+                    {list.map(r => renderRow(r))}
                   </div>
                 </div>
               );

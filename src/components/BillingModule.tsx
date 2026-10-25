@@ -206,26 +206,38 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   };
 
   /**
-   * Exclusão em massa (agenda): uma confirmação só, uma chamada por cobrança.
-   * O Asaas recusa apagar cobrança paga — as que falharem são listadas no fim
-   * e continuam na tela.
+   * Exclusão em massa (agenda): uma confirmação só, uma chamada por cobrança,
+   * quatro de cada vez. Cada uma sai da tela assim que o Asaas confirma — sem
+   * isso a lista ficava parada por quase um minuto e parecia travada. O Asaas
+   * recusa apagar cobrança paga: as que falharem são listadas no fim.
    */
-  const handleDeleteCharges = async (rs: FinancialRecord[]): Promise<string[]> => {
+  const handleDeleteCharges = async (
+    rs: FinancialRecord[],
+    onProgress?: (feitos: number, total: number) => void,
+  ): Promise<string[]> => {
     if (!rs.length) return [];
     const total = rs.reduce((a, r) => a + (r.amount || 0), 0);
-    if (!window.confirm(`Excluir ${rs.length} cobrança(s), somando ${formatBRL(total)}?\nIsso também remove no Asaas (só funciona nas que não foram pagas).`)) return [];
+    if (!window.confirm(`Cancelar ${rs.length} cobrança(s), somando ${formatBRL(total)}?\nIsso também remove no Asaas (só funciona nas que não foram pagas).`)) return [];
     const ok: string[] = [];
     const falhas: string[] = [];
-    for (const r of rs) {
-      try {
-        await asaasDeleteCharge({ recordId: r.id, paymentId: r.asaas_payment_id });
-        ok.push(r.id);
-      } catch (e: any) {
-        falhas.push(`${clientName(r.companyId)} (${formatBRL(r.amount)}): ${e.message}`);
+    let feitos = 0;
+    onProgress?.(0, rs.length);
+    const fila = [...rs];
+    const trabalhador = async () => {
+      for (let r = fila.shift(); r; r = fila.shift()) {
+        try {
+          await asaasDeleteCharge({ recordId: r.id, paymentId: r.asaas_payment_id });
+          ok.push(r.id);
+          const id = r.id;
+          setFinanceRecords(prev => prev.filter(x => x.id !== id));
+        } catch (e: any) {
+          falhas.push(`${clientName(r.companyId)} (${formatBRL(r.amount)}): ${e.message}`);
+        }
+        onProgress?.(++feitos, rs.length);
       }
-    }
-    if (ok.length) setFinanceRecords(prev => prev.filter(x => !ok.includes(x.id)));
-    if (falhas.length) alert(`${ok.length} excluída(s). Não foi possível excluir ${falhas.length}:\n\n${falhas.join('\n')}`);
+    };
+    await Promise.all(Array.from({ length: Math.min(4, rs.length) }, trabalhador));
+    if (falhas.length) alert(`${ok.length} cancelada(s). Não foi possível cancelar ${falhas.length}:\n\n${falhas.join('\n')}`);
     return ok;
   };
 

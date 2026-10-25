@@ -15,7 +15,7 @@ interface ReceivablesAgendaProps {
   onEditCharge?: (r: FinancialRecord) => void;
   onDeleteCharge?: (r: FinancialRecord) => void;
   /** Exclusão em massa; devolve os ids que de fato saíram. */
-  onDeleteCharges?: (rs: FinancialRecord[]) => Promise<string[]>;
+  onDeleteCharges?: (rs: FinancialRecord[], onProgress?: (feitos: number, total: number) => void) => Promise<string[]>;
 }
 
 const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
@@ -79,6 +79,8 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
   const [fila, setFila] = useState<FinancialRecord[] | null>(null);
   const [filaPos, setFilaPos] = useState(0);
   const [copiouTodas, setCopiouTodas] = useState(false);
+  /** Andamento do cancelamento em massa (null = parado). */
+  const [cancelando, setCancelando] = useState<{ feitos: number; total: number } | null>(null);
 
   const companyById = useMemo(() => new Map(companies.map(c => [c.id, c])), [companies]);
   const clientName = (id?: string) => companyById.get(id || '')?.name || 'Sem cliente';
@@ -350,7 +352,7 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
         )}
       </div>
 
-      {selecionadas.length > 0 && (
+      {(selecionadas.length > 0 || cancelando) && (
         // Fixa na tela, e não "sticky": o <main> do app tem overflow-x-hidden,
         // o que anula o sticky — a barra ficava lá no fim da página.
         <div role="toolbar" aria-label="Ações nas cobranças selecionadas"
@@ -359,7 +361,7 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
             <b>{selecionadas.length}</b> selecionada{selecionadas.length === 1 ? '' : 's'} · <span className="tabular-nums">{brl(sum(selecionadas))}</span>
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <button onClick={() => { setFila(selecionadas); setFilaPos(0); }}
+            <button disabled={!!cancelando} onClick={() => { setFila(selecionadas); setFilaPos(0); }}
               className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-mirai-lime text-mirai-ink hover:brightness-95">
               <MessageCircle size={15} /> Reenviar no WhatsApp
             </button>
@@ -372,15 +374,21 @@ export const ReceivablesAgenda: React.FC<ReceivablesAgendaProps> = ({ records, c
               {copiouTodas ? <Check size={15} /> : <Copy size={15} />} Copiar mensagens
             </button>
             {onDeleteCharges && (
-              <button onClick={async () => {
-                  const saiu = await onDeleteCharges(selecionadas);
-                  if (saiu.length) setSelected(prev => { const n = new Set(prev); saiu.forEach(id => n.delete(id)); return n; });
+              <button disabled={!!cancelando} onClick={async () => {
+                  try {
+                    const saiu = await onDeleteCharges(selecionadas, (feitos, total) => setCancelando({ feitos, total }));
+                    if (saiu.length) setSelected(prev => { const n = new Set(prev); saiu.forEach(id => n.delete(id)); return n; });
+                  } finally {
+                    setCancelando(null);
+                  }
                 }}
-                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl bg-white/10 hover:bg-red-500/80">
-                <Trash2 size={15} /> Cancelar cobranças
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl bg-white/10 hover:bg-red-500/80 disabled:opacity-80 disabled:hover:bg-white/10">
+                {cancelando
+                  ? <><Loader2 size={15} className="animate-spin" /> Cancelando {cancelando.feitos} de {cancelando.total}…</>
+                  : <><Trash2 size={15} /> Cancelar cobranças</>}
               </button>
             )}
-            <button onClick={() => setSelected(new Set())} aria-label="Limpar seleção"
+            <button disabled={!!cancelando} onClick={() => setSelected(new Set())} aria-label="Limpar seleção"
               className="p-2 rounded-xl text-[#b9c6ba] hover:text-white hover:bg-white/10"><X size={16} /></button>
           </div>
         </div>

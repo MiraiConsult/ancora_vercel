@@ -1,11 +1,10 @@
 /**
  * Movimento de clientes: quantos entraram, renovaram, voltaram e saíram por
- * mês — no geral e em cada sistema. Os números da tabela abrem a lista de
- * nomes, para saber quem é, e não só quantos.
+ * mês — no geral e em cada sistema. Os números da tabela filtram a lista de
+ * clientes logo abaixo, para saber quem é, e não só quantos.
  */
 
-import React, { useMemo, useState } from 'react';
-import { X } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Company, FinancialRecord, Product, Subscription } from '../types';
 import { computeClientList, computeMovement, MovementMonth, MOVEMENT_SCOPES, SystemOverride } from '../lib/clientMovement';
 import { ClientSystemList } from './ClientSystemList';
@@ -61,25 +60,34 @@ export const ClientMovement: React.FC<Props> = ({ records, subscriptions, produc
 
   const meses = porEscopo[escopo];
   const nomeEscopo = MOVEMENT_SCOPES.find(s => s.key === escopo)!.nome;
-  const nome = (id: string) => companies.find(c => c.id === id)?.name || 'Sem cliente';
 
   // Mesma escala para cima e para baixo: uma saída e uma entrada do mesmo
   // tamanho têm de parecer do mesmo tamanho.
   const maior = Math.max(1, ...meses.map(m => Math.max(m.novos.length + m.voltaram.length, m.sairam.length)));
   const px = (n: number) => (n ? Math.max(16, Math.round((n / maior) * ALTURA)) : 0);
 
-  const nomesDaLista = lista
-    ? (meses.find(m => m.mes === lista.mes)?.[lista.campo] || []).map(nome).sort((a, b) => a.localeCompare(b))
-    : [];
-  const abrir = (mes: string, campo: Campo) =>
+  // Número clicado vira filtro da lista de clientes; clicar de novo limpa.
+  const listaRef = useRef<HTMLDivElement>(null);
+  const abrir = (mes: string, campo: Campo) => {
     setLista(l => (l && l.mes === mes && l.campo === campo ? null : { mes, campo }));
+    listaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+  const filtroLista = useMemo(() => {
+    if (!lista) return null;
+    const m = meses.find(x => x.mes === lista.mes);
+    if (!m) return null;
+    return {
+      titulo: `${CAMPOS.find(c => c.campo === lista.campo)!.nome} · ${rotulo(lista.mes)}`,
+      ids: new Set(m[lista.campo]),
+    };
+  }, [lista, meses]);
 
   return (
     <div className="bg-white rounded-[28px] border border-[rgba(11,20,11,0.08)] p-5 sm:p-7 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-[22px] font-semibold text-mirai-ink">Clientes: entradas e saídas</h2>
-          <p className="text-[13px] text-mirai-muted mt-1">Últimos 12 meses · clique num número para ver os nomes</p>
+          <p className="text-[13px] text-mirai-muted mt-1">Últimos 12 meses · clique num número para filtrar a lista de clientes</p>
         </div>
         <div className="flex flex-wrap gap-1 p-1 bg-mcsystem-100 rounded-full">
           {MOVEMENT_SCOPES.map(s => (
@@ -98,7 +106,7 @@ export const ClientMovement: React.FC<Props> = ({ records, subscriptions, produc
             {meses.map(m => {
               const ativo = lista?.mes === m.mes;
               return (
-                <button key={m.mes} type="button" onClick={() => abrir(m.mes, 'sairam')}
+                <button key={m.mes} type="button" onClick={() => abrir(m.mes, 'ativos')}
                   title={`${rotulo(m.mes)}: ${m.ativos.length} ativos · +${m.novos.length} novos · +${m.voltaram.length} voltaram · −${m.sairam.length} saíram`}
                   className={`flex flex-col items-center gap-1.5 rounded-xl py-1 transition-colors ${ativo ? 'bg-mcsystem-100' : 'hover:bg-mcsystem-50'}`}>
                   <span className="text-[10px] sm:text-[11px] text-mirai-muted tabular-nums">{m.ativos.length}</span>
@@ -170,36 +178,18 @@ export const ClientMovement: React.FC<Props> = ({ records, subscriptions, produc
         </div>
       </div>
 
-      {lista && (
-        <div className="rounded-2xl bg-mcsystem-50 border border-[rgba(11,20,11,0.08)] p-5">
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div>
-              <h3 className="text-base font-semibold text-mirai-ink">
-                {CAMPOS.find(c => c.campo === lista.campo)!.nome} · {rotulo(lista.mes)}
-              </h3>
-              <p className="text-xs text-mirai-muted mt-0.5">{nomeEscopo} · {nomesDaLista.length} cliente(s)</p>
-            </div>
-            <button onClick={() => setLista(null)} aria-label="Fechar lista"
-              className="p-1.5 text-mirai-muted hover:text-mirai-ink rounded-full hover:bg-white"><X size={16} /></button>
-          </div>
-          {nomesDaLista.length === 0 ? (
-            <p className="text-sm text-mirai-muted">Ninguém neste mês.</p>
-          ) : (
-            <ul className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-1.5 text-sm text-mirai-ink">
-              {nomesDaLista.map((n, i) => <li key={i} className="truncate py-1 border-b border-[rgba(11,20,11,0.06)]">{n}</li>)}
-            </ul>
-          )}
-        </div>
-      )}
-
-      <ClientSystemList
-        rows={escopo === 'GERAL' ? linhasClientes : linhasClientes.filter(r => r.system === escopo)}
-        companies={companies}
-        nomeEscopo={nomeEscopo}
-        mostrarSistema={escopo === 'GERAL'}
-        tenantId={tenantId}
-        setOverrides={setOverrides}
-      />
+      <div ref={listaRef} className="scroll-mt-4">
+        <ClientSystemList
+          rows={escopo === 'GERAL' ? linhasClientes : linhasClientes.filter(r => r.system === escopo)}
+          companies={companies}
+          nomeEscopo={nomeEscopo}
+          mostrarSistema={escopo === 'GERAL'}
+          tenantId={tenantId}
+          setOverrides={setOverrides}
+          filtroMes={filtroLista}
+          onLimparFiltroMes={() => setLista(null)}
+        />
+      </div>
 
       <p className="text-xs text-mirai-muted">
         Ativo é quem teve cobrança no mês, paga ou não. Saiu: estava no mês anterior e não está neste. Voltou: já foi

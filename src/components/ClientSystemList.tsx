@@ -6,8 +6,8 @@
  * aqui altera cobrança ou assinatura no Asaas.
  */
 
-import React, { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, RotateCcw, Search } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp, RotateCcw, Search, X } from 'lucide-react';
 import { Company } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import { ClientSystemRow, SISTEMA_NOME, SistemaKey, SystemOverride } from '../lib/clientMovement';
@@ -20,6 +20,9 @@ interface Props {
   mostrarSistema: boolean;
   tenantId?: string;
   setOverrides: React.Dispatch<React.SetStateAction<SystemOverride[]>>;
+  /** Número clicado na tabela de cima (ex.: Novos em out/26): restringe a lista. */
+  filtroMes?: { titulo: string; ids: Set<string> } | null;
+  onLimparFiltroMes?: () => void;
 }
 
 type Ordem = 'nome' | 'entrada' | 'valor' | 'situacao';
@@ -30,11 +33,15 @@ const hoje = () => new Date().toISOString().slice(0, 10);
 
 const campo = 'h-8 px-2 rounded-md border border-transparent bg-transparent text-[13px] text-mirai-ink tabular-nums hover:border-gray-200 focus:border-mcsystem-500 focus:bg-white outline-none';
 
-export const ClientSystemList: React.FC<Props> = ({ rows, companies, nomeEscopo, mostrarSistema, tenantId, setOverrides }) => {
+export const ClientSystemList: React.FC<Props> = ({ rows, companies, nomeEscopo, mostrarSistema, tenantId, setOverrides, filtroMes, onLimparFiltroMes }) => {
   const [busca, setBusca] = useState('');
   const [filtro, setFiltro] = useState<FiltroSituacao>('todos');
   const [ordem, setOrdem] = useState<{ key: Ordem; dir: 1 | -1 }>({ key: 'nome', dir: 1 });
   const [erro, setErro] = useState<string | null>(null);
+
+  // Quem saiu em setembro hoje consta como "Saiu": com o filtro Ativos ligado, a
+  // lista ficaria vazia e pareceria que o clique não funcionou.
+  useEffect(() => { if (filtroMes) setFiltro('todos'); }, [filtroMes?.titulo]);
 
   const nomes = useMemo(() => new Map(companies.map(c => [c.id, c.name])), [companies]);
   const nome = (id: string) => nomes.get(id) || 'Sem cliente';
@@ -42,6 +49,7 @@ export const ClientSystemList: React.FC<Props> = ({ rows, companies, nomeEscopo,
   const visiveis = useMemo(() => {
     const q = busca.trim().toLowerCase();
     const lista = rows.filter(r => {
+      if (filtroMes && !filtroMes.ids.has(r.clientId)) return false;
       if (filtro === 'ativos' && !r.ativo) return false;
       if (filtro === 'sairam' && r.ativo) return false;
       return !q || nome(r.clientId).toLowerCase().includes(q);
@@ -59,7 +67,7 @@ export const ClientSystemList: React.FC<Props> = ({ rows, companies, nomeEscopo,
       if (ka === kb) return nome(a.clientId).localeCompare(nome(b.clientId));
       return (ka > kb ? 1 : -1) * ordem.dir;
     });
-  }, [rows, busca, filtro, ordem, nomes]);
+  }, [rows, busca, filtro, ordem, nomes, filtroMes]);
 
   const ativos = rows.filter(r => r.ativo);
   const totalAtivos = ativos.reduce((a, r) => a + r.valor, 0);
@@ -112,6 +120,13 @@ export const ClientSystemList: React.FC<Props> = ({ rows, companies, nomeEscopo,
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {filtroMes && (
+            <button type="button" onClick={onLimparFiltroMes} title="Tirar o filtro"
+              className="inline-flex items-center gap-1.5 h-9 pl-3 pr-2 rounded-xl bg-mirai-lime text-mirai-ink text-[13px] font-semibold">
+              {filtroMes.titulo} · {filtroMes.ids.size} cliente{filtroMes.ids.size === 1 ? '' : 's'}
+              <X size={14} />
+            </button>
+          )}
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar cliente..." aria-label="Buscar cliente"

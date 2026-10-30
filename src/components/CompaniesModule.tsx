@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Company, User, NoteColor, FinancialRecord, TransactionType, TransactionStatus, RevenueType, Bank, GeneralNote, Product, Subscription } from '../types';
 import { Search, Plus, Pencil, Trash2, X, Save, User as UserIcon, ChevronDown, StickyNote, TrendingUp, LayoutDashboard, CheckSquare, HelpCircle, LayoutGrid, LayoutList, Square, Copy, ArrowUpDown, Bell, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
-import { asaasDeleteCharge } from '../services/asaasService';
+import { useExcluirCobrancas } from './useExcluirCobrancas';
 import { ClientNotificationsModal } from './ClientNotificationsModal';
 import { lookupCnpj, isCnpjComplete, maskCnpj } from '../lib/lookup';
 
@@ -19,6 +19,7 @@ interface CompaniesModuleProps {
   currentUser: User;
   products: Product[];
   subscriptions: Subscription[];
+  setSubscriptions?: React.Dispatch<React.SetStateAction<Subscription[]>>;
   onOpenHelp: (title: string, content: React.ReactNode) => void;
 }
 
@@ -78,7 +79,7 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
     financeRecords = [], setFinanceRecords,
     generalNotes, setGeneralNotes,
     revenueTypes = [], banks = [], allUsers = [], currentUser,
-    products = [], subscriptions = [],
+    products = [], subscriptions = [], setSubscriptions,
     onOpenHelp
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -154,6 +155,10 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
   // Real Supabase IDs are UUIDs (36 characters with hyphens)
   // Mock IDs are typically short strings like 'u1', 'u2', etc.
   const isMockUser = !currentUser.id || currentUser.id.length < 20;
+  const { pedirExclusao, dialogoExclusao } = useExcluirCobrancas({
+    records: financeRecords, subscriptions, setRecords: setFinanceRecords, setSubscriptions, isMock: isMockUser,
+    nomeCliente: id => companies.find(c => c.id === id)?.name || 'Sem cliente',
+  });
 
   // Reset view mode when opening a new company
   useEffect(() => {
@@ -312,22 +317,8 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
       await supabase.from('financial_records').upsert(record);
   };
   const handleDeleteFinance = async (id: string) => {
-      if (!setFinanceRecords) return;
-      // Cobrança do Asaas sai de lá também: só aqui, o sync a traria de volta.
-      const paymentId = financeRecords?.find(f => f.id === id)?.asaas_payment_id;
-      if (!window.confirm(paymentId ? 'Excluir esta cobrança? Ela também será removida do Asaas.' : 'Excluir registro?')) return;
-      if (isMockUser) { setFinanceRecords(prev => prev.filter(f => f.id !== id)); return; }
-      try {
-        if (paymentId) {
-          await asaasDeleteCharge({ recordId: id, paymentId });
-        } else {
-          const { error } = await supabase.from('financial_records').delete().eq('id', id);
-          if (error) throw error;
-        }
-        setFinanceRecords(prev => prev.filter(f => f.id !== id));
-      } catch (err: any) {
-        alert(`Não foi possível excluir: ${err.message}`);
-      }
+      const r = financeRecords.find(f => f.id === id);
+      if (r) await pedirExclusao([r]);
   };
 
 
@@ -653,6 +644,7 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
 
   return (
     <div className="space-y-6 relative h-full">
+      {dialogoExclusao}
       {notifyCompany && (
         <ClientNotificationsModal
           clientId={notifyCompany.id}

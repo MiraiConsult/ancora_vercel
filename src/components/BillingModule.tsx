@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Company, Product, FinancialRecord, Subscription, RevenueType, User } from '../types';
 import {
   asaasCreateCharge, asaasCreateSubscription, asaasSyncAll, asaasCreateClient,
-  asaasUpdateCharge, asaasDeleteCharge, asaasUpdateSubscription, asaasDeleteSubscription,
+  asaasUpdateCharge, asaasUpdateSubscription, asaasDeleteSubscription,
 } from '../services/asaasService';
 import { supabase } from '../lib/supabaseClient';
 import {
@@ -11,6 +11,7 @@ import {
   Pencil, Trash2, CalendarClock, ChevronDown, ChevronRight, Wallet, UserPlus, QrCode, Receipt,
 } from 'lucide-react';
 import { ReceivablesAgenda } from './ReceivablesAgenda';
+import { useExcluirCobrancas } from './useExcluirCobrancas';
 import { BillingProjection } from './BillingProjection';
 import { ChargeShareModal } from './ChargeShareModal';
 import { InvoiceModal } from './InvoiceModal';
@@ -195,51 +196,14 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
     if (error) alert('Erro ao aplicar aos demais lançamentos: ' + error.message);
   };
 
-  const handleDeleteCharge = async (r: FinancialRecord) => {
-    if (!window.confirm(`Excluir a cobrança de ${clientName(r.companyId)} (${formatBRL(r.amount)})?\nIsso também remove no Asaas (só funciona se não estiver paga).`)) return;
-    try {
-      await asaasDeleteCharge({ recordId: r.id, paymentId: r.asaas_payment_id });
-      setFinanceRecords(prev => prev.filter(x => x.id !== r.id));
-    } catch (e: any) {
-      alert(`Erro ao excluir cobrança: ${e.message}`);
-    }
-  };
-
-  /**
-   * Exclusão em massa (agenda): uma confirmação só, uma chamada por cobrança,
-   * quatro de cada vez. Cada uma sai da tela assim que o Asaas confirma — sem
-   * isso a lista ficava parada por quase um minuto e parecia travada. O Asaas
-   * recusa apagar cobrança paga: as que falharem são listadas no fim.
-   */
-  const handleDeleteCharges = async (
-    rs: FinancialRecord[],
-    onProgress?: (feitos: number, total: number) => void,
-  ): Promise<string[]> => {
-    if (!rs.length) return [];
-    const total = rs.reduce((a, r) => a + (r.amount || 0), 0);
-    if (!window.confirm(`Cancelar ${rs.length} cobrança(s), somando ${formatBRL(total)}?\nIsso também remove no Asaas (só funciona nas que não foram pagas).`)) return [];
-    const ok: string[] = [];
-    const falhas: string[] = [];
-    let feitos = 0;
-    onProgress?.(0, rs.length);
-    const fila = [...rs];
-    const trabalhador = async () => {
-      for (let r = fila.shift(); r; r = fila.shift()) {
-        try {
-          await asaasDeleteCharge({ recordId: r.id, paymentId: r.asaas_payment_id });
-          ok.push(r.id);
-          const id = r.id;
-          setFinanceRecords(prev => prev.filter(x => x.id !== id));
-        } catch (e: any) {
-          falhas.push(`${clientName(r.companyId)} (${formatBRL(r.amount)}): ${e.message}`);
-        }
-        onProgress?.(++feitos, rs.length);
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(4, rs.length) }, trabalhador));
-    if (falhas.length) alert(`${ok.length} cancelada(s). Não foi possível cancelar ${falhas.length}:\n\n${falhas.join('\n')}`);
-    return ok;
-  };
+  // A pergunta (só esta / esta e as futuras) e a exclusão moram no hook.
+  const { pedirExclusao, dialogoExclusao } = useExcluirCobrancas({
+    records: financeRecords, subscriptions, setRecords: setFinanceRecords, setSubscriptions,
+    nomeCliente: id => clientName(id),
+  });
+  const handleDeleteCharge = (r: FinancialRecord) => { pedirExclusao([r]); };
+  const handleDeleteCharges = (rs: FinancialRecord[], onProgress?: (feitos: number, total: number) => void) =>
+    pedirExclusao(rs, onProgress);
 
   const handleDeleteSub = async (s: Subscription) => {
     if (!window.confirm(`Excluir a assinatura de ${clientName(s.client_id)} (${formatBRL(s.value)})?\nIsso também remove no Asaas.`)) return;
@@ -541,6 +505,8 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
           onClose={() => setInvoiceFor(null)}
         />
       )}
+
+      {dialogoExclusao}
 
       {editCharge && (
         <ChargeEditModal

@@ -637,6 +637,7 @@ const handleAddUser = async (newUser: User) => {
             currentUser={user}
             products={products}
             subscriptions={subscriptions}
+            setSubscriptions={setSubscriptions}
             onOpenHelp={openHelp}
           />
         ) : <AccessDenied />;
@@ -670,6 +671,7 @@ const handleAddUser = async (newUser: User) => {
                   currentUser={user}
                   products={products}
                   subscriptions={subscriptions}
+                  setSubscriptions={setSubscriptions}
                   onOpenHelp={openHelp}
                 />
               ) : <AccessDenied />,

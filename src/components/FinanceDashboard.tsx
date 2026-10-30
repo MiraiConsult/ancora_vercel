@@ -5,7 +5,7 @@ import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as
 import * as XLSX from 'xlsx';
 import { generateFinancialInsight } from '../services/geminiService';
 import { supabase } from '../lib/supabaseClient';
-import { asaasDeleteCharge } from '../services/asaasService';
+import { useExcluirCobrancas } from './useExcluirCobrancas';
 import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
 import { DateRangeFilter, presetRange, inRange, type DateRange } from './DateRangeFilter';
 import { PayRecordModal } from './PayRecordModal';
@@ -1631,54 +1631,18 @@ const newRecords: FinancialRecord[] = [];
     }
 };
 
-  /**
-   * Exclui lançamentos. Cobrança do Asaas tem de sair de lá: apagar só aqui
-   * deixava o cliente sendo cobrado e o sync a trazia de volta em até uma hora.
-   * Por isso cada uma só some da tela depois que o Asaas confirma — ele recusa a
-   * que já foi paga, e essa fica. O resto é só banco. Devolve o que falhou.
-   */
-  const excluirLancamentos = async (ids: string[]): Promise<string[]> => {
-    const alvo = records.filter(r => ids.includes(r.id));
-    const doAsaas = alvo.filter(r => r.asaas_payment_id);
-    const locais = alvo.filter(r => !r.asaas_payment_id).map(r => r.id);
-    const falhas: string[] = [];
-
-    if (locais.length) {
-      if (!isMockUser) {
-        // Em lotes: .in() com centenas de ids estoura o tamanho da URL.
-        for (let i = 0; i < locais.length; i += 100) {
-          const lote = locais.slice(i, i + 100);
-          const { error } = await supabase.from('financial_records').delete().in('id', lote);
-          if (error) { falhas.push(`${lote.length} lançamento(s): ${error.message}`); continue; }
-          setRecords(prev => prev.filter(r => !lote.includes(r.id)));
-        }
-      } else {
-        setRecords(prev => prev.filter(r => !locais.includes(r.id)));
-      }
-    }
-
-    const fila = [...doAsaas];
-    const trabalhador = async () => {
-      for (let r = fila.shift(); r; r = fila.shift()) {
-        try {
-          if (!isMockUser) await asaasDeleteCharge({ recordId: r.id, paymentId: r.asaas_payment_id });
-          const id = r.id;
-          setRecords(prev => prev.filter(x => x.id !== id));
-        } catch (err: any) {
-          falhas.push(`${r.description} (R$ ${Number(r.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}): ${err.message}`);
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(4, doAsaas.length) }, trabalhador));
-    return falhas;
-  };
+  // Exclusão passa pelo hook: cobrança do Asaas sai de lá também, e a de
+  // assinatura pergunta se leva as futuras. Apagar só aqui deixava o cliente
+  // sendo cobrado e o sync trazia a cobrança de volta em até uma hora.
+  const { pedirExclusao, dialogoExclusao } = useExcluirCobrancas({
+    records, subscriptions, setRecords, setSubscriptions, isMock: isMockUser,
+    nomeCliente: id => companies.find(c => c.id === id)?.name || 'Sem cliente',
+  });
 
   const handleDeleteTransaction = async (e: React.MouseEvent, id: string) => {
     e.preventDefault(); e.stopPropagation();
-    const noAsaas = !!records.find(r => r.id === id)?.asaas_payment_id;
-    if (!window.confirm(noAsaas ? 'Excluir esta cobrança? Ela também será removida do Asaas.' : 'Excluir esta transação?')) return;
-    const falhas = await excluirLancamentos([id]);
-    if (falhas.length) alert(`Não foi possível excluir:\n\n${falhas.join('\n')}`);
+    const r = records.find(x => x.id === id);
+    if (r) await pedirExclusao([r]);
   };
   const rubricSplitTotal = rubricSplit.reduce((acc, sp) => acc + (Number(sp.amount) || 0), 0);
 
@@ -1689,15 +1653,8 @@ const newRecords: FinancialRecord[] = [];
   const handleSelectAll = (filteredRecords: FinancialRecord[]) => { if (selectedRecordIds.size === filteredRecords.length && filteredRecords.length > 0) { setSelectedRecordIds(new Set()); } else { setSelectedRecordIds(new Set(filteredRecords.map(r => r.id))); } };
   const handleSelectOne = (id: string) => { const newSet = new Set(selectedRecordIds); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedRecordIds(newSet); };
   const handleBulkDelete = async () => {
-    const ids = Array.from(selectedRecordIds);
-    const noAsaas = records.filter(r => ids.includes(r.id) && r.asaas_payment_id).length;
-    const aviso = noAsaas ? `\n\n${noAsaas} delas são cobranças e também serão removidas do Asaas.` : '';
-    if (!window.confirm(`Excluir ${ids.length} itens?${aviso}`)) return;
-    setSelectedRecordIds(new Set());
-    const falhas = await excluirLancamentos(ids);
-    if (falhas.length) {
-      alert(`${ids.length - falhas.length} excluído(s). Não foi possível excluir ${falhas.length}:\n\n${falhas.join('\n')}`);
-    }
+    const saiu = await pedirExclusao(records.filter(r => selectedRecordIds.has(r.id)));
+    if (saiu.length) setSelectedRecordIds(prev => { const n = new Set(prev); saiu.forEach(id => n.delete(id)); return n; });
   };
   const handleBulkStatusChange = async (status: TransactionStatus) => {
     const idsToUpdate = Array.from(selectedRecordIds);
@@ -3357,6 +3314,8 @@ const newRecords: FinancialRecord[] = [];
             }}
           />
         )}
+
+        {dialogoExclusao}
 
         <RecordsDrillModal
           onEditProduct={handleDrillProductChange}

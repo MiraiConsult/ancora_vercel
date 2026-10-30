@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Company, User, NoteColor, FinancialRecord, TransactionType, TransactionStatus, RevenueType, Bank, GeneralNote, Product, Subscription } from '../types';
 import { Search, Plus, Pencil, Trash2, X, Save, User as UserIcon, ChevronDown, StickyNote, TrendingUp, LayoutDashboard, CheckSquare, HelpCircle, LayoutGrid, LayoutList, Square, Copy, ArrowUpDown, Bell, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import { asaasDeleteCharge } from '../services/asaasService';
 import { ClientNotificationsModal } from './ClientNotificationsModal';
 import { lookupCnpj, isCnpjComplete, maskCnpj } from '../lib/lookup';
 
@@ -311,10 +312,22 @@ export const CompaniesModule: React.FC<CompaniesModuleProps> = ({
       await supabase.from('financial_records').upsert(record);
   };
   const handleDeleteFinance = async (id: string) => {
-      if (!window.confirm('Excluir registro?') || !setFinanceRecords) return;
-      setFinanceRecords(prev => prev.filter(f => f.id !== id));
-      if (isMockUser) return;
-      await supabase.from('financial_records').delete().eq('id', id);
+      if (!setFinanceRecords) return;
+      // Cobrança do Asaas sai de lá também: só aqui, o sync a traria de volta.
+      const paymentId = financeRecords?.find(f => f.id === id)?.asaas_payment_id;
+      if (!window.confirm(paymentId ? 'Excluir esta cobrança? Ela também será removida do Asaas.' : 'Excluir registro?')) return;
+      if (isMockUser) { setFinanceRecords(prev => prev.filter(f => f.id !== id)); return; }
+      try {
+        if (paymentId) {
+          await asaasDeleteCharge({ recordId: id, paymentId });
+        } else {
+          const { error } = await supabase.from('financial_records').delete().eq('id', id);
+          if (error) throw error;
+        }
+        setFinanceRecords(prev => prev.filter(f => f.id !== id));
+      } catch (err: any) {
+        alert(`Não foi possível excluir: ${err.message}`);
+      }
   };
 
 

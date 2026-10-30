@@ -7,13 +7,18 @@
 import React, { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { Company, FinancialRecord, Product, Subscription } from '../types';
-import { computeMovement, MovementMonth, MOVEMENT_SCOPES } from '../lib/clientMovement';
+import { computeClientList, computeMovement, MovementMonth, MOVEMENT_SCOPES, SystemOverride } from '../lib/clientMovement';
+import { ClientSystemList } from './ClientSystemList';
 
 interface Props {
   records: FinancialRecord[];
   subscriptions: Subscription[];
   products: Product[];
   companies: Company[];
+  /** Ajustes da lista de clientes: entram nas contas de cima. */
+  overrides: SystemOverride[];
+  setOverrides: React.Dispatch<React.SetStateAction<SystemOverride[]>>;
+  tenantId?: string;
 }
 
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
@@ -41,13 +46,18 @@ const retencao = (m: MovementMonth) => {
 /** Altura máxima de cada metade do gráfico, em px. */
 const ALTURA = 112;
 
-export const ClientMovement: React.FC<Props> = ({ records, subscriptions, products, companies }) => {
+export const ClientMovement: React.FC<Props> = ({ records, subscriptions, products, companies, overrides, setOverrides, tenantId }) => {
   const [escopo, setEscopo] = useState('GERAL');
   const [lista, setLista] = useState<{ mes: string; campo: Campo } | null>(null);
 
   const porEscopo = useMemo(() => Object.fromEntries(
-    MOVEMENT_SCOPES.map(s => [s.key, computeMovement(records, subscriptions, products, s)])),
-  [records, subscriptions, products]);
+    MOVEMENT_SCOPES.map(s => [s.key, computeMovement(records, subscriptions, products, s, overrides)])),
+  [records, subscriptions, products, overrides]);
+
+  const linhasClientes = useMemo(
+    () => computeClientList(records, subscriptions, products, overrides),
+    [records, subscriptions, products, overrides],
+  );
 
   const meses = porEscopo[escopo];
   const nomeEscopo = MOVEMENT_SCOPES.find(s => s.key === escopo)!.nome;
@@ -181,6 +191,15 @@ export const ClientMovement: React.FC<Props> = ({ records, subscriptions, produc
           )}
         </div>
       )}
+
+      <ClientSystemList
+        rows={escopo === 'GERAL' ? linhasClientes : linhasClientes.filter(r => r.system === escopo)}
+        companies={companies}
+        nomeEscopo={nomeEscopo}
+        mostrarSistema={escopo === 'GERAL'}
+        tenantId={tenantId}
+        setOverrides={setOverrides}
+      />
 
       <p className="text-xs text-mirai-muted">
         Ativo é quem teve cobrança no mês, paga ou não. Saiu: estava no mês anterior e não está neste. Voltou: já foi

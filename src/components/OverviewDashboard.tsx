@@ -6,7 +6,8 @@ import {
 } from 'recharts';
 import { ChevronDown, Check, ArrowUp, ArrowDown, X, ExternalLink } from 'lucide-react';
 import { ClientMovement } from './ClientMovement';
-import { computeMovement, MOVEMENT_SCOPES, normName, shiftMes } from '../lib/clientMovement';
+import { computeMovement, MOVEMENT_SCOPES, normName, shiftMes, SystemOverride } from '../lib/clientMovement';
+import { supabase } from '../lib/supabaseClient';
 
 interface OverviewDashboardProps {
   records: FinancialRecord[];
@@ -79,7 +80,7 @@ const monthlyFactor = (cycle?: string) => {
   }
 };
 
-export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, products, companies, subscriptions, banks = [], onNavigate }) => {
+export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, products, companies, subscriptions, banks = [], currentUser, onNavigate }) => {
   const productName = (id?: string | null) => products.find(p => p.id === id)?.name || null;
   const companyName = (id?: string) => companies.find(c => c.id === id)?.name || 'Sem cliente';
 
@@ -210,9 +211,23 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     return map;
   }, [validRecords, productSet, products]);
 
+  // Ajustes manuais da lista de clientes (entrada, valor e situação).
+  const [overrides, setOverrides] = useState<SystemOverride[]>([]);
+  useEffect(() => {
+    if (!currentUser?.tenant_id) return;
+    let vivo = true;
+    supabase.from('client_system_overrides').select('client_id, system, entry_date, exit_date, monthly_value, status')
+      .eq('tenant_id', currentUser.tenant_id)
+      .then(({ data, error }) => {
+        if (error) { console.warn('client_system_overrides:', error.message); return; }
+        if (vivo) setOverrides((data || []) as SystemOverride[]);
+      });
+    return () => { vivo = false; };
+  }, [currentUser?.tenant_id]);
+
   const movGeral = useMemo(
-    () => computeMovement(records, subscriptions, products, MOVEMENT_SCOPES[0]),
-    [records, subscriptions, products],
+    () => computeMovement(records, subscriptions, products, MOVEMENT_SCOPES[0], overrides),
+    [records, subscriptions, products, overrides],
   );
 
   const primary = useMemo(() => aggregate(year),[validRecords, year, monthsSorted, productSet, products, companies]);
@@ -591,7 +606,8 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
 
         {/* Entradas e saídas de clientes */}
         <section>
-          <ClientMovement records={records} subscriptions={subscriptions} products={products} companies={companies} />
+          <ClientMovement records={records} subscriptions={subscriptions} products={products} companies={companies}
+            overrides={overrides} setOverrides={setOverrides} tenantId={currentUser?.tenant_id} />
         </section>
 
         {/* Sistemas */}

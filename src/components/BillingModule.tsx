@@ -199,7 +199,9 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   // A pergunta (só esta / esta e as futuras) e a exclusão moram no hook.
   const { pedirExclusao, dialogoExclusao } = useExcluirCobrancas({
     records: financeRecords, subscriptions, setRecords: setFinanceRecords, setSubscriptions,
-    nomeCliente: id => clientName(id),
+    // Não usar clientName aqui: ele é declarado mais abaixo, e a janela roda
+    // durante o render — ler antes da declaração derrubava a tela inteira.
+    nomeCliente: id => companies.find(c => c.id === id)?.name || '—',
   });
   const handleDeleteCharge = (r: FinancialRecord) => { pedirExclusao([r]); };
   const handleDeleteCharges = (rs: FinancialRecord[], onProgress?: (feitos: number, total: number) => void) =>

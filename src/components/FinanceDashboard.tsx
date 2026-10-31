@@ -1,13 +1,14 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { FinancialRecord, TransactionType, TransactionStatus, ChartOfAccount, RevenueType, Bank, Company, User, FinancialRecordSplit, Product, Subscription, Supplier } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, AreaChart, Area, Line, PieChart, Pie, ComposedChart, LineChart, ReferenceLine } from 'recharts';
-import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as PieIcon, DollarSign, Plus, X, Save, List, Hash, Tag, Search, Pencil, Trash2, Landmark, Tags, Grid3X3, CalendarRange, FileCheck, Filter, Upload, Download, ChevronDown, TrendingUp, Wallet, ArrowRightLeft, LayoutDashboard, ChevronRight, Eye, EyeOff, Calendar, ArrowUpRight, ArrowDownRight, Minus, Settings2, Check, Copy, RefreshCw, BarChart3, TrendingDown, Sparkles, CreditCard, Clock, CalendarClock, Lock, CheckSquare, Square, CheckCircle2, Calculator, Split, Building, Edit3, Table, BookTemplate, BookOpen, ArrowUp, ArrowDown, ArrowUpDown, Users, Package, Barcode } from 'lucide-react';
+import { ArrowUpCircle, ArrowDownCircle, AlertCircle, Bot, FileText, PieChart as PieIcon, DollarSign, Plus, X, Save, List, Hash, Tag, Search, Pencil, Trash2, Landmark, Tags, Grid3X3, CalendarRange, FileCheck, Filter, Upload, Download, ChevronDown, Wallet, ArrowRightLeft, LayoutDashboard, ChevronRight, Eye, EyeOff, Calendar, ArrowUpRight, ArrowDownRight, Minus, Settings2, Check, Copy, RefreshCw, BarChart3, TrendingDown, Sparkles, CreditCard, Clock, CalendarClock, Lock, CheckSquare, Square, CheckCircle2, Calculator, Split, Building, Edit3, Table, BookTemplate, BookOpen, ArrowUp, ArrowDown, ArrowUpDown, Users, Package, Barcode } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { generateFinancialInsight } from '../services/geminiService';
 import { supabase } from '../lib/supabaseClient';
 import { useExcluirCobrancas } from './useExcluirCobrancas';
 import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
 import { DateRangeFilter, presetRange, inRange, type DateRange } from './DateRangeFilter';
+import { dataDoLancamento } from '../lib/dataLancamento';
 import { PayRecordModal } from './PayRecordModal';
 import { isProjected, projectSubscriptions, shiftMonthKey } from '../lib/subscriptionProjection';
 import { RecordsDrillModal } from './RecordsDrillModal';
@@ -36,7 +37,7 @@ interface FinanceDashboardProps {
   hideTabs?: boolean;
 }
 
-export type MainTab = 'RECONCILIATION' | 'DRE' | 'CASHFLOW' | 'COA' | 'VALIDATION' | 'CASH_EVOLUTION';
+export type MainTab = 'RECONCILIATION' | 'DRE' | 'COA' | 'VALIDATION' | 'CASH_EVOLUTION';
 type ReportViewMode = 'SUMMARY' | 'DETAILED';
 
 interface PeriodConfig {
@@ -133,12 +134,9 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   );
   const [showCashEvolution, setShowCashEvolution] = useState(initialTab === 'CASH_EVOLUTION');
   const [reportViewMode, setReportViewMode] = useState<ReportViewMode>('SUMMARY');
-  /** Período do resumo do caixa — independente do ano/meses da matriz. */
-  const [cashRange, setCashRange] = useState<DateRange>(() => presetRange('MONTH'));
   
   // --- View Options & Advanced Filtering ---
   const [hideEmptyRows, setHideEmptyRows] = useState(true);
-  const [includeProjections, setIncludeProjections] = useState(false);
   
   // Default: Current Year, All Months
   const currentYear = new Date().getFullYear();
@@ -243,7 +241,6 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
       type: TransactionType.EXPENSE,
       status: TransactionStatus.PENDING,
       dueDate: new Date().toISOString().split('T')[0],
-      competenceDate: new Date().toISOString().slice(0, 7) + '-01',
       rubricId: '',
       revenueTypeId: '',
       bankId: '',
@@ -253,7 +250,6 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   
   // New States for Installments/Payment Method
   const [installmentCount, setInstallmentCount] = useState<number>(1);
-  const [competenceType, setCompetenceType] = useState<'FIXED' | 'RECURRING'>('FIXED');
   const [amountDistribution, setAmountDistribution] = useState<'TOTAL' | 'RECURRING'>('TOTAL');
   const [installmentsPreview, setInstallmentsPreview] = useState<Array<{ dueDate: string, competenceDate: string, amount: number }>>([]);
 
@@ -400,41 +396,23 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
             remainder = 0;
         }
         
-        // Use Competence Date as the seed for Start Date, or Today if not set.
-        let startComp = new Date();
-        if (newRecord.competenceDate) {
-            // Competence is YYYY-MM-01, handle it correctly
-            const [y, m] = newRecord.competenceDate.split('-').map(Number);
-            startComp = new Date(y, m - 1, 1);
-        }
-        
         const newPreviews = [];
         for (let i = 0; i < count; i++) {
             let dueDateObj = new Date();
-             if (newRecord.dueDate) {
+            if (newRecord.dueDate) {
                 const [y,m,d] = newRecord.dueDate.split('-').map(Number);
                 dueDateObj = new Date(y, m-1, d);
-                dueDateObj.setMonth(dueDateObj.getMonth() + i);
-            } else {
-                dueDateObj = new Date(startComp);
-                dueDateObj.setMonth(dueDateObj.getMonth() + 1 + i);
             }
+            dueDateObj.setMonth(dueDateObj.getMonth() + i);
             const dateStr = dueDateObj.toISOString().split('T')[0];
 
-            let compDateObj;
-            if (competenceType === 'RECURRING') {
-                compDateObj = new Date(startComp.getFullYear(), startComp.getMonth() + i, 1);
-            } else {
-                compDateObj = new Date(startComp.getFullYear(), startComp.getMonth(), 1);
-            }
-            const compStr = compDateObj.toISOString().split('T')[0];
-
             const amount = (i === 0 && amountDistribution === 'TOTAL') ? baseAmount + remainder : baseAmount;
-            newPreviews.push({ dueDate: dateStr, competenceDate: compStr, amount: Number(amount.toFixed(2)) });
+            // Uma data só: cada parcela fica no mês em que cai.
+            newPreviews.push({ dueDate: dateStr, competenceDate: dateStr, amount: Number(amount.toFixed(2)) });
         }
         setInstallmentsPreview(newPreviews);
     } 
-  }, [installmentCount, newRecord.amount, rubricSplit, newRecord.competenceDate, newRecord.dueDate, editingTransactionId, competenceType, amountDistribution]);
+  }, [installmentCount, newRecord.amount, rubricSplit, newRecord.dueDate, editingTransactionId, amountDistribution]);
 
   // Click outside handler for Menus
   useEffect(() => {
@@ -697,9 +675,9 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
   // ... (Import Handlers Unchanged) ...
   const handleDownloadTemplate = () => {
     const BOM = "\uFEFF";
-    const headers = ['Vencimento', 'Competencia', 'Descricao', 'Valor', 'Tipo', 'Categoria', 'Banco', 'Cliente', 'Tipo de Receita'];
-    const row1 = ['20/12/2023', '12/2023', 'Venda de Consultoria', '2500,00', 'Receita', 'Serviços Prestados', 'Banco Itaú', 'Empresa Exemplo', 'Consultoria'];
-    const row2 = ['22/12/2023', '12/2023', 'Conta de Luz', '350,50', 'Despesa', 'Energia Elétrica', 'Nubank', '', ''];
+    const headers = ['Data', 'Descricao', 'Valor', 'Tipo', 'Categoria', 'Banco', 'Cliente', 'Tipo de Receita'];
+    const row1 = ['20/12/2023', 'Venda de Consultoria', '2500,00', 'Receita', 'Serviços Prestados', 'Banco Itaú', 'Empresa Exemplo', 'Consultoria'];
+    const row2 = ['22/12/2023', 'Conta de Luz', '350,50', 'Despesa', 'Energia Elétrica', 'Nubank', '', ''];
     const csvContent = BOM + [headers.join(';'), row1.join(';'), row2.join(';')].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -749,8 +727,7 @@ const newRecords: FinancialRecord[] = [];
                return -1;
             }
 
-            const dueDateIdx = getIndex(["vencimento"]);
-            const competenceIdx = getIndex(["competencia", "competência"]);
+            const dueDateIdx = getIndex(["data", "vencimento"]);
             const descIdx = getIndex(["descricao", "descrição"]);
             const amountIdx = getIndex(["valor"]);
             const typeIdx = getIndex(["tipo"]);
@@ -773,17 +750,6 @@ const newRecords: FinancialRecord[] = [];
                 }
                 return new Date().toISOString().split('T')[0];
             }
-            const parseCompetence = (str: string, dueDate: string) => {
-                if(!str) return dueDate;
-                if(str.match(/^\d{2}\/\d{4}$/)) {
-                    const [month, year] = str.split('/');
-                    return `${year}-${month.padStart(2, '0')}-01`;
-                }
-                if(str.match(/^\d{4}-\d{2}$/)) {
-                    return `${str}-01`;
-                }
-                return parseDate(str);
-            }
             const parseAmount = (raw: string) => {
                if (!raw) return 0;
                let clean = raw.replace(/"/g, '').trim();
@@ -805,22 +771,6 @@ const newRecords: FinancialRecord[] = [];
 
                 const recordId = `imp-${Date.now()}-${i}`;
                 const dueDate = parseDate(cols[dueDateIdx]);
-                const competenceStr = cols[competenceIdx]?.trim();
-                let competenceDate = dueDate; // Default to due date
-                if (competenceStr) {
-                    const monthMap: { [key: string]: string } = {
-                        'jan': '01', 'fev': '02', 'mar': '03', 'abr': '04', 'mai': '05', 'jun': '06',
-                        'jul': '07', 'ago': '08', 'set': '09', 'out': '10', 'nov': '11', 'dez': '12'
-                    };
-                    const parts = competenceStr.split('/');
-                    if (parts.length === 2) {
-                        const [monthName, year] = parts;
-                        const month = monthMap[monthName?.toLowerCase()];
-                        if (month && year) {
-                            competenceDate = `20${year}-${month}-01`;
-                        }
-                    }
-                }
                 const amount = parseAmount(cols[amountIdx]);
                 const typeStr = cols[typeIdx]?.toLowerCase() || '';
                 const type = (typeStr.includes('receita') || typeStr.includes('entrada')) ? TransactionType.INCOME : TransactionType.EXPENSE;
@@ -854,7 +804,7 @@ const newRecords: FinancialRecord[] = [];
                     type,
                     status: TransactionStatus.PENDING,
                     dueDate,
-                    competenceDate,
+                    competenceDate: dueDate,
                     bankId: banks.find(b => b.name.toLowerCase().includes(cols[bankIdx]?.toLowerCase()))?.id,
                     rubricId: chartOfAccounts.find(c => c.rubricName.toUpperCase() === cols[categoryIdx]?.toUpperCase())?.id,
                     companyId: foundCompany?.id,
@@ -1312,16 +1262,11 @@ const newRecords: FinancialRecord[] = [];
   };
 
   // ... (Transaction Handlers Unchanged) ...
-  const handleUpdateInstallmentPreview = (index: number, field: 'amount' | 'dueDate' | 'competenceDate', value: string) => {
+  const handleUpdateInstallmentPreview = (index: number, field: 'amount' | 'dueDate', value: string) => {
       const updated = [...installmentsPreview];
-      let newDate = value;
-      if (field === 'competenceDate' && value) {
-          newDate = `${value}-01`;
-      }
-      updated[index] = { 
-          ...updated[index], 
-          [field]: field === 'amount' ? Number(value) : newDate
-      };
+      updated[index] = field === 'amount'
+        ? { ...updated[index], amount: Number(value) }
+        : { ...updated[index], dueDate: value, competenceDate: value };
       setInstallmentsPreview(updated);
   };
 
@@ -1336,7 +1281,7 @@ const newRecords: FinancialRecord[] = [];
     }
 
     // Receita: classificada pelo Produto (a rubrica é derivada pelo nome, igual ao
-    // sync do Asaas, para o lançamento aparecer certo no DRE e no Fluxo de Caixa).
+    // sync do Asaas, para o lançamento aparecer certo no DRE).
     const norm = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     if (isIncome) {
       const prodName = products.find(p => p.id === newRecord.product_id)?.name;
@@ -1470,9 +1415,7 @@ const newRecords: FinancialRecord[] = [];
             // despesa em outra.
             type: valorFinal >= 0 ? TransactionType.INCOME : TransactionType.EXPENSE,
             dueDate: finalDueDate,
-            competenceDate: editingTransactionId
-                ? newRecord.competenceDate
-                : (installmentsPreview.length > 0 ? installmentsPreview[0].competenceDate : newRecord.competenceDate),
+            competenceDate: finalDueDate,
             category: displayCategory,
             status: finalStatus,
             paymentDate: finalStatus === TransactionStatus.PAID ? (newRecord.paymentDate || finalDueDate) : undefined,
@@ -1534,14 +1477,13 @@ const newRecords: FinancialRecord[] = [];
     setNewRecord({
         ...record,
         split_revenue: record.split_revenue || [],
-        // Ensure competenceDate is correctly formatted for the month input
-        competenceDate: record.competenceDate ? record.competenceDate.slice(0, 7) + '-01' : undefined
+        dueDate: dataDoLancamento(record),
     });
     // Reabre o rateio como estava gravado, para editar sem refazer.
     setRubricSplit(record.split_rubrics?.length ? record.split_rubrics.map(sp => ({ ...sp })) : []);
 
     setInstallmentCount(1);
-    setInstallmentsPreview([{ dueDate: record.dueDate, competenceDate: record.competenceDate || record.dueDate, amount: record.amount }]);
+    setInstallmentsPreview([{ dueDate: dataDoLancamento(record), competenceDate: dataDoLancamento(record), amount: record.amount }]);
 
     setIsModalOpen(true);
   };
@@ -1610,7 +1552,6 @@ const newRecords: FinancialRecord[] = [];
                 category: firstInstallment.category,
                 amount: totalAmount,
                 dueDate: new Date().toISOString().split('T')[0],
-                competenceDate: new Date().toISOString().slice(0, 7) + '-01',
                 status: TransactionStatus.PENDING,
                 paymentDate: undefined,
             });
@@ -1646,7 +1587,7 @@ const newRecords: FinancialRecord[] = [];
   };
   const rubricSplitTotal = rubricSplit.reduce((acc, sp) => acc + (Number(sp.amount) || 0), 0);
 
-  const resetTransactionForm = () => { setNewRecord({ description: '', amount: 0, type: TransactionType.EXPENSE, status: TransactionStatus.PENDING, dueDate: new Date().toISOString().split('T')[0], competenceDate: new Date().toISOString().slice(0,7)+'-01', rubricId: '', revenueTypeId: '', bankId: '', companyId: '', split_revenue: [] }); setInstallmentCount(1); setCompetenceType('FIXED'); setAmountDistribution('TOTAL'); setInstallmentsPreview([]); setEditingTransactionId(null); setRubricSplit([]);  }
+  const resetTransactionForm = () => { setNewRecord({ description: '', amount: 0, type: TransactionType.EXPENSE, status: TransactionStatus.PENDING, dueDate: new Date().toISOString().split('T')[0], rubricId: '', revenueTypeId: '', bankId: '', companyId: '', split_revenue: [] }); setInstallmentCount(1); setAmountDistribution('TOTAL'); setInstallmentsPreview([]); setEditingTransactionId(null); setRubricSplit([]);  }
   const handleStatusChange = async (id: string, newStatus: TransactionStatus) => { const now = new Date().toISOString().split('T')[0]; const record = records.find(r => r.id === id); const updates: any = { status: newStatus }; if (record && newStatus === TransactionStatus.PAID && !record.paymentDate) { updates.paymentDate = now; } setRecords(prev => prev.map(r => { if (r.id === id) { return { ...r, ...updates }; } return r; })); if (!isMockUser) { await supabase.from('financial_records').update(updates).eq('id', id); } };
 
   // ... (Bulk actions unchanged) ...
@@ -1835,34 +1776,22 @@ const newRecords: FinancialRecord[] = [];
    * `dateKeys` é uma lista porque a coluna TOTAL é o mesmo nó somado em vários
    * meses — clicar nela tem que trazer os lançamentos de todos eles.
    */
-  const handleCellClick = (node: any, dateKeys: string[], mode: 'DRE' | 'CASHFLOW', periodoLabel?: string) => {
+  const handleCellClick = (node: any, dateKeys: string[], periodoLabel?: string) => {
       if (!node || !node.values) return;
       const alvo = dateKeys.reduce((a, k) => a + (node.values[k] || 0), 0);
       if (!alvo) return;
   
       // A célula pode conter renovação prevista; a lista tem que mostrar as
       // mesmas linhas, senão o detalhe não fecha com o total.
-      const fonte = mode === 'DRE' || includeProjections
-        ? [...validRecords, ...projectedRecords]
-        : validRecords;
-      const recordsToDisplay = fonte.filter(r => {
-          let rDate = '';
-          if (mode === 'DRE') {
-              rDate = r.competenceDate || '';
-          } else { // CASHFLOW
-              if(includeProjections) rDate = r.dueDate;
-              else if (r.status === TransactionStatus.PAID) rDate = r.paymentDate || r.dueDate;
-              else return false;
-          }
+      const recordsToDisplay = [...validRecords, ...projectedRecords].filter(r => {
+          const rDate = dataDoLancamento(r);
           if (!rDate || !dateKeys.some(k => rDate.startsWith(k))) return false;
 
           if (node.type === 'ROOT') {
               // Linha de resultado: entra tudo que passou pelo período.
-              if (node.code === 'NET') return true;
-              if (node.code === 'INFLOW') return r.amount >= 0;
-              if (node.code === 'OUTFLOW') return r.amount < 0;
+              return true;
           } else if (node.type === 'CLASSIFICATION') {
-              if (mode === 'DRE' && node.code === '1') {
+              if (node.code === '1') {
                   return r.amount >= 0;
               }
               // Com rateio, o lançamento aparece em toda classificação que ele toca.
@@ -1913,9 +1842,7 @@ const newRecords: FinancialRecord[] = [];
       setDrillDownRevTypeIds(ehNoDeTipoReceita ? [node.code] : undefined);
       setDrillDownRubricIds(rubricasDoNo?.length ? rubricasDoNo : undefined);
       setDrillDownTitle(node.name);
-      setDrillDownSubtitle(
-        `${periodoLabel || dateKeys.join(', ')} · ${mode === 'DRE' ? 'por competência' : 'por caixa'}`,
-      );
+      setDrillDownSubtitle(periodoLabel || dateKeys.join(', '));
       setDrillDownExpected(alvo);
       setIsDrillDownOpen(true);
   };
@@ -1929,7 +1856,7 @@ const newRecords: FinancialRecord[] = [];
    * O Asaas só emite a cobrança ~30/40 dias antes do vencimento, então o caixa
    * futuro secava logo à frente do último lote emitido, mesmo com a assinatura
    * ativa e sem prazo. Aqui o horizonte cobre pelo menos 24 meses e se estica
-   * até onde o usuário estiver olhando — matriz ou resumo.
+   * até onde o usuário estiver olhando.
    */
   const projectedRecords = useMemo(() => {
     if (!subscriptions.length) return [] as FinancialRecord[];
@@ -1938,13 +1865,12 @@ const newRecords: FinancialRecord[] = [];
       shiftMonthKey(mesAtual, 24),
       `${primaryPeriod.year}-12`,
       isCompareEnabled ? `${comparePeriod.year}-12` : '',
-      cashRange.to?.slice(0, 7) || '',
     ].filter(Boolean).sort().pop()!;
     // Depende de `records`, e não de `validRecords`: este último é recalculado
     // a cada render, o que faria a projeção inteira ser refeita a cada tecla
     // digitada na busca.
     return projectSubscriptions(subscriptions, records, { fromMonth: mesAtual, toMonth: fim });
-  }, [subscriptions, records, primaryPeriod.year, comparePeriod.year, isCompareEnabled, cashRange.to]);
+  }, [subscriptions, records, primaryPeriod.year, comparePeriod.year, isCompareEnabled]);
 
   
   // --- DASHBOARD CHARTS DATA ---
@@ -2138,18 +2064,15 @@ const newRecords: FinancialRecord[] = [];
       };
   }, [validRecords, dashboardPrimaryPeriod, dashboardComparePeriod, isDashboardCompareEnabled, revenueTypes, companies]);
 
-  const buildHierarchy = (mode: 'DRE' | 'CASHFLOW') => {
+  const buildHierarchy = () => {
       const primaryKeys = primaryPeriod.months.map(m => `${primaryPeriod.year}-${String(m).padStart(2, '0')}`);
       const compareKeys = isCompareEnabled ? comparePeriod.months.map(m => `${comparePeriod.year}-${String(m).padStart(2, '0')}`) : [];
       /**
-       * Renovações previstas: no caixa, só quando se pede o que ainda não foi
-       * pago. No DRE sempre — ele já mostra a despesa futura lançada, e sem a
-       * receita das assinaturas os meses à frente do último lote do Asaas
-       * pareciam uma queda de faturamento que não existe.
+       * As renovações previstas entram sempre: sem a receita das assinaturas, os
+       * meses à frente do último lote do Asaas pareciam uma queda de faturamento
+       * que não existe.
        */
-      const baseRecords = mode === 'DRE' || includeProjections
-        ? [...validRecords, ...projectedRecords]
-        : validRecords;
+      const baseRecords = [...validRecords, ...projectedRecords];
       const hierarchy: any[] = []; const netResult: Record<string, number> = {}; const prevNetResult: Record<string, number> = {};
       
       /**
@@ -2173,33 +2096,9 @@ const newRecords: FinancialRecord[] = [];
       const calculateValueForNode = (rubricIds: string[], keys: string[], isExpense: boolean) => { 
         const vals: Record<string, number> = {}; 
         keys.forEach(key => { 
-            vals[key] = baseRecords.filter(r => {
-                if (mode === 'DRE') { // DRE always includes all statuses
-                    // Use competence date first, then due date, then payment date as fallback
-                    let rDate = r.competenceDate || r.dueDate || r.paymentDate || '';
-                    if (!rDate) return false; // Skip records without any date
-                    return touchesRubrics(r, rubricIds) && rDate.startsWith(key); 
-                }
-                
-                // CASHFLOW logic
-                // If includeProjections is OFF, only show PAID records
-                if (!includeProjections && r.status !== TransactionStatus.PAID) return false;
-                
-                let rDate = '';
-                if (includeProjections) {
-                    // Show all records by due date when projections are enabled
-                    rDate = r.dueDate || r.competenceDate || '';
-                } else if (r.status === TransactionStatus.PAID) {
-                    // For paid records, use payment date first, then due date, then competence date
-                    rDate = r.paymentDate || r.dueDate || r.competenceDate || '';
-                } else {
-                    return false;
-                }
-                
-                // Ensure we have a valid date and it matches the period
-                if (!rDate) return false;
-                return touchesRubrics(r, rubricIds) && rDate.startsWith(key); 
-            }).reduce((acc, r) => acc + amountForRubrics(r, rubricIds), 0);
+            vals[key] = baseRecords
+              .filter(r => touchesRubrics(r, rubricIds) && dataDoLancamento(r).startsWith(key))
+              .reduce((acc, r) => acc + amountForRubrics(r, rubricIds), 0);
         }); 
         return vals; 
       };
@@ -2246,9 +2145,7 @@ const newRecords: FinancialRecord[] = [];
 
               const monthRecords = baseRecords.filter(r => {
                   if (r.amount <= 0) return false; // Somente lançamentos positivos (entradas)
-                  // DRE is competence based
-                  const rDate = r.competenceDate || '';
-                  return rDate.startsWith(key);
+                  return dataDoLancamento(r).startsWith(key);
               });
 
               monthRecords.forEach(record => { totalForMonth += revenueShare(record, productId); });
@@ -2258,134 +2155,46 @@ const newRecords: FinancialRecord[] = [];
           return vals;
       };
 
-      // Helper: calculate cashflow value for a revenue type (uses payment/due date, not competence)
-      const calculateValueForRevenueTypeCashflow = (productId: string | null, keys: string[]) => {
-          const vals: Record<string, number> = {};
-          keys.forEach(key => {
-              let totalForMonth = 0;
-              const monthRecords = baseRecords.filter(r => {
-                  if (r.amount <= 0) return false; // Somente lançamentos positivos (entradas)
-                  if (!includeProjections && r.status !== TransactionStatus.PAID) return false;
-                  let rDate = '';
-                  if (includeProjections) {
-                      rDate = r.dueDate || r.competenceDate || '';
-                  } else if (r.status === TransactionStatus.PAID) {
-                      rDate = r.paymentDate || r.dueDate || r.competenceDate || '';
-                  } else { return false; }
-                  return rDate.startsWith(key);
-              });
-              monthRecords.forEach(record => { totalForMonth += revenueShare(record, productId); });
-              vals[key] = totalForMonth;
-          });
-          return vals;
-      };
-
-      if (mode === 'CASHFLOW') {
-        const inflowNode = { code: 'INFLOW', name: 'TOTAL ENTRADAS', type: 'ROOT', values: {}, prevValues: {}, children: [] as any[] };
-        const outflowNode = { code: 'OUTFLOW', name: 'TOTAL SAÍDAS', type: 'ROOT', values: {}, prevValues: {}, children: [] as any[] };
-
-        const outflowCenters = uniqueCenters.filter(c => c.classificationCode !== '1').sort((a,b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
-
-        if (revenueDim !== 'COA') {
-          revenueBuckets.forEach(pb => {
-              inflowNode.children.push({
-                  code: pb.id || 'SEM_PRODUTO',
-                  name: pb.name,
-                  type: 'RUBRIC',
-                  values: calculateValueForRevenueTypeCashflow(pb.id, primaryKeys),
-                  prevValues: calculateValueForRevenueTypeCashflow(pb.id, compareKeys)
-              });
-          });
-        } else {
-          const inflowCenters = uniqueCenters.filter(c => c.classificationCode === '1')
-            .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
-          inflowCenters.forEach(center => {
-            const centerNode: any = { code: center.code, name: center.name, type: 'CENTER', values: {}, prevValues: {}, children: [] };
-            chartOfAccounts.filter(c => c.centerCode === center.code)
-              .sort((a, b) => a.rubricCode.localeCompare(b.rubricCode, undefined, { numeric: true }))
-              .forEach(rubric => {
-                centerNode.children.push({
-                  code: rubric.rubricCode, name: rubric.rubricName, type: 'RUBRIC',
-                  values: calculateValueForNode([rubric.id], primaryKeys, false),
-                  prevValues: calculateValueForNode([rubric.id], compareKeys, false),
-                });
-              });
-            inflowNode.children.push(centerNode);
-          });
-        }
-
-        outflowCenters.forEach(center => {
-            const centerNode: any = { code: center.code, name: center.name, type: 'CENTER', values: {}, prevValues: {}, children: [] };
-            
-            const rubrics = chartOfAccounts.filter(c => c.centerCode === center.code).sort((a,b) => a.rubricCode.localeCompare(b.rubricCode, undefined, { numeric: true }));
-            rubrics.forEach(rubric => {
-                const rubricNode = { 
-                    code: rubric.rubricCode, 
-                    name: rubric.rubricName, 
-                    type: 'RUBRIC', 
-                    values: calculateValueForNode([rubric.id], primaryKeys, true),
-                    prevValues: calculateValueForNode([rubric.id], compareKeys, true) 
-                };
-                centerNode.children.push(rubricNode);
-            });
-            
-            primaryKeys.forEach(k => { centerNode.values[k] = centerNode.children.reduce((acc, child) => acc + (child.values[k] || 0), 0); });
-            compareKeys.forEach(k => { centerNode.prevValues[k] = centerNode.children.reduce((acc, child) => acc + (child.prevValues[k] || 0), 0); });
-            outflowNode.children.push(centerNode);
-        });
-
-        primaryKeys.forEach(k => {
-            inflowNode.values[k] = inflowNode.children.reduce((acc, child) => acc + (child.values[k] || 0), 0);
-            outflowNode.values[k] = outflowNode.children.reduce((acc, child) => acc + (child.values[k] || 0), 0);
-        });
-        compareKeys.forEach(k => {
-            inflowNode.prevValues[k] = inflowNode.children.reduce((acc, child) => acc + (child.prevValues[k] || 0), 0);
-            outflowNode.prevValues[k] = outflowNode.children.reduce((acc, child) => acc + (child.prevValues[k] || 0), 0);
-        });
-
-        hierarchy.push(inflowNode, outflowNode);
-      } else { // DRE
-          // Uma linha por classificação real (código + nome). Agrupar só pelo
-          // código fundia CUSTO FIXO, CUSTO VARIÁVEL, INVESTIMENTOS e
-          // NÃO-OPERACIONAIS num bloco único, com o nome do primeiro deles.
-          let classifications = uniqueClassifications.map(c => ({ ...c }));
-          if (!classifications.some(c => c.code === '1')) {
-            classifications = [{ key: '1|RECEITA OPERACIONAL', code: '1', name: 'RECEITA OPERACIONAL' }, ...classifications];
-          }
-          classifications.forEach(cls => {
-              const clsCode = cls.code;
-              const clsName = cls.name || `GRUPO ${clsCode}`;
-              // `code` continua sendo o código real — é o que diz se a linha é
-              // despesa. A chave composta vai à parte, para React e drill-down.
-              const clsNode: any = { code: clsCode, key: cls.key, name: clsName, type: 'CLASSIFICATION', values: {}, prevValues: {}, children: [] };
-              const isExpense = clsCode !== '1';
-              
-              if (clsCode === '1' && revenueDim !== 'COA') { // Receita por Produto ou Tipo de Receita
-                  revenueBuckets.forEach(pb => {
-                      const rtNode = { code: pb.id || 'SEM_PRODUTO', name: pb.name, type: 'RUBRIC', values: calculateValueForRevenueType(pb.id, primaryKeys), prevValues: calculateValueForRevenueType(pb.id, compareKeys) };
-                      clsNode.children.push(rtNode);
-                  });
-              } else { // Despesas — e receitas de quem não usa produto — pelo plano de contas
-                  const centers = uniqueCenters.filter(c => c.classificationKey === cls.key).map(c => c.code).sort();
-                  centers.forEach(centerCode => { 
-                      const centerName = chartOfAccounts.find(c => c.centerCode === centerCode)?.centerName || 'Geral'; 
-                      const centerNode: any = { code: centerCode, name: centerName, type: 'CENTER', values: {}, prevValues: {}, children: [] };
-                      const rubrics = chartOfAccounts.filter(c => c.centerCode === centerCode).sort((a,b) => a.rubricCode.localeCompare(b.rubricCode, undefined, { numeric: true }));
-                      rubrics.forEach(rubric => { 
-                          const rubricNode = { code: rubric.rubricCode, name: rubric.rubricName, type: 'RUBRIC', values: calculateValueForNode([rubric.id], primaryKeys, isExpense), prevValues: calculateValueForNode([rubric.id], compareKeys, isExpense) }; 
-                          centerNode.children.push(rubricNode);
-                      });
-                      primaryKeys.forEach(k => { centerNode.values[k] = centerNode.children.reduce((acc, child) => acc + (child.values[k] || 0), 0); });
-                      compareKeys.forEach(k => { centerNode.prevValues[k] = centerNode.children.reduce((acc, child) => acc + (child.prevValues[k] || 0), 0); });
-                      clsNode.children.push(centerNode);
-                  });
-              }
-
-              primaryKeys.forEach(k => { clsNode.values[k] = clsNode.children.reduce((acc, child) => acc + (child.values[k] || 0), 0); });
-              compareKeys.forEach(k => { clsNode.prevValues[k] = clsNode.children.reduce((acc, child) => acc + (child.prevValues[k] || 0), 0); });
-              hierarchy.push(clsNode);
-          });
+      // Uma linha por classificação real (código + nome). Agrupar só pelo
+      // código fundia CUSTO FIXO, CUSTO VARIÁVEL, INVESTIMENTOS e
+      // NÃO-OPERACIONAIS num bloco único, com o nome do primeiro deles.
+      let classifications = uniqueClassifications.map(c => ({ ...c }));
+      if (!classifications.some(c => c.code === '1')) {
+        classifications = [{ key: '1|RECEITA OPERACIONAL', code: '1', name: 'RECEITA OPERACIONAL' }, ...classifications];
       }
+      classifications.forEach(cls => {
+          const clsCode = cls.code;
+          const clsName = cls.name || `GRUPO ${clsCode}`;
+          // `code` continua sendo o código real — é o que diz se a linha é
+          // despesa. A chave composta vai à parte, para React e drill-down.
+          const clsNode: any = { code: clsCode, key: cls.key, name: clsName, type: 'CLASSIFICATION', values: {}, prevValues: {}, children: [] };
+          const isExpense = clsCode !== '1';
+          
+          if (clsCode === '1' && revenueDim !== 'COA') { // Receita por Produto ou Tipo de Receita
+              revenueBuckets.forEach(pb => {
+                  const rtNode = { code: pb.id || 'SEM_PRODUTO', name: pb.name, type: 'RUBRIC', values: calculateValueForRevenueType(pb.id, primaryKeys), prevValues: calculateValueForRevenueType(pb.id, compareKeys) };
+                  clsNode.children.push(rtNode);
+              });
+          } else { // Despesas — e receitas de quem não usa produto — pelo plano de contas
+              const centers = uniqueCenters.filter(c => c.classificationKey === cls.key).map(c => c.code).sort();
+              centers.forEach(centerCode => { 
+                  const centerName = chartOfAccounts.find(c => c.centerCode === centerCode)?.centerName || 'Geral'; 
+                  const centerNode: any = { code: centerCode, name: centerName, type: 'CENTER', values: {}, prevValues: {}, children: [] };
+                  const rubrics = chartOfAccounts.filter(c => c.centerCode === centerCode).sort((a,b) => a.rubricCode.localeCompare(b.rubricCode, undefined, { numeric: true }));
+                  rubrics.forEach(rubric => { 
+                      const rubricNode = { code: rubric.rubricCode, name: rubric.rubricName, type: 'RUBRIC', values: calculateValueForNode([rubric.id], primaryKeys, isExpense), prevValues: calculateValueForNode([rubric.id], compareKeys, isExpense) }; 
+                      centerNode.children.push(rubricNode);
+                  });
+                  primaryKeys.forEach(k => { centerNode.values[k] = centerNode.children.reduce((acc, child) => acc + (child.values[k] || 0), 0); });
+                  compareKeys.forEach(k => { centerNode.prevValues[k] = centerNode.children.reduce((acc, child) => acc + (child.prevValues[k] || 0), 0); });
+                  clsNode.children.push(centerNode);
+              });
+          }
+
+          primaryKeys.forEach(k => { clsNode.values[k] = clsNode.children.reduce((acc, child) => acc + (child.values[k] || 0), 0); });
+          compareKeys.forEach(k => { clsNode.prevValues[k] = clsNode.children.reduce((acc, child) => acc + (child.prevValues[k] || 0), 0); });
+          hierarchy.push(clsNode);
+      });
       primaryKeys.forEach(k => { netResult[k] = hierarchy.reduce((acc, cls) => acc + (cls.values[k] || 0), 0); });
       compareKeys.forEach(k => { prevNetResult[k] = hierarchy.reduce((acc, cls) => acc + (cls.prevValues[k] || 0), 0); });
       return { hierarchy, primaryKeys, compareKeys, netResult, prevNetResult };
@@ -2407,7 +2216,7 @@ const newRecords: FinancialRecord[] = [];
             <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
                 <table className="w-full text-left text-sm text-gray-600">
                     <thead className="bg-gray-50 text-gray-700 font-bold border-b border-gray-200 uppercase text-xs tracking-wider">
-                        <tr>{isValidationMode && (<th className="p-4 w-10 text-center"><div onClick={() => handleSelectAll(recordsToShow)} className="cursor-pointer text-gray-400 hover:text-mcsystem-500 transition-colors">{allSelected ? <CheckSquare size={18} className="text-mcsystem-500" /> : <Square size={18} />}</div></th>)}<th className="p-4">Descrição</th><th className="p-4">Vencimento</th><th className="p-4">Valor</th><th className="p-4">Tipo</th><th className="p-4">Categoria / Rubrica</th><th className="p-4 text-center">Ações</th></tr>
+                        <tr>{isValidationMode && (<th className="p-4 w-10 text-center"><div onClick={() => handleSelectAll(recordsToShow)} className="cursor-pointer text-gray-400 hover:text-mcsystem-500 transition-colors">{allSelected ? <CheckSquare size={18} className="text-mcsystem-500" /> : <Square size={18} />}</div></th>)}<th className="p-4">Descrição</th><th className="p-4">Data</th><th className="p-4">Valor</th><th className="p-4">Tipo</th><th className="p-4">Categoria / Rubrica</th><th className="p-4 text-center">Ações</th></tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {recordsToShow.map(r => {
@@ -2416,7 +2225,7 @@ const newRecords: FinancialRecord[] = [];
                             <tr key={r.id} className={`hover:bg-gray-50 group transition-colors ${isSelected ? 'bg-blue-50/50' : ''}`}>
                                 {isValidationMode && (<td className="p-4 text-center"><div onClick={() => handleSelectOne(r.id)} className="cursor-pointer text-gray-300 hover:text-mcsystem-500 transition-colors">{isSelected ? <CheckSquare size={18} className="text-mcsystem-500" /> : <Square size={18} />}</div></td>)}
                                 <td className="p-4 font-medium text-gray-800">{r.description}{r.companyId && (<div className="flex items-center mt-1 text-[10px] text-gray-500 font-normal"><Building size={10} className="mr-1" />{companies.find(c => c.id === r.companyId)?.name}</div>)}</td>
-                                <td className="p-4">{new Date(r.dueDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</td>
+                                <td className="p-4">{new Date(dataDoLancamento(r)).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</td>
                                 <td className={`p-4 font-bold ${isPositiveFlow ? 'text-green-600' : 'text-red-500'}`}>{isPositiveFlow ? '+' : ''} R$ {(realValue || 0).toLocaleString('pt-BR')}</td>
                                 <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${r.type === TransactionType.INCOME ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{r.type}</span></td>
                                 <td className="p-4">{r.rubricId ? (<span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs border border-blue-100">{chartOfAccounts.find(c => c.id === r.rubricId)?.rubricName || r.category}</span>) : (r.revenueTypeId ? (<span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs border border-emerald-100">{revenueTypes.find(rt => rt.id === r.revenueTypeId)?.name || 'Receita'}</span>) : (<span className="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs border border-yellow-200 flex items-center w-fit"><AlertCircle size={10} className="mr-1"/> Definir Categoria</span>))}</td>
@@ -2437,7 +2246,7 @@ const newRecords: FinancialRecord[] = [];
           const matchesType = reconFilterType === 'ALL' || r.type === reconFilterType;
           const matchesStatus = reconFilterStatus === 'ALL' || r.status === reconFilterStatus;
           const matchesBank = reconFilterBank === 'ALL' || r.bankId === reconFilterBank;
-          if (!inRange(r.dueDate, reconRange)) return false;
+          if (!inRange(dataDoLancamento(r), reconRange)) return false;
           const matchesSearch = r.description.toLowerCase().includes(reconSearch.toLowerCase()) || (chartOfAccounts.find(c=>c.id===r.rubricId)?.rubricName || r.category ||'').toLowerCase().includes(reconSearch.toLowerCase()) || r.amount.toString().includes(reconSearch);
           return matchesType && matchesStatus && matchesSearch && matchesBank;
       });
@@ -2453,6 +2262,9 @@ const newRecords: FinancialRecord[] = [];
             } else if (sortConfig.key === 'amount') {
                 aValue = a.amount;
                 bValue = b.amount;
+            } else if (sortConfig.key === 'dueDate') {
+                aValue = dataDoLancamento(a);
+                bValue = dataDoLancamento(b);
             } else {
                 aValue = a[sortConfig.key as keyof FinancialRecord];
                 bValue = b[sortConfig.key as keyof FinancialRecord];
@@ -2470,7 +2282,7 @@ const newRecords: FinancialRecord[] = [];
             let comparison = 0;
             if (typeof valA === 'number' && typeof valB === 'number') {
                 comparison = valA - valB;
-            } else if (sortConfig.key === 'dueDate' || sortConfig.key === 'competenceDate') {
+            } else if (sortConfig.key === 'dueDate') {
                 const dateA = new Date(valA).getTime();
                 const dateB = new Date(valB).getTime();
                 comparison = dateA - dateB;
@@ -2485,7 +2297,7 @@ const newRecords: FinancialRecord[] = [];
       // Saldo acumulado: acumula sobre a MESMA lista que a tabela mostra, só que
       // sempre no sentido cronológico (de baixo pra cima quando a ordenação é do
       // mais novo pro mais antigo). Antes ele acumulava numa ordem própria
-      // (vencimento + id): como quase todo dia tem mais de um lançamento, o
+      // (data + id): como quase todo dia tem mais de um lançamento, o
       // desempate não batia com o da tela e a coluna não fechava de uma linha
       // para a seguinte — a diferença entre duas linhas vizinhas era o valor de
       // outra linha, o que dava a impressão de valor somado com o sinal errado.
@@ -2494,7 +2306,7 @@ const newRecords: FinancialRecord[] = [];
         ? (sortConfig.direction === 'descending' ? [...filtered].reverse() : filtered)
         // Ordenada por outra coluna, a leitura linha a linha não existe: cai no
         // saldo por data mesmo, preservando a ordem da tela dentro do mesmo dia.
-        : [...filtered].sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
+        : [...filtered].sort((a, b) => dataDoLancamento(a).localeCompare(dataDoLancamento(b)));
       let acc = 0;
       chronological.forEach(r => { acc += (r.amount || 0); runningBalance.set(r.id, acc); });
       const chronoPos = new Map(chronological.map((r, i) => [r.id, i]));
@@ -2504,7 +2316,7 @@ const newRecords: FinancialRecord[] = [];
 
       /**
        * Receitas agrupadas (botão "Agrupar receitas do dia"): as do mesmo
-       * produto com o mesmo vencimento viram uma linha de resumo, que abre as
+       * produto na mesma data viram uma linha de resumo, que abre as
        * receitas dela. Receita sozinha no dia e despesa seguem linha a linha. O
        * grupo entra na posição da primeira receita dele na ordem da tabela,
        * então a ordenação continua valendo.
@@ -2518,7 +2330,7 @@ const newRecords: FinancialRecord[] = [];
         filtered.forEach(r => {
           if (r.amount < 0) { displayRows.push({ kind: 'row', r }); return; }
           const produto = r.product_id || '__sem_produto';
-          const key = `${produto}|${(r.dueDate || '').slice(0, 10)}`;
+          const key = `${produto}|${dataDoLancamento(r).slice(0, 10)}`;
           let g = grupos.get(key);
           if (!g) {
             g = { kind: 'group', key, rows: [], nome: produto === '__sem_produto' ? 'Sem produto' : (products.find(pr => pr.id === produto)?.name || 'Produto') };
@@ -2552,8 +2364,7 @@ const newRecords: FinancialRecord[] = [];
                               <tr onClick={() => setExpandedRecordId(isExpanded ? null : r.id)}
                                   className={`group cursor-pointer [&>td]:border-b [&>td]:border-r [&>td]:border-gray-200 [&>td]:px-2.5 [&>td]:py-1.5 [&>td]:whitespace-nowrap ${isSelected ? 'bg-blue-50' : isExpanded ? 'bg-mcsystem-50/60' : inGroup ? 'bg-mcsystem-50/40 hover:bg-yellow-50/60' : idx % 2 ? 'bg-gray-50/60 hover:bg-yellow-50/60' : 'bg-white hover:bg-yellow-50/60'}`}>
                                   <td className="text-center" onClick={e => e.stopPropagation()}><div onClick={() => handleSelectOne(r.id)} className="cursor-pointer text-gray-300 hover:text-mcsystem-500 inline-flex">{isSelected ? <CheckSquare size={15} className="text-mcsystem-500" /> : <Square size={15} />}</div></td>
-                                  <td className="tabular-nums">{new Date(r.dueDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</td>
-                                  <td className="tabular-nums text-gray-500">{r.competenceDate ? new Date(r.competenceDate).toLocaleDateString('pt-BR', {month: '2-digit', year: 'numeric', timeZone: 'UTC'}) : '-'}</td>
+                                  <td className="tabular-nums">{new Date(dataDoLancamento(r)).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</td>
                                   <td className="overflow-hidden"><div className="truncate text-gray-900" title={r.description}>{r.description}</div></td>
                                   <td className="max-w-[200px]"><div className="truncate text-gray-600" title={parte}>{parte || <span className="text-gray-300">—</span>}</div></td>
                                   <td className="max-w-[170px]"><div className="truncate text-gray-600" title={categoria}>{categoria}{(r.split_rubrics?.length || 0) > 1 && (<span className="ml-1 text-[11px] font-bold text-mcsystem-700" title={r.split_rubrics!.map(sp => `${chartOfAccounts.find(c => c.id === sp.rubric_id)?.rubricName || 'Rubrica'}: ${sp.description || ''} ${sp.amount}`).join('\n')}>+{r.split_rubrics!.length - 1}</span>)}</div></td>
@@ -2566,13 +2377,12 @@ const newRecords: FinancialRecord[] = [];
 
                               {isExpanded && (
                                 <tr>
-                                  <td colSpan={10} className="bg-mcsystem-50/30 border-b border-mcsystem-100 px-6 py-4">
+                                  <td colSpan={9} className="bg-mcsystem-50/30 border-b border-mcsystem-100 px-6 py-4">
                                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 text-sm">
                                       <div className="space-y-1.5">
                                         <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Lançamento</p>
                                         <p className="font-semibold text-gray-900">{r.description}</p>
-                                        <p className="text-gray-500">Vence {new Date(r.dueDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
-                                          {r.competenceDate && ` · comp. ${new Date(r.competenceDate).toLocaleDateString('pt-BR', { month: '2-digit', year: 'numeric', timeZone: 'UTC' })}`}
+                                        <p className="text-gray-500">{new Date(dataDoLancamento(r)).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
                                           {r.paymentDate && ` · pago em ${new Date(r.paymentDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}`}
                                         </p>
                                         <p className={`text-lg font-bold tabular-nums ${r.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -2648,7 +2458,7 @@ const newRecords: FinancialRecord[] = [];
                     <div className="flex-1">
                       <h4 className="font-bold text-yellow-800 text-sm">Pendentes de validação</h4>
                       <p className="text-sm text-yellow-700 mt-1">
-                        Foram importados ou gerados automaticamente e <b>ficam fora do DRE, do Fluxo de Caixa e do Dashboard</b> até
+                        Foram importados ou gerados automaticamente e <b>ficam fora do DRE e do Dashboard</b> até
                         serem validados. Confira a rubrica de cada um, selecione e clique em Validar.
                       </p>
                     </div>
@@ -2691,9 +2501,9 @@ const newRecords: FinancialRecord[] = [];
                   )}
               </div>
 
-              <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-lg border border-gray-100 shadow-sm transition-all">{selectedRecordIds.size > 0 ? (<div className="flex items-center justify-between w-full animate-in slide-in-from-top-2"><div className="flex items-center space-x-4"><div className="bg-mcsystem-500 text-white px-3 py-1.5 rounded-md text-sm font-bold flex items-center shadow-sm"><CheckSquare size={16} className="mr-2"/> {selectedRecordIds.size} Selecionados</div><button onClick={() => setSelectedRecordIds(new Set())} className="text-gray-500 hover:text-gray-700 text-sm flex items-center"><X size={14} className="mr-1"/> Cancelar</button></div><div className="flex items-center space-x-2">{reconOnlyPending && (<button onClick={handleBulkValidate} className="bg-yellow-400 text-yellow-950 hover:bg-yellow-300 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center border border-yellow-500"><CheckCircle2 size={14} className="mr-1"/> Validar</button>)}<button onClick={() => handleBulkStatusChange(TransactionStatus.PAID)} className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><CheckCircle2 size={14} className="mr-1"/> Marcar Pago</button><button onClick={() => handleBulkStatusChange(TransactionStatus.PENDING)} className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Clock size={14} className="mr-1"/> Marcar Pendente</button><div className="h-4 w-px bg-gray-300 mx-2"></div><button onClick={handleBulkDuplicate} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Copy size={14} className="mr-1"/> Duplicar</button><button onClick={handleBulkDelete} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Trash2 size={14} className="mr-1"/> Excluir</button></div></div>) : (<><div className="flex gap-3 items-center flex-1 flex-wrap"><div className="relative flex-1 min-w-[200px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input type="text" placeholder="Buscar lançamentos..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={reconSearch} onChange={e => setReconSearch(e.target.value)} /></div><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterType} onChange={e => setReconFilterType(e.target.value as any)}><option value="ALL">Todas Movimentações</option><option value={TransactionType.INCOME}>Receitas</option><option value={TransactionType.EXPENSE}>Despesas</option></select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterBank} onChange={e => setReconFilterBank(e.target.value as any)}><option value="ALL">Todos os Bancos</option>{banks.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}</select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterStatus} onChange={e => setReconFilterStatus(e.target.value as any)}><option value="ALL">Todos Status</option><option value={TransactionStatus.PAID}>Realizado / Pago</option><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select><DateRangeFilter value={reconRange} onChange={setReconRange} /><span className="text-xs text-gray-400 whitespace-nowrap">por vencimento</span>{/* Fica sempre visível: escondê-lo quando a fila zera faz o filtro parecer
+              <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-lg border border-gray-100 shadow-sm transition-all">{selectedRecordIds.size > 0 ? (<div className="flex items-center justify-between w-full animate-in slide-in-from-top-2"><div className="flex items-center space-x-4"><div className="bg-mcsystem-500 text-white px-3 py-1.5 rounded-md text-sm font-bold flex items-center shadow-sm"><CheckSquare size={16} className="mr-2"/> {selectedRecordIds.size} Selecionados</div><button onClick={() => setSelectedRecordIds(new Set())} className="text-gray-500 hover:text-gray-700 text-sm flex items-center"><X size={14} className="mr-1"/> Cancelar</button></div><div className="flex items-center space-x-2">{reconOnlyPending && (<button onClick={handleBulkValidate} className="bg-yellow-400 text-yellow-950 hover:bg-yellow-300 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center border border-yellow-500"><CheckCircle2 size={14} className="mr-1"/> Validar</button>)}<button onClick={() => handleBulkStatusChange(TransactionStatus.PAID)} className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><CheckCircle2 size={14} className="mr-1"/> Marcar Pago</button><button onClick={() => handleBulkStatusChange(TransactionStatus.PENDING)} className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Clock size={14} className="mr-1"/> Marcar Pendente</button><div className="h-4 w-px bg-gray-300 mx-2"></div><button onClick={handleBulkDuplicate} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Copy size={14} className="mr-1"/> Duplicar</button><button onClick={handleBulkDelete} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Trash2 size={14} className="mr-1"/> Excluir</button></div></div>) : (<><div className="flex gap-3 items-center flex-1 flex-wrap"><div className="relative flex-1 min-w-[200px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input type="text" placeholder="Buscar lançamentos..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={reconSearch} onChange={e => setReconSearch(e.target.value)} /></div><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterType} onChange={e => setReconFilterType(e.target.value as any)}><option value="ALL">Todas Movimentações</option><option value={TransactionType.INCOME}>Receitas</option><option value={TransactionType.EXPENSE}>Despesas</option></select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterBank} onChange={e => setReconFilterBank(e.target.value as any)}><option value="ALL">Todos os Bancos</option>{banks.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}</select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterStatus} onChange={e => setReconFilterStatus(e.target.value as any)}><option value="ALL">Todos Status</option><option value={TransactionStatus.PAID}>Realizado / Pago</option><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select><DateRangeFilter value={reconRange} onChange={setReconRange} />{/* Fica sempre visível: escondê-lo quando a fila zera faz o filtro parecer
     inexistente. Apagado sem pendência, amarelo com a contagem quando há. */}
-<button onClick={toggleGroupIncome} title="Junta numa linha só as receitas do mesmo produto que vencem no mesmo dia; clique na linha para abrir" className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${groupIncomeByProduct ? 'bg-mcsystem-500 border-mcsystem-500 text-white' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}><Package size={15} /> Agrupar receitas do dia</button><button onClick={() => { setReconOnlyPending(v => !v); setSelectedRecordIds(new Set()); }} title={pendingValidationRecords.length > 0 ? 'Lançamentos importados que ainda não entram no DRE nem no Dashboard' : 'Nenhum lançamento pendente de validação'} className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${reconOnlyPending ? 'bg-yellow-400 border-yellow-400 text-yellow-950' : pendingValidationRecords.length > 0 ? 'bg-white border-yellow-200 text-yellow-700 hover:bg-yellow-50' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}><AlertCircle size={15} /> A validar{pendingValidationRecords.length > 0 && <span className={`text-[10px] font-bold px-1.5 rounded-full ${reconOnlyPending ? 'bg-yellow-950 text-yellow-100' : 'bg-yellow-400 text-yellow-950'}`}>{pendingValidationRecords.length}</span>}</button></div><button onClick={() => { resetTransactionForm(); setIsModalOpen(true); }} className="bg-mcsystem-500 hover:bg-mcsystem-400 text-white px-4 py-2 rounded-lg font-bold flex items-center shadow-sm whitespace-nowrap"><Plus size={18} className="mr-2" /> Novo Lançamento</button></>)}</div>
+<button onClick={toggleGroupIncome} title="Junta numa linha só as receitas do mesmo produto no mesmo dia; clique na linha para abrir" className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${groupIncomeByProduct ? 'bg-mcsystem-500 border-mcsystem-500 text-white' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}><Package size={15} /> Agrupar receitas do dia</button><button onClick={() => { setReconOnlyPending(v => !v); setSelectedRecordIds(new Set()); }} title={pendingValidationRecords.length > 0 ? 'Lançamentos importados que ainda não entram no DRE nem no Dashboard' : 'Nenhum lançamento pendente de validação'} className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${reconOnlyPending ? 'bg-yellow-400 border-yellow-400 text-yellow-950' : pendingValidationRecords.length > 0 ? 'bg-white border-yellow-200 text-yellow-700 hover:bg-yellow-50' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}><AlertCircle size={15} /> A validar{pendingValidationRecords.length > 0 && <span className={`text-[10px] font-bold px-1.5 rounded-full ${reconOnlyPending ? 'bg-yellow-950 text-yellow-100' : 'bg-yellow-400 text-yellow-950'}`}>{pendingValidationRecords.length}</span>}</button></div><button onClick={() => { resetTransactionForm(); setIsModalOpen(true); }} className="bg-mcsystem-500 hover:bg-mcsystem-400 text-white px-4 py-2 rounded-lg font-bold flex items-center shadow-sm whitespace-nowrap"><Plus size={18} className="mr-2" /> Novo Lançamento</button></>)}</div>
               {/* Tabela no jeito de planilha: grade, uma linha por lançamento, cabeçalho
                   fixo ao rolar e totais no rodapé. O clique na linha abre o detalhe. */}
               <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-auto max-h-[72vh]">
@@ -2704,7 +2514,6 @@ const newRecords: FinancialRecord[] = [];
                       <colgroup>
                         <col style={{ width: 36 }} />
                         <col style={{ width: 92 }} />
-                        <col style={{ width: 68 }} />
                         <col />
                         <col style={{ width: 170 }} />
                         <col style={{ width: 140 }} />
@@ -2717,8 +2526,7 @@ const newRecords: FinancialRecord[] = [];
                           <tr className="[&>th]:border-b [&>th]:border-r [&>th]:border-gray-300 [&>th]:px-2.5 [&>th]:py-2 [&>th]:whitespace-nowrap">
                             <th className="w-9 text-center"><div onClick={() => handleSelectAll(filtered)} className="cursor-pointer text-gray-400 hover:text-mcsystem-500 inline-flex">{allSelected ? <CheckSquare size={15} className="text-mcsystem-500" /> : <Square size={15} />}</div></th>
                             {([
-                              ['dueDate', 'Vencimento', 'w-[104px]'],
-                              ['competenceDate', 'Comp.', 'w-[78px]'],
+                              ['dueDate', 'Data', 'w-[104px]'],
                               ['description', 'Descrição', ''],
                               ['company', 'Cliente / Fornecedor', 'w-[200px]'],
                               ['category', 'Categoria', 'w-[170px]'],
@@ -2735,7 +2543,7 @@ const newRecords: FinancialRecord[] = [];
                                 </div>
                               </th>
                             ))}
-                            <th className="w-[120px] text-right" title="Saldo dos lançamentos filtrados acumulado em ordem de vencimento, incluindo os ainda não pagos. Ordene por Vencimento para ler a coluna de cima a baixo.">Saldo acum. (R$)</th>
+                            <th className="w-[120px] text-right" title="Saldo dos lançamentos filtrados acumulado por data, incluindo os ainda não pagos. Ordene por Data para ler a coluna de cima a baixo.">Saldo acum. (R$)</th>
                             <th className="w-[96px] text-center">Ações</th>
                           </tr>
                       </thead>
@@ -2745,14 +2553,12 @@ const newRecords: FinancialRecord[] = [];
                               const g = item;
                               const aberto = openIncomeGroups.has(g.key);
                               const total = g.rows.reduce((a, r) => a + (r.amount || 0), 0);
-                              const datas = g.rows.map(r => r.dueDate).filter(Boolean).sort();
+                              const datas = g.rows.map(r => dataDoLancamento(r)).filter(Boolean).sort();
                               const dt = (d?: string) => d ? new Date(d).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '';
                               const pagos = g.rows.filter(r => r.status === TransactionStatus.PAID).length;
                               const clientes = new Set(g.rows.map(r => r.companyId).filter(Boolean)).size;
                               const todosSel = g.rows.every(r => selectedRecordIds.has(r.id));
                               const todosPagos = pagos === g.rows.length;
-                              const comp = g.rows[0]?.competenceDate
-                                ? new Date(g.rows[0].competenceDate).toLocaleDateString('pt-BR', { month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-';
                               const ultima = g.rows.reduce((a, r) => ((chronoPos.get(r.id) ?? -1) > (chronoPos.get(a.id) ?? -1) ? r : a), g.rows[0]);
                               const saldoGrupo = runningBalance.get(ultima.id) ?? 0;
                               const fmtG = (v: number) => Math.abs(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -2768,7 +2574,6 @@ const newRecords: FinancialRecord[] = [];
                                       </div>
                                     </td>
                                     <td className="tabular-nums">{dt(datas[0])}</td>
-                                    <td className="tabular-nums text-gray-500">{comp}</td>
                                     <td colSpan={3} className="overflow-hidden">
                                       <div className="flex items-center gap-2 min-w-0">
                                         <span className="flex-shrink-0 inline-flex items-center justify-center min-w-[22px] h-5 px-1.5 rounded-full bg-mcsystem-100 text-mcsystem-700 text-[11px] font-bold tabular-nums">{g.rows.length}</span>
@@ -2795,7 +2600,7 @@ const newRecords: FinancialRecord[] = [];
                                 </React.Fragment>
                               );
                           })}
-                          {filtered.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-gray-400">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
+                          {filtered.length === 0 && <tr><td colSpan={9} className="p-8 text-center text-gray-400">Nenhum lançamento encontrado com os filtros atuais.</td></tr>}
                       </tbody>
                       {filtered.length > 0 && (() => {
                         const entradas = filtered.filter(r => r.amount >= 0).reduce((a, r) => a + r.amount, 0);
@@ -2804,7 +2609,7 @@ const newRecords: FinancialRecord[] = [];
                         return (
                           <tfoot className="sticky bottom-0 bg-gray-100 font-semibold text-[13px]">
                             <tr className="[&>td]:border-t-2 [&>td]:border-r [&>td]:border-gray-300 [&>td]:px-2.5 [&>td]:py-2 [&>td]:whitespace-nowrap">
-                              <td colSpan={7} className="text-gray-600">
+                              <td colSpan={6} className="text-gray-600">
                                 {filtered.length} lançamento(s)
                                 <span className="ml-4 font-normal text-gray-500">Entradas <b className="text-green-700 tabular-nums">{f(entradas)}</b></span>
                                 <span className="ml-4 font-normal text-gray-500">Saídas <b className="text-red-600 tabular-nums">−{f(saidas)}</b></span>
@@ -2822,8 +2627,8 @@ const newRecords: FinancialRecord[] = [];
       );
   };
 
-  const renderHierarchicalReport = (mode: 'DRE' | 'CASHFLOW') => {
-      const { hierarchy, primaryKeys, compareKeys, netResult, prevNetResult } = buildHierarchy(mode);
+  const renderHierarchicalReport = () => {
+      const { hierarchy, primaryKeys, compareKeys, netResult, prevNetResult } = buildHierarchy();
       const calculateRowTotal = (values: Record<string, number>, keys: string[]) => keys.reduce((acc, m) => acc + (values[m] || 0), 0);
       /** "out/2026" para uma coluna, "set/2026 a dez/2026" para a coluna TOTAL. */
       const rotuloPeriodo = (keys: string[]) => {
@@ -2834,7 +2639,7 @@ const newRecords: FinancialRecord[] = [];
       };
       /** Props de uma célula clicável — o mesmo comportamento em todo nível. */
       const celulaDetalhe = (node: any, keys: string[]) => ({
-        onClick: () => handleCellClick(node, keys, mode, rotuloPeriodo(keys)),
+        onClick: () => handleCellClick(node, keys, rotuloPeriodo(keys)),
         title: 'Ver os lançamentos deste valor',
         className: 'cursor-pointer',
       });
@@ -2871,231 +2676,16 @@ const newRecords: FinancialRecord[] = [];
       };
 
       if (reportViewMode === 'SUMMARY') {
-          if (mode === 'CASHFLOW') {
-              /**
-               * Resumo do caixa por intervalo de datas, calculado direto dos
-               * lançamentos — e não da matriz, que é presa a ano + meses. É o
-               * "bater o olho" antes de abrir o detalhado.
-               */
-              // Com "Incluir Pendentes" ligado o resumo enxerga as renovações
-              // que o Asaas ainda não emitiu — do contrário o mês seguinte ao
-              // último lote emitido aparece vazio.
-              const baseResumo = includeProjections ? [...validRecords, ...projectedRecords] : validRecords;
-              const noPeriodo = baseResumo.filter(r => {
-                if (!includeProjections && r.status !== TransactionStatus.PAID) return false;
-                const d = includeProjections
-                  ? (r.dueDate || r.competenceDate)
-                  : (r.paymentDate || r.dueDate || r.competenceDate);
-                return inRange(d, cashRange);
-              });
-              const previstoNoPeriodo = noPeriodo
-                .filter(r => isProjected(r))
-                .reduce((a, r) => a + r.amount, 0);
-              const entradas = noPeriodo.filter(r => r.amount >= 0).reduce((a, r) => a + r.amount, 0);
-              const saidas = noPeriodo.filter(r => r.amount < 0).reduce((a, r) => a + r.amount, 0);
-              const saldo = entradas + saidas;
-
-              /**
-               * Colunas do resumo: dias quando a janela cabe em ~2 meses,
-               * senão meses. É o que faz "filtrei agosto" virar uma coluna por
-               * dia e "filtrei o ano" virar uma por mês, sem opção extra.
-               */
-              const diaISO = (d: Date) => {
-                const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-                return z.toISOString().slice(0, 10);
-              };
-              const dataDoCaixa = (r: FinancialRecord) => (includeProjections
-                ? (r.dueDate || r.competenceDate)
-                : (r.paymentDate || r.dueDate || r.competenceDate)) || '';
-
-              const limites = (() => {
-                if (cashRange.from && cashRange.to) return { ini: cashRange.from, fim: cashRange.to };
-                const datas = noPeriodo.map(dataDoCaixa).filter(Boolean).sort();
-                return { ini: datas[0] || diaISO(new Date()), fim: datas[datas.length - 1] || diaISO(new Date()) };
-              })();
-              const dias = Math.round(
-                (new Date(limites.fim + 'T00:00:00').getTime() - new Date(limites.ini + 'T00:00:00').getTime()) / 86400000,
-              ) + 1;
-              const porDia = dias <= 62;
-
-              const colunas: { key: string; label: string }[] = [];
-              if (porDia) {
-                for (let d = new Date(limites.ini + 'T00:00:00'); diaISO(d) <= limites.fim; d.setDate(d.getDate() + 1)) {
-                  const k = diaISO(d);
-                  colunas.push({ key: k, label: k.slice(8, 10) + '/' + k.slice(5, 7) });
-                }
-              } else {
-                const ini = new Date(limites.ini + 'T00:00:00');
-                const fim = new Date(limites.fim + 'T00:00:00');
-                for (let d = new Date(ini.getFullYear(), ini.getMonth(), 1); d <= fim; d.setMonth(d.getMonth() + 1)) {
-                  const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                  colunas.push({ key: k, label: `${monthNames[d.getMonth()]}/${String(d.getFullYear()).slice(2)}` });
-                }
-              }
-
-              const chaveDe = (r: FinancialRecord) => {
-                const d = dataDoCaixa(r);
-                return porDia ? d.slice(0, 10) : d.slice(0, 7);
-              };
-              const entradaPor: Record<string, number> = {};
-              const saidaPor: Record<string, number> = {};
-              noPeriodo.forEach(r => {
-                const k = chaveDe(r);
-                if (r.amount >= 0) entradaPor[k] = (entradaPor[k] || 0) + r.amount;
-                else saidaPor[k] = (saidaPor[k] || 0) + r.amount;
-              });
-
-              // Colunas sem movimento viram ruído numa janela longa.
-              const colunasComDado = porDia && colunas.length > 20
-                ? colunas.filter(c => entradaPor[c.key] || saidaPor[c.key])
-                : colunas;
-
-              // Maiores saídas do período — onde o dinheiro está indo.
-              // Maiores saídas do período — onde o dinheiro está indo.
-              const porRubrica = new Map<string, number>();
-              noPeriodo.filter(r => r.amount < 0).forEach(r => {
-                const fatias = r.split_rubrics?.length
-                  ? r.split_rubrics.map(sp => ({ id: sp.rubric_id, v: Number(sp.amount) || 0 }))
-                  : [{ id: r.rubricId, v: r.amount }];
-                fatias.forEach(f => {
-                  const nome = chartOfAccounts.find(c => c.id === f.id)?.rubricName || r.category || 'Sem rubrica';
-                  porRubrica.set(nome, (porRubrica.get(nome) || 0) + Math.abs(f.v));
-                });
-              });
-              const topRubricas = [...porRubrica.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-              const brlFull = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-              return (
-                  <div className="space-y-5 animate-in fade-in">
-                      <div className="bg-white rounded-2xl border border-gray-200/80 px-5 py-4 flex flex-wrap items-center gap-3">
-                          <DateRangeFilter value={cashRange} onChange={setCashRange} label="Período" />
-                          <button onClick={() => setIncludeProjections(!includeProjections)}
-                            className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${includeProjections ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                            {includeProjections ? <CheckSquare size={15} className="mr-2"/> : <Square size={15} className="mr-2"/>}
-                            Incluir pendentes
-                          </button>
-                          <span className="text-xs text-gray-400">
-                            {includeProjections ? 'Por vencimento, incluindo o que ainda não foi pago.' : 'Só o que foi pago, pela data da baixa.'}
-                          </span>
-                          <button onClick={() => setReportViewMode('DETAILED')}
-                            className="ml-auto px-4 py-2 text-sm bg-mcsystem-900 text-white rounded-lg font-semibold hover:bg-mcsystem-800 flex items-center gap-2">
-                            <List size={15} /> Ver detalhado
-                          </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="bg-white rounded-2xl border border-green-200 p-6">
-                              <p className="text-[11px] text-green-700 font-bold uppercase tracking-wider">Total de entradas</p>
-                              <p className="text-3xl font-bold text-green-700 tabular-nums mt-2">R$ {brlFull(entradas)}</p>
-                              <p className="text-xs text-gray-400 mt-1">{noPeriodo.filter(r => r.amount >= 0).length} lançamento(s)</p>
-                              {previstoNoPeriodo > 0 && (
-                                <p className="text-xs text-blue-600 mt-1" title="Assinaturas ativas cuja cobrança o Asaas ainda não emitiu">
-                                  inclui R$ {brlFull(previstoNoPeriodo)} de renovações previstas
-                                </p>
-                              )}
-                          </div>
-                          <div className="bg-white rounded-2xl border border-red-200 p-6">
-                              <p className="text-[11px] text-red-700 font-bold uppercase tracking-wider">Total de saídas</p>
-                              <p className="text-3xl font-bold text-red-700 tabular-nums mt-2">R$ {brlFull(Math.abs(saidas))}</p>
-                              <p className="text-xs text-gray-400 mt-1">{noPeriodo.filter(r => r.amount < 0).length} lançamento(s)</p>
-                          </div>
-                          <div className={`bg-white rounded-2xl border p-6 ${saldo >= 0 ? 'border-blue-200' : 'border-amber-300'}`}>
-                              <p className={`text-[11px] font-bold uppercase tracking-wider ${saldo >= 0 ? 'text-blue-700' : 'text-amber-700'}`}>Saldo operacional</p>
-                              <p className={`text-3xl font-bold tabular-nums mt-2 ${saldo >= 0 ? 'text-blue-700' : 'text-amber-700'}`}>R$ {brlFull(saldo)}</p>
-                              <p className="text-xs text-gray-400 mt-1">{saldo >= 0 ? 'entrou mais do que saiu' : 'saiu mais do que entrou'}</p>
-                          </div>
-                      </div>
-
-                      <div className="bg-white rounded-2xl border border-gray-200/80 overflow-hidden">
-                        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-                          <h4 className="font-bold text-gray-800 text-sm">
-                            Caixa {porDia ? 'por dia' : 'por mês'}
-                          </h4>
-                          <span className="text-xs text-gray-400">
-                            {colunasComDado.length} {porDia ? 'dia(s)' : 'mês(es)'} com movimento
-                          </span>
-                        </div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="bg-gray-50 text-gray-500 uppercase text-[11px] tracking-wider">
-                                <th className="px-5 py-2.5 text-left font-semibold sticky left-0 bg-gray-50 z-10 min-w-[140px]">Período</th>
-                                {colunasComDado.map(c => (
-                                  <th key={c.key} className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">{c.label}</th>
-                                ))}
-                                <th className="px-5 py-2.5 text-right font-semibold border-l border-gray-200 bg-gray-100">Total</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                              <tr className="hover:bg-gray-50/70">
-                                <td className="px-5 py-2.5 font-medium text-green-700 sticky left-0 bg-white z-10">Entradas</td>
-                                {colunasComDado.map(c => (
-                                  <td key={c.key} className="px-3 py-2.5 text-right tabular-nums text-green-700">
-                                    {entradaPor[c.key] ? brlFull(entradaPor[c.key]) : <span className="text-gray-200">—</span>}
-                                  </td>
-                                ))}
-                                <td className="px-5 py-2.5 text-right tabular-nums font-bold text-green-700 border-l border-gray-200 bg-gray-50">{brlFull(entradas)}</td>
-                              </tr>
-                              <tr className="hover:bg-gray-50/70">
-                                <td className="px-5 py-2.5 font-medium text-red-700 sticky left-0 bg-white z-10">Saídas</td>
-                                {colunasComDado.map(c => (
-                                  <td key={c.key} className="px-3 py-2.5 text-right tabular-nums text-red-700">
-                                    {saidaPor[c.key] ? brlFull(Math.abs(saidaPor[c.key])) : <span className="text-gray-200">—</span>}
-                                  </td>
-                                ))}
-                                <td className="px-5 py-2.5 text-right tabular-nums font-bold text-red-700 border-l border-gray-200 bg-gray-50">{brlFull(Math.abs(saidas))}</td>
-                              </tr>
-                            </tbody>
-                            <tfoot>
-                              <tr className="bg-gray-50 font-bold text-gray-900">
-                                <td className="px-5 py-3 sticky left-0 bg-gray-50 z-10">Saldo</td>
-                                {colunasComDado.map(c => {
-                                  const v = (entradaPor[c.key] || 0) + (saidaPor[c.key] || 0);
-                                  return (
-                                    <td key={c.key} className={`px-3 py-3 text-right tabular-nums ${v < 0 ? 'text-red-600' : v > 0 ? 'text-green-600' : 'text-gray-300'}`}>
-                                      {v ? brlFull(v) : '—'}
-                                    </td>
-                                  );
-                                })}
-                                <td className={`px-5 py-3 text-right tabular-nums border-l border-gray-200 ${saldo < 0 ? 'text-red-600' : 'text-green-600'}`}>{brlFull(saldo)}</td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-                      </div>
-
-                      {topRubricas.length > 0 && (
-                        <div className="bg-white rounded-2xl border border-gray-200/80 overflow-hidden">
-                          <div className="px-6 py-3 border-b border-gray-100">
-                            <h4 className="font-bold text-gray-800 text-sm">Para onde foi o dinheiro</h4>
-                          </div>
-                          <ul className="divide-y divide-gray-100">
-                            {topRubricas.map(([nome, valor]) => (
-                              <li key={nome} className="px-6 py-2.5 flex items-center gap-3">
-                                <span className="flex-1 text-sm text-gray-700 truncate">{nome}</span>
-                                <div className="w-32 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                  <div className="h-full bg-red-400" style={{ width: `${Math.min(100, (valor / Math.abs(saidas || 1)) * 100)}%` }} />
-                                </div>
-                                <span className="text-sm font-semibold text-gray-800 tabular-nums w-32 text-right">R$ {brlFull(valor)}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                  </div>
-              );
-          } else { // DRE SUMMARY
-              return (
-                  <div className="bg-white rounded-lg shadow-sm border border-gray-100 max-w-4xl mx-auto p-8 animate-in fade-in">
-                      <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold text-gray-800">DRE Gerencial ({primaryPeriod.year})</h3><button onClick={() => setReportViewMode('DETAILED')} className="text-sm text-mcsystem-500 hover:underline flex items-center"><List size={14} className="mr-1"/> Ver Detalhado (Matriz)</button></div>
-                      <div className="space-y-1">{hierarchy.map(cls => { const ytdTotal = calculateRowTotal(cls.values, primaryKeys); const isPositive = ytdTotal >= 0; return (<div key={cls.code} className="flex justify-between py-3 border-b border-gray-50 last:border-0 hover:bg-gray-50"><span className="font-semibold text-gray-700">{cls.name}</span><span className={`font-bold ${isPositive ? 'text-green-600' : 'text-red-500'}`}>R$ {ytdTotal.toLocaleString('pt-BR')}</span></div>); })}<div className="pt-4 mt-4 border-t border-gray-200"><div className="flex justify-between items-center bg-gray-50 p-4 rounded-lg"><span className="text-lg font-bold text-gray-900 uppercase">Resultado Acumulado</span><span className={`text-xl font-bold ${netTotal >= 0 ? 'text-green-700' : 'text-red-700'}`}>R$ {netTotal.toLocaleString('pt-BR')}</span></div></div></div>
-                  </div>
-              );
-          }
+          return (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-100 max-w-4xl mx-auto p-8 animate-in fade-in">
+                  <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold text-gray-800">DRE Gerencial ({primaryPeriod.year})</h3><button onClick={() => setReportViewMode('DETAILED')} className="text-sm text-mcsystem-500 hover:underline flex items-center"><List size={14} className="mr-1"/> Ver Detalhado (Matriz)</button></div>
+                  <div className="space-y-1">{hierarchy.map(cls => { const ytdTotal = calculateRowTotal(cls.values, primaryKeys); const isPositive = ytdTotal >= 0; return (<div key={cls.code} className="flex justify-between py-3 border-b border-gray-50 last:border-0 hover:bg-gray-50"><span className="font-semibold text-gray-700">{cls.name}</span><span className={`font-bold ${isPositive ? 'text-green-600' : 'text-red-500'}`}>R$ {ytdTotal.toLocaleString('pt-BR')}</span></div>); })}<div className="pt-4 mt-4 border-t border-gray-200"><div className="flex justify-between items-center bg-gray-50 p-4 rounded-lg"><span className="text-lg font-bold text-gray-900 uppercase">Resultado Acumulado</span><span className={`text-xl font-bold ${netTotal >= 0 ? 'text-green-700' : 'text-red-700'}`}>R$ {netTotal.toLocaleString('pt-BR')}</span></div></div></div>
+              </div>
+          );
       }
 
       const filterNodes = (nodes: any[]): any[] => { if (!hideEmptyRows) return nodes; return nodes.map(node => { if (node.children && node.children.length > 0) { const filteredChildren = filterNodes(node.children); const totalVal = primaryKeys.reduce((acc, m) => acc + Math.abs(node.values[m] || 0), 0); if (filteredChildren.length > 0 || totalVal > 0.01) { return { ...node, children: filteredChildren }; } return null; } else { const totalVal = primaryKeys.reduce((acc, m) => acc + Math.abs(node.values[m] || 0), 0); return totalVal > 0.01 ? node : null; } }).filter(Boolean); };
-      const displayedHierarchy = filterNodes(hierarchy); const bottomLineLabel = mode === 'DRE' ? 'RESULTADO LÍQUIDO' : 'SALDO OPERACIONAL';
+      const displayedHierarchy = filterNodes(hierarchy); const bottomLineLabel = 'RESULTADO LÍQUIDO';
       /** A linha de resultado não vem da hierarquia — vira um nó só para o detalhe. */
       const linhaResultado = { code: 'NET', name: bottomLineLabel, type: 'ROOT', values: netResult };
 
@@ -3114,13 +2704,13 @@ const newRecords: FinancialRecord[] = [];
         rows.push(netRow);
         const ws = XLSX.utils.aoa_to_sheet(rows);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, mode === 'DRE' ? 'DRE' : 'Fluxo de Caixa');
-        XLSX.writeFile(wb, `${mode === 'DRE' ? 'DRE' : 'FluxoCaixa'}_${primaryPeriod.year}.xlsx`);
+        XLSX.utils.book_append_sheet(wb, ws, 'DRE');
+        XLSX.writeFile(wb, `DRE_${primaryPeriod.year}.xlsx`);
       };
 
       return (
           <div className="space-y-4 animate-in fade-in">
-              <div className="flex flex-col md:flex-row justify-between items-center gap-4"><h3 className="font-bold text-gray-800 text-lg">{mode === 'DRE' ? `DRE Matriz` : `Fluxo de Caixa`}</h3><div className="flex flex-wrap gap-2 items-center"><div className="relative" ref={periodMenuRef}><button onClick={() => setIsPeriodMenuOpen(!isPeriodMenuOpen)} className="px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg font-medium flex items-center shadow-sm hover:bg-gray-50 text-gray-700"><Calendar size={16} className="mr-2 text-mcsystem-500" /> Configurar Período <ChevronDown size={14} className="ml-2 text-gray-400" /></button>{isPeriodMenuOpen && (<div className="absolute top-full right-0 mt-2 w-[400px] bg-white border border-gray-200 rounded-lg shadow-xl z-30 p-4 animate-in fade-in zoom-in-95"><div className="mb-4"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Principal</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={primaryPeriod.year} onChange={e => setPrimaryPeriod({...primaryPeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, false)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${primaryPeriod.months.includes(i + 1) ? 'bg-mcsystem-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{m}</button>))}</div><div className="flex justify-between text-xs text-mcsystem-600"><button onClick={() => selectAllMonths(false)} className="hover:underline">Selecionar Todos</button><button onClick={() => clearMonths(false)} className="text-red-500 hover:underline">Limpar</button></div></div><div className="h-px bg-gray-200 my-4"></div><div className="flex items-center justify-between mb-3"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={isCompareEnabled} onChange={() => setIsCompareEnabled(!isCompareEnabled)} className="sr-only peer"/><div className="relative w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-mcsystem-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-mcsystem-500"></div><span className="ms-2 text-sm font-medium text-gray-700">Comparar com outro período</span></label></div>{isCompareEnabled && (<div className="bg-gray-50 p-3 rounded-lg border border-gray-100 animate-in slide-in-from-top-2"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Comparativo</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none" value={comparePeriod.year} onChange={e => setComparePeriod({...comparePeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, true)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${comparePeriod.months.includes(i + 1) ? 'bg-purple-500 text-white' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-100'}`}>{m}</button>))}</div><div className="flex justify-between text-xs"><button onClick={copyPrimaryToCompare} className="text-purple-600 hover:underline flex items-center"><Copy size={10} className="mr-1"/> Copiar Principal</button><div className="space-x-2"><button onClick={() => selectAllMonths(true)} className="text-purple-600 hover:underline">Todos</button><button onClick={() => clearMonths(true)} className="text-red-500 hover:underline">Limpar</button></div></div></div>)}</div>)}</div><div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><button onClick={() => setIncludeProjections(!includeProjections)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${includeProjections ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{includeProjections ? <CheckSquare size={16} className="mr-2"/> : <Square size={16} className="mr-2"/>}{'Incluir Pendentes'}</button><button onClick={() => setHideEmptyRows(!hideEmptyRows)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${!hideEmptyRows ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{hideEmptyRows ? <Eye size={16} className="mr-2"/> : <EyeOff size={16} className="mr-2"/>}{hideEmptyRows ? 'Mostrar Vazios' : 'Ocultar Vazios'}</button><button onClick={() => setReportViewMode('SUMMARY')} className="px-4 py-2 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 font-medium">Voltar</button><button onClick={handleExportExcel} className="px-4 py-2 text-sm bg-mcsystem-500 text-white rounded-lg flex items-center font-medium shadow-sm hover:bg-mcsystem-400"><Download size={14} className="mr-2"/> Excel</button></div></div>
+              <div className="flex flex-col md:flex-row justify-between items-center gap-4"><h3 className="font-bold text-gray-800 text-lg">DRE Matriz</h3><div className="flex flex-wrap gap-2 items-center"><div className="relative" ref={periodMenuRef}><button onClick={() => setIsPeriodMenuOpen(!isPeriodMenuOpen)} className="px-3 py-2 text-sm border border-gray-200 bg-white rounded-lg font-medium flex items-center shadow-sm hover:bg-gray-50 text-gray-700"><Calendar size={16} className="mr-2 text-mcsystem-500" /> Configurar Período <ChevronDown size={14} className="ml-2 text-gray-400" /></button>{isPeriodMenuOpen && (<div className="absolute top-full right-0 mt-2 w-[400px] bg-white border border-gray-200 rounded-lg shadow-xl z-30 p-4 animate-in fade-in zoom-in-95"><div className="mb-4"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Principal</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={primaryPeriod.year} onChange={e => setPrimaryPeriod({...primaryPeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, false)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${primaryPeriod.months.includes(i + 1) ? 'bg-mcsystem-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{m}</button>))}</div><div className="flex justify-between text-xs text-mcsystem-600"><button onClick={() => selectAllMonths(false)} className="hover:underline">Selecionar Todos</button><button onClick={() => clearMonths(false)} className="text-red-500 hover:underline">Limpar</button></div></div><div className="h-px bg-gray-200 my-4"></div><div className="flex items-center justify-between mb-3"><label className="flex items-center cursor-pointer"><input type="checkbox" checked={isCompareEnabled} onChange={() => setIsCompareEnabled(!isCompareEnabled)} className="sr-only peer"/><div className="relative w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-mcsystem-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-mcsystem-500"></div><span className="ms-2 text-sm font-medium text-gray-700">Comparar com outro período</span></label></div>{isCompareEnabled && (<div className="bg-gray-50 p-3 rounded-lg border border-gray-100 animate-in slide-in-from-top-2"><div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-gray-500 uppercase">Período Comparativo</label><select className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none" value={comparePeriod.year} onChange={e => setComparePeriod({...comparePeriod, year: Number(e.target.value)})}>{availableYears.map(y => <option key={y} value={y}>{y}</option>)}</select></div><div className="grid grid-cols-6 gap-1 mb-2">{monthNames.map((m, i) => (<button key={i} onClick={() => toggleMonth(i + 1, true)} className={`text-[10px] font-bold py-1.5 rounded transition-colors ${comparePeriod.months.includes(i + 1) ? 'bg-purple-500 text-white' : 'bg-white border border-gray-200 text-gray-400 hover:bg-gray-100'}`}>{m}</button>))}</div><div className="flex justify-between text-xs"><button onClick={copyPrimaryToCompare} className="text-purple-600 hover:underline flex items-center"><Copy size={10} className="mr-1"/> Copiar Principal</button><div className="space-x-2"><button onClick={() => selectAllMonths(true)} className="text-purple-600 hover:underline">Todos</button><button onClick={() => clearMonths(true)} className="text-red-500 hover:underline">Limpar</button></div></div></div>)}</div>)}</div><div className="h-6 w-px bg-gray-300 mx-2 hidden md:block"></div><button onClick={() => setHideEmptyRows(!hideEmptyRows)} className={`px-3 py-2 text-sm border rounded-lg font-medium flex items-center transition-colors ${!hideEmptyRows ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{hideEmptyRows ? <Eye size={16} className="mr-2"/> : <EyeOff size={16} className="mr-2"/>}{hideEmptyRows ? 'Mostrar Vazios' : 'Ocultar Vazios'}</button><button onClick={() => setReportViewMode('SUMMARY')} className="px-4 py-2 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 font-medium">Voltar</button><button onClick={handleExportExcel} className="px-4 py-2 text-sm bg-mcsystem-500 text-white rounded-lg flex items-center font-medium shadow-sm hover:bg-mcsystem-400"><Download size={14} className="mr-2"/> Excel</button></div></div>
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
                   <table className="w-full text-xs text-gray-600 whitespace-nowrap table-fixed min-w-[1400px]">
                       <thead className="bg-gray-100 text-gray-600 font-bold uppercase tracking-wider text-[10px]">
@@ -3130,7 +2720,7 @@ const newRecords: FinancialRecord[] = [];
                           {displayedHierarchy.map((cls: any) => {
                               const clsTotal = calculateRowTotal(cls.values, primaryKeys);
                               const prevClsTotal = calculateRowTotal(cls.prevValues, compareKeys);
-                              const isExpense = (mode === 'DRE' && cls.code !== '1') || (mode === 'CASHFLOW' && cls.code === 'OUTFLOW');
+                              const isExpense = cls.code !== '1';
                               return (
                               <React.Fragment key={cls.key || cls.code}>
                                   <tr className="bg-slate-50 border-b border-gray-200 font-bold text-gray-900 uppercase">
@@ -3294,14 +2884,13 @@ const newRecords: FinancialRecord[] = [];
   return (
     <div className="space-y-6">
         <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4">
-            <div className={`${hideTabs ? 'hidden' : 'flex'} bg-gray-100 p-1 rounded-lg overflow-x-auto max-w-full no-scrollbar shadow-inner`}>{[{ id: 'RECONCILIATION', label: 'Conciliação', icon: ArrowRightLeft }, { id: 'DRE', label: 'DRE Gerencial', icon: FileText }, { id: 'CASHFLOW', label: 'Fluxo de Caixa', icon: TrendingUp }, { id: 'COA', label: 'Plano de Contas', icon: Tags }, { id: 'VALIDATION', label: 'Validação', icon: FileCheck, badge: pendingValidationRecords.length }].map(tab => (<button key={tab.id} onClick={() => { setActiveTab(tab.id as any); setReportViewMode('SUMMARY'); }} className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-white text-mcsystem-600 shadow-sm font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}><tab.icon size={16} className={`mr-2 ${activeTab === tab.id ? 'text-mcsystem-500' : ''}`} />{tab.label}{tab.badge ? <span className="ml-2 bg-red-500 text-white text-[10px] px-1.5 rounded-full shadow-sm">{tab.badge}</span> : null}</button>))}</div>
+            <div className={`${hideTabs ? 'hidden' : 'flex'} bg-gray-100 p-1 rounded-lg overflow-x-auto max-w-full no-scrollbar shadow-inner`}>{[{ id: 'RECONCILIATION', label: 'Conciliação', icon: ArrowRightLeft }, { id: 'DRE', label: 'DRE Gerencial', icon: FileText }, { id: 'COA', label: 'Plano de Contas', icon: Tags }, { id: 'VALIDATION', label: 'Validação', icon: FileCheck, badge: pendingValidationRecords.length }].map(tab => (<button key={tab.id} onClick={() => { setActiveTab(tab.id as any); setReportViewMode('SUMMARY'); }} className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-white text-mcsystem-600 shadow-sm font-bold' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}><tab.icon size={16} className={`mr-2 ${activeTab === tab.id ? 'text-mcsystem-500' : ''}`} />{tab.label}{tab.badge ? <span className="ml-2 bg-red-500 text-white text-[10px] px-1.5 rounded-full shadow-sm">{tab.badge}</span> : null}</button>))}</div>
             <div className="flex items-center gap-2"><input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv,.txt" className="hidden" /><div className="relative" ref={importMenuRef}><button onClick={() => setIsImportMenuOpen(!isImportMenuOpen)} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-md text-sm font-medium flex items-center shadow-sm transition-colors"><Upload size={16} className="mr-2" /> Importar <ChevronDown size={14} className="ml-2 text-gray-400" /></button>{isImportMenuOpen && (<div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-100 z-10 py-1 animate-in fade-in zoom-in-95 duration-200"><button onClick={handleDownloadTemplate} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center"><Download size={14} className="mr-2 text-gray-400"/> Baixar Modelo</button><button onClick={handleImportClick} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center"><FileText size={14} className="mr-2 text-gray-400"/> Selecionar Arquivo</button></div>)}</div></div>
         </div>
         
 
         {activeTab === 'RECONCILIATION' && renderUnifiedTransactions()}
-        {activeTab === 'DRE' && renderHierarchicalReport('DRE')}
-        {activeTab === 'CASHFLOW' && renderHierarchicalReport('CASHFLOW')}
+        {activeTab === 'DRE' && renderHierarchicalReport()}
         {activeTab === 'COA' && renderCOA()}
         {activeTab === 'VALIDATION' && renderTransactionTable(undefined, true)}
 
@@ -3399,10 +2988,7 @@ const newRecords: FinancialRecord[] = [];
                                     <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Status</label><select value={newRecord.status} onChange={e => setNewRecord({...newRecord, status: e.target.value as any})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white"><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.PAID}>Pago</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select></div>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Vencimento</label><input required type="date" value={newRecord.dueDate} onChange={e => setNewRecord({...newRecord, dueDate: e.target.value})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/></div>
-                                    <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Competência</label><input type="month" value={newRecord.competenceDate ? newRecord.competenceDate.slice(0, 7) : ''} onChange={e => setNewRecord({...newRecord, competenceDate: e.target.value ? `${e.target.value}-01` : ''})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/></div>
-                                </div>
+                                <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Data</label><input required type="date" value={newRecord.dueDate} onChange={e => setNewRecord({...newRecord, dueDate: e.target.value})} className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm"/></div>
                                 <div><label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Cliente / Fornecedor (Opcional)</label><div className="flex gap-2 items-center"><SearchableSelect
                                     options={[
                                       ...companies.map(c => ({ value: `c:${c.id}`, label: `${c.name} · cliente` })),
@@ -3711,8 +3297,7 @@ const newRecords: FinancialRecord[] = [];
                                     <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2.5">Parcelamento / Recorrência</label>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div><label className="text-xs font-medium">Nº de Parcelas</label><input type="number" disabled={!!editingTransactionId} min="1" value={installmentCount} onChange={e => setInstallmentCount(Number(e.target.value))} className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"/></div>
-                                        <div><label className="text-xs font-medium">Competência</label><select disabled={!!editingTransactionId} value={competenceType} onChange={e => setCompetenceType(e.target.value as any)} className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"><option value="FIXED">Fixa</option><option value="RECURRING">Recorrente</option></select></div>
-                                        <div className="col-span-2"><label className="text-xs font-medium">Distribuição do Valor</label><select disabled={!!editingTransactionId} value={amountDistribution} onChange={e => setAmountDistribution(e.target.value as any)} className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"><option value="TOTAL">Dividir valor total nas parcelas</option><option value="RECURRING">Repetir valor em cada parcela</option></select></div>
+                                        <div><label className="text-xs font-medium">Distribuição do Valor</label><select disabled={!!editingTransactionId} value={amountDistribution} onChange={e => setAmountDistribution(e.target.value as any)} className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"><option value="TOTAL">Dividir valor total nas parcelas</option><option value="RECURRING">Repetir valor em cada parcela</option></select></div>
                                     </div>
                                 </div>
                                 {installmentsPreview.length > 1 && !editingTransactionId && (
@@ -3721,15 +3306,14 @@ const newRecords: FinancialRecord[] = [];
                                         {/* Headers */}
                                         <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-gray-500 px-1 pb-1 mb-1 border-b border-blue-100">
                                             <div className="col-span-1">#</div>
-                                            <div className="col-span-4">Vencimento</div>
-                                            <div className="col-span-3">Competência</div>
-                                            <div className="col-span-4 text-right">Valor</div>
+                                            <div className="col-span-6">Data</div>
+                                            <div className="col-span-5 text-right">Valor</div>
                                         </div>
                                         <div className="max-h-36 overflow-y-auto space-y-2 pr-2">
                                             {installmentsPreview.map((inst, i) => (
                                                 <div key={i} className="grid grid-cols-12 gap-2 items-center text-xs">
                                                     <span className="col-span-1 text-center font-mono text-gray-500">{i + 1})</span>
-                                                    <div className="col-span-4">
+                                                    <div className="col-span-6">
                                                         <input 
                                                             type="date"
                                                             value={inst.dueDate}
@@ -3737,15 +3321,7 @@ const newRecords: FinancialRecord[] = [];
                                                             className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:ring-1 focus:ring-blue-500 outline-none"
                                                         />
                                                     </div>
-                                                    <div className="col-span-3">
-                                                        <input 
-                                                            type="month"
-                                                            value={inst.competenceDate ? inst.competenceDate.slice(0, 7) : ''}
-                                                            onChange={e => handleUpdateInstallmentPreview(i, 'competenceDate', e.target.value)}
-                                                            className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:ring-1 focus:ring-blue-500 outline-none"
-                                                        />
-                                                    </div>
-                                                    <div className="col-span-4 relative">
+                                                    <div className="col-span-5 relative">
                                                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">R$</span>
                                                         <input
                                                             type="number"

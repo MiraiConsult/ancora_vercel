@@ -1,9 +1,8 @@
 /**
  * Detalhe de um número de relatório: quais lançamentos formam aquele valor.
  *
- * É o mesmo modal no Fluxo de Caixa, no DRE, nos Relatórios e no Contas a
- * Pagar — antes cada tela tinha (ou não tinha) o seu, e quem clicava num total
- * do DRE via uma lista diferente da do Fluxo para o mesmo lançamento.
+ * É o mesmo modal no DRE, nos Relatórios e no Contas a Pagar — antes cada tela
+ * tinha (ou não tinha) o seu.
  *
  * Quem abre pode passar `onEditRecord` para editar o lançamento sem sair do
  * relatório. Renovação prevista não tem edição: ela não existe no banco.
@@ -14,6 +13,7 @@ import * as XLSX from 'xlsx';
 import { ArrowDown, ArrowUp, ArrowUpDown, CalendarClock, Download, List, Pencil, X } from 'lucide-react';
 import { ChartOfAccount, Company, FinancialRecord, Product, RevenueType, Supplier, TransactionStatus } from '../types';
 import { isProjected } from '../lib/subscriptionProjection';
+import { dataDoLancamento } from '../lib/dataLancamento';
 
 interface RecordsDrillModalProps {
   open: boolean;
@@ -182,7 +182,7 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
         case 'party': return x.party.toLowerCase();
         case 'category': return x.category.toLowerCase();
         case 'status': return x.status;
-        default: return x.r.dueDate || '';
+        default: return dataDoLancamento(x.r);
       }
     };
     return l.sort((a, b) => {
@@ -202,12 +202,12 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
   const divergente = expectedTotal !== undefined && Math.abs(total - expectedTotal) > 0.01;
 
   const exportar = () => {
-    const head = ['Vencimento', 'Competência', 'Descrição', 'Cliente/Fornecedor', 'Categoria', 'Produto', 'Status', 'Origem', 'Valor'];
+    const head = ['Data', 'Descrição', 'Cliente/Fornecedor', 'Categoria', 'Produto', 'Status', 'Origem', 'Valor'];
     const body = linhas.map(x => [
-      fmtDate(x.r.dueDate), fmtDate(x.r.competenceDate), x.description,
+      fmtDate(dataDoLancamento(x.r)), x.description,
       x.party, x.category, x.product, x.status, origemOf(x.r), x.amount,
     ]);
-    const ws = XLSX.utils.aoa_to_sheet([[title], subtitle ? [subtitle] : [], head, ...body, [], ['TOTAL', '', '', '', '', '', '', '', total]]);
+    const ws = XLSX.utils.aoa_to_sheet([[title], subtitle ? [subtitle] : [], head, ...body, [], ['TOTAL', '', '', '', '', '', '', total]]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Detalhe');
     XLSX.writeFile(wb, `detalhe-${title.replace(/[^\w]+/g, '-').toLowerCase()}.xlsx`);
@@ -257,8 +257,7 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-500 uppercase text-[11px] tracking-wider sticky top-0 z-10">
                 <tr>
-                  <Th k="dueDate">Vencimento</Th>
-                  <th className="px-4 py-2.5 font-semibold text-left">Competência</th>
+                  <Th k="dueDate">Data</Th>
                   <Th k="description">Descrição</Th>
                   <Th k="party">Cliente/Fornecedor</Th>
                   <Th k="category">Categoria</Th>
@@ -272,8 +271,7 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
               <tbody className="divide-y divide-gray-100">
                 {linhas.map(({ r, key, party, category, product, status, description, origem, amount }) => (
                   <tr key={key} className="hover:bg-gray-50/70">
-                    <td className="px-4 py-2.5 whitespace-nowrap tabular-nums text-gray-600">{fmtDate(r.dueDate)}</td>
-                    <td className="px-4 py-2.5 whitespace-nowrap tabular-nums text-gray-400">{fmtDate(r.competenceDate)}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap tabular-nums text-gray-600">{fmtDate(dataDoLancamento(r))}</td>
                     <td className="px-4 py-2.5 font-medium text-gray-800">
                       {description}
                       {origem && <span className="block text-[11px] font-normal text-gray-400">de {origem}</span>}
@@ -344,7 +342,7 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
               </tbody>
               <tfoot className="bg-gray-50 sticky bottom-0">
                 <tr className="font-bold text-gray-800">
-                  <td className="px-4 py-3" colSpan={8}>
+                  <td className="px-4 py-3" colSpan={7}>
                     {qtdLancamentos} lançamento(s)
                     {linhas.length > qtdLancamentos && <span className="ml-2 font-normal text-xs text-gray-500">em {linhas.length} linhas de rateio</span>}
                     {previsto !== 0 && <span className="ml-2 font-normal text-xs text-blue-600">inclui {brl(previsto)} de renovações previstas</span>}
@@ -354,7 +352,7 @@ export const RecordsDrillModal: React.FC<RecordsDrillModalProps> = ({
                 </tr>
                 {divergente && (
                   <tr className="text-[11px] text-gray-500">
-                    <td className="px-4 pb-3" colSpan={onEditRecord ? 10 : 9}>
+                    <td className="px-4 pb-3" colSpan={onEditRecord ? 9 : 8}>
                       O número clicado é {brl(expectedTotal!)} e a lista soma {brl(total)}. A diferença costuma ser
                       rateio por produto, que divide o valor sem dividir o lançamento.
                     </td>

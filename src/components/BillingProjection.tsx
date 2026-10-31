@@ -110,7 +110,7 @@ export const BillingProjection: React.FC<BillingProjectionProps> = ({ charges, s
 
     // Renovações futuras das assinaturas ativas. O passado nunca é projetado —
     // lá vale só o que foi efetivamente cobrado. A mesma projeção alimenta o
-    // Fluxo de Caixa; regra duplicada aqui era divergência garantida.
+    // DRE; regra duplicada aqui era divergência garantida.
     for (const r of projectSubscriptions(subscriptions, charges, { fromMonth: curMonth, toMonth: last })) {
       for (const s of splitCharge(r)) bump(s.pid, r.dueDate.slice(0, 7), 'previsto', s.amount, r.companyId || '');
     }

@@ -279,9 +279,9 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
         <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-500 flex items-start gap-2">
           <Info size={14} className="mt-0.5 flex-shrink-0 text-gray-400" />
           <span>
-            Por competência, como no DRE. Meses em azul são previsão.
+            Os meses são os mesmos do DRE. Meses em azul são previsão.
             {ehMDT && ' Acordos: 80% ao credor, 2% ao Diego da BR Clin, 18% Mirai.'}
-            {cfg.repasse && ` Mensalidades: 10% ao Diego da BR Clin desde a competência ${MESES[Number(cfg.repasse.desde.slice(5)) - 1].toLowerCase()}/${cfg.repasse.desde.slice(0, 4)} (pago no mês seguinte).`}
+            {cfg.repasse && ` Mensalidades: 10% ao Diego da BR Clin desde ${MESES[Number(cfg.repasse.desde.slice(5)) - 1].toLowerCase()}/${cfg.repasse.desde.slice(0, 4)} (pago no mês seguinte).`}
             {compartilhadoAno < 0 && ` Há ${brl(-compartilhadoAno)} de despesas sem sistema em ${ano} (custo compartilhado), que não entram aqui — marque o sistema na despesa para atribuir.`}
           </span>
         </div>
@@ -326,7 +326,7 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
           {dados.rubricas.length === 0 ? (
             <p className="px-5 py-10 text-center text-sm text-gray-400">
               Nenhuma despesa marcada com {cfg.nome}.<br />
-              Abra a despesa (em Lançamentos, DRE ou Fluxo de Caixa) e escolha o sistema.
+              Abra a despesa (em Lançamentos ou no DRE) e escolha o sistema.
             </p>
           ) : (
             <table className="w-full text-sm">

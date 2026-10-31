@@ -14,7 +14,6 @@ const FINANCE_TABS: Record<string, MainTab> = {
   finance: 'RECONCILIATION',
   entries: 'RECONCILIATION',
   dre: 'DRE',
-  cashflow: 'CASHFLOW',
   'cash-evolution': 'CASH_EVOLUTION',
   coa: 'COA',
 };
@@ -38,7 +37,6 @@ const PAGE_TITLES: Record<string, string> = {
   reports: 'Relatórios',
   systems: 'Sistemas',
   dre: 'DRE Gerencial',
-  cashflow: 'Fluxo de Caixa',
   'cash-evolution': 'Evolução do Caixa',
   companies: 'Clientes',
   products: 'Produtos',
@@ -585,7 +583,6 @@ const handleAddUser = async (newUser: User) => {
       case 'finance':
       case 'entries':
       case 'dre':
-      case 'cashflow':
       case 'cash-evolution':
       case 'coa':
         return hasPermission('finance') ? (

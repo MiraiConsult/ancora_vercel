@@ -3,7 +3,7 @@
 import React from 'react';
 import {
   UserCog, LogOut, Database, ChevronsLeft, Zap, X,
-  LayoutDashboard, ArrowRightLeft, FileText, TrendingUp, Tags, Boxes,
+  LayoutDashboard, ArrowRightLeft, FileText, Tags, Boxes,
   FileBarChart,
 } from 'lucide-react';
 import { User } from '../types';
@@ -50,7 +50,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, curre
         { id: 'reports', label: 'Relatórios', icon: FileBarChart, perm: 'finance' },
         { id: 'systems', label: 'Sistemas', icon: Boxes, perm: 'finance' },
         { id: 'dre', label: 'DRE Gerencial', icon: FileText, perm: 'finance' },
-        { id: 'cashflow', label: 'Fluxo de Caixa', icon: TrendingUp, perm: 'finance' },
       ],
     },
     {

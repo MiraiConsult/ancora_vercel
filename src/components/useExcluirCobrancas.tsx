@@ -10,6 +10,9 @@
  * atraso antigo (visto nos webhooks de todas as exclusões de assinatura). Por
  * isso a janela avisa quando há atraso anterior, e essas cobranças são apagadas
  * explicitamente: o resultado não fica dependendo do tempo de resposta do Asaas.
+ *
+ * Parcelamento traz a mesma escolha quando há parcelas à frente, mas não tem o
+ * que encerrar: as parcelas saem uma a uma e o atraso anterior fica onde está.
  */
 
 import React, { useMemo, useRef, useState } from 'react';
@@ -29,9 +32,10 @@ interface Opcoes {
   nomeCliente: (id?: string) => string;
 }
 
-/** Uma assinatura ativa atingida pela exclusão. */
+/** Uma assinatura ativa ou um parcelamento atingido pela exclusão. */
 interface ItemPlano {
-  sub: Subscription;
+  /** Só em assinatura: é o que "todas as futuras" encerra. */
+  sub?: Subscription;
   /** Em aberto, a partir da cobrança escolhida, fora as selecionadas. */
   futuras: FinancialRecord[];
   /** Em aberto, anteriores à cobrança escolhida. */
@@ -49,27 +53,45 @@ const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', c
 const soma = (l: FinancialRecord[]) => l.reduce((a, r) => a + (r.amount || 0), 0);
 const fmtData = (iso?: string) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '');
 
+/**
+ * Parcelas de um mesmo parcelamento. O id do Asaas vem do sync; a cobrança
+ * parcelada criada aqui só tem o seriesId até o sync seguinte.
+ */
+const serieDe = (r: FinancialRecord) => r.asaas_installment_id || r.seriesId;
+const assinaturaDe = (r: FinancialRecord) => r.asaas_subscription_id;
+
 function planejar(selecionadas: FinancialRecord[], records: FinancialRecord[], subscriptions: Subscription[]) {
   const ids = new Set(selecionadas.map(r => r.id));
-  const porSub = new Map<string, FinancialRecord[]>();
-  selecionadas.forEach(r => {
-    const sid = r.asaas_subscription_id;
-    if (!sid) return;
-    if (!porSub.has(sid)) porSub.set(sid, []);
-    porSub.get(sid)!.push(r);
-  });
-  const plano: ItemPlano[] = [];
-  porSub.forEach((lista, sid) => {
-    const sub = subscriptions.find(s => s.asaas_id === sid && (s.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
-    if (!sub) return;
+
+  const agrupar = (chave: (r: FinancialRecord) => string | undefined) => {
+    const grupos = new Map<string, FinancialRecord[]>();
+    selecionadas.forEach(r => {
+      const k = chave(r);
+      if (!k) return;
+      if (!grupos.has(k)) grupos.set(k, []);
+      grupos.get(k)!.push(r);
+    });
+    return grupos;
+  };
+
+  const emAberto = (lista: FinancialRecord[], chave: (r: FinancialRecord) => string | undefined, k: string) => {
     const desde = lista.map(r => r.dueDate || '').sort()[0];
-    const abertas = records.filter(r => r.asaas_subscription_id === sid
-      && r.status !== TransactionStatus.PAID && !ids.has(r.id));
-    plano.push({
-      sub,
+    const abertas = records.filter(r => chave(r) === k && r.status !== TransactionStatus.PAID && !ids.has(r.id));
+    return {
       futuras: abertas.filter(r => (r.dueDate || '') >= desde),
       antigas: abertas.filter(r => (r.dueDate || '') < desde),
-    });
+    };
+  };
+
+  const plano: ItemPlano[] = [];
+  agrupar(assinaturaDe).forEach((lista, sid) => {
+    const sub = subscriptions.find(s => s.asaas_id === sid && (s.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
+    if (sub) plano.push({ sub, ...emAberto(lista, assinaturaDe, sid) });
+  });
+  agrupar(serieDe).forEach((lista, serie) => {
+    // Na última parcela não há o que perguntar.
+    const { futuras } = emAberto(lista, serieDe, serie);
+    if (futuras.length) plano.push({ futuras, antigas: [] });
   });
   return plano;
 }
@@ -126,6 +148,7 @@ export function useExcluirCobrancas({ records, subscriptions, setRecords, setSub
 
     if (comFuturas) {
       for (const { sub } of p.plano) {
+        if (!sub) continue;
         try {
           if (!mock) await asaasDeleteSubscription({ rowId: sub.id, subscriptionId: sub.asaas_id });
           tirarSub?.(prev => prev.filter(s => s.id !== sub.id));
@@ -147,8 +170,10 @@ export function useExcluirCobrancas({ records, subscriptions, setRecords, setSub
     const umaSo = selecionadas.length === 1;
     const noAsaas = selecionadas.some(r => r.asaas_payment_id);
     const antigas = plano.flatMap(i => i.antigas);
-    const futuras = plano.flatMap(i => i.futuras);
-    const umaAssinatura = plano.length === 1;
+    const assinaturas = plano.filter(i => i.sub);
+    const parcelamentos = plano.filter(i => !i.sub);
+    const futurasAssinatura = assinaturas.flatMap(i => i.futuras);
+    const futurasParcelas = parcelamentos.flatMap(i => i.futuras);
     const titulo = umaSo
       ? (noAsaas ? 'Excluir cobrança' : 'Excluir lançamento')
       : `Excluir ${selecionadas.length} lançamentos`;
@@ -175,16 +200,28 @@ export function useExcluirCobrancas({ records, subscriptions, setRecords, setSub
             )}
             {noAsaas && <p>A exclusão vale também no Asaas. Cobrança já paga o Asaas não deixa excluir.</p>}
 
-            {plano.length > 0 && (
+            {assinaturas.length > 0 && (
               <div className="rounded-xl bg-mcsystem-50 border border-[rgba(11,20,11,0.08)] p-3 space-y-1">
                 <p className="font-semibold text-mirai-ink">
-                  {umaAssinatura
-                    ? `É de uma assinatura ativa de ${brl(plano[0].sub.value)} por mês.`
-                    : `São de ${plano.length} assinaturas ativas.`}
+                  {assinaturas.length === 1
+                    ? `É de uma assinatura ativa de ${brl(assinaturas[0].sub!.value)} por mês.`
+                    : `São de ${assinaturas.length} assinaturas ativas.`}
                 </p>
                 <p>
                   Excluindo só {umaSo ? 'esta' : 'estas'}, a assinatura continua e gera a cobrança do próximo mês.
-                  {futuras.length > 0 && ` Já há mais ${futuras.length} emitida(s) à frente (${brl(soma(futuras))}).`}
+                  {futurasAssinatura.length > 0 && ` Já há mais ${futurasAssinatura.length} emitida(s) à frente (${brl(soma(futurasAssinatura))}).`}
+                </p>
+              </div>
+            )}
+
+            {parcelamentos.length > 0 && (
+              <div className="rounded-xl bg-mcsystem-50 border border-[rgba(11,20,11,0.08)] p-3 space-y-1">
+                <p className="font-semibold text-mirai-ink">
+                  {parcelamentos.length === 1 ? 'Faz parte de um parcelamento.' : `São de ${parcelamentos.length} parcelamentos.`}
+                </p>
+                <p>
+                  Há mais {futurasParcelas.length} parcela(s) em aberto à frente ({brl(soma(futurasParcelas))}).
+                  {' '}Excluindo só {umaSo ? 'esta' : 'estas'}, elas continuam valendo.
                 </p>
               </div>
             )}
@@ -206,7 +243,7 @@ export function useExcluirCobrancas({ records, subscriptions, setRecords, setSub
               className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold ${plano.length
                 ? 'bg-white border border-gray-300 text-gray-800 hover:bg-gray-100'
                 : 'bg-red-600 text-white hover:bg-red-700'}`}>
-              <Trash2 size={15} /> {plano.length ? (umaSo ? 'Só esta cobrança' : 'Só estas') : 'Excluir'}
+              <Trash2 size={15} /> {plano.length ? (umaSo ? 'Só esta' : 'Só estas') : 'Excluir'}
             </button>
             {plano.length > 0 && (
               <button onClick={() => executar(pedido, true)}

@@ -158,6 +158,8 @@ export interface FinancialRecord {
   asaas_payment_id?: string;
   asaas_invoice_url?: string;
   asaas_subscription_id?: string;
+  /** Parcelamento do Asaas a que a cobrança pertence. */
+  asaas_installment_id?: string;
 }
 
 /** Rateio de um valor entre produtos, em percentual (pct soma 100). */

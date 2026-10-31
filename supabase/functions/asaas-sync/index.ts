@@ -347,6 +347,7 @@ Deno.serve(async (req: Request) => {
         asaas_payment_id: p.id,
         asaas_invoice_url: p.invoiceUrl || null,
         asaas_subscription_id: p.subscription || null,
+        asaas_installment_id: p.installment || null,
       };
     });
     if (paymentRows.length) {

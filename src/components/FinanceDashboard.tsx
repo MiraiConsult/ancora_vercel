@@ -398,13 +398,11 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
         
         const newPreviews = [];
         for (let i = 0; i < count; i++) {
-            let dueDateObj = new Date();
-            if (newRecord.dueDate) {
-                const [y,m,d] = newRecord.dueDate.split('-').map(Number);
-                dueDateObj = new Date(y, m-1, d);
-            }
-            dueDateObj.setMonth(dueDateObj.getMonth() + i);
-            const dateStr = dueDateObj.toISOString().split('T')[0];
+            // Dia 31 em mês mais curto vira o último dia: o Date empurraria a
+            // parcela para o mês seguinte, e novembro ficaria sem parcela no DRE.
+            const [y, m, d] = (newRecord.dueDate || new Date().toISOString().slice(0, 10)).split('-').map(Number);
+            const dia = Math.min(d, new Date(y, m + i, 0).getDate());
+            const dateStr = new Date(y, m - 1 + i, dia).toISOString().split('T')[0];
 
             const amount = (i === 0 && amountDistribution === 'TOTAL') ? baseAmount + remainder : baseAmount;
             // Uma data só: cada parcela fica no mês em que cai.

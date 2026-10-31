@@ -9,6 +9,7 @@ import { useExcluirCobrancas } from './useExcluirCobrancas';
 import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
 import { DateRangeFilter, presetRange, inRange, type DateRange } from './DateRangeFilter';
 import { dataDoLancamento } from '../lib/dataLancamento';
+import { abateDespesa, rubricasDeDespesa } from '../lib/abateDespesa';
 import { PayRecordModal } from './PayRecordModal';
 import { isProjected, projectSubscriptions, shiftMonthKey } from '../lib/subscriptionProjection';
 import { RecordsDrillModal } from './RecordsDrillModal';
@@ -1281,14 +1282,16 @@ const newRecords: FinancialRecord[] = [];
     // Receita: classificada pelo Produto (a rubrica é derivada pelo nome, igual ao
     // sync do Asaas, para o lançamento aparecer certo no DRE).
     const norm = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (isIncome) {
+    // Entrada que abate despesa fica na rubrica dela: editar não a devolve à receita.
+    const manterRubrica = !!newRecord.rubricId && rubricasDespesa.has(newRecord.rubricId);
+    if (isIncome && !manterRubrica) {
       const prodName = products.find(p => p.id === newRecord.product_id)?.name;
       const match = chartOfAccounts.find(c => c.classificationCode === '1' && norm(c.rubricName) === norm(prodName))
         || chartOfAccounts.find(c => c.classificationCode === '1' && norm(c.rubricName) === norm('OUTRAS RECEITAS'));
       newRecord.rubricId = match?.id;
     }
 
-    const displayCategory = isIncome
+    const displayCategory = isIncome && !manterRubrica
       ? (products.find(p => p.id === newRecord.product_id)?.name || 'Receita')
       : (chartOfAccounts.find(c => c.id === newRecord.rubricId)?.rubricName || 'Geral');
     const baseDescription = newRecord.description || 'Nova Transação';
@@ -1790,7 +1793,7 @@ const newRecords: FinancialRecord[] = [];
               return true;
           } else if (node.type === 'CLASSIFICATION') {
               if (node.code === '1') {
-                  return r.amount >= 0;
+                  return r.amount >= 0 && !abateDespesa(r, rubricasDespesa);
               }
               // Com rateio, o lançamento aparece em toda classificação que ele toca.
               // Nome junto: várias classificações dividem o mesmo código.
@@ -1805,7 +1808,7 @@ const newRecords: FinancialRecord[] = [];
                 products.some(p => p.active) ? 'PRODUCT'
                 : revenueTypes.length > 0 ? 'REVENUE_TYPE'
                 : 'COA';
-              if (r.amount >= 0 && dim !== 'COA') {
+              if (r.amount >= 0 && !abateDespesa(r, rubricasDespesa) && dim !== 'COA') {
                   const alvo = node.code === 'SEM_PRODUTO' ? null : node.code;
                   if (r.split_revenue && r.split_revenue.length > 0) {
                       return r.split_revenue.some(sp => ((dim === 'PRODUCT' ? sp.product_id : sp.revenue_type_id) ?? null) === alvo);
@@ -1847,6 +1850,7 @@ const newRecords: FinancialRecord[] = [];
 
   // --- Common Calculations ---
   const validRecords = records.filter(r => !r.needsValidation);
+  const rubricasDespesa = useMemo(() => rubricasDeDespesa(chartOfAccounts), [chartOfAccounts]);
 
   /**
    * Renovações previstas das assinaturas ativas.
@@ -2142,7 +2146,7 @@ const newRecords: FinancialRecord[] = [];
               let totalForMonth = 0;
 
               const monthRecords = baseRecords.filter(r => {
-                  if (r.amount <= 0) return false; // Somente lançamentos positivos (entradas)
+                  if (r.amount <= 0 || abateDespesa(r, rubricasDespesa)) return false; // Só receita: o resto abate a despesa
                   return dataDoLancamento(r).startsWith(key);
               });
 

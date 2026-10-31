@@ -16,6 +16,7 @@ import React, { useMemo, useState } from 'react';
 import { CalendarClock, Info, Layers, TrendingDown, TrendingUp, Users, Wallet } from 'lucide-react';
 import { ChartOfAccount, Company, FinancialRecord, Product, Subscription } from '../types';
 import { isProjected, projectSubscriptions } from '../lib/subscriptionProjection';
+import { abateDespesa, rubricasDeDespesa } from '../lib/abateDespesa';
 
 interface SystemsReportProps {
   records: FinancialRecord[];
@@ -95,6 +96,8 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
     return [...validos, ...previstos].filter(r => mesDe(r).startsWith(String(ano)));
   }, [records, subscriptions, ano, comPrevisto]);
 
+  const rubricasDespesa = useMemo(() => rubricasDeDespesa(chartOfAccounts), [chartOfAccounts]);
+
   const dados = useMemo(() => {
     const zero = () => Object.fromEntries(chaves.map(k => [k, 0])) as Record<string, number>;
     const mensal = zero(), acordos = zero(), custos = zero(), compartilhado = zero();
@@ -104,7 +107,7 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
 
     for (const r of base) {
       const k = mesDe(r);
-      if (!(k in mensal)) continue;
+      if (!(k in mensal) || abateDespesa(r, rubricasDespesa)) continue;
       if (r.amount > 0) {
         const m = fatia(r, idsProduto);
         const a = fatia(r, idsAcordo);
@@ -145,7 +148,7 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
         .sort((a, b) => b.receita - a.receita),
       rubricas: [...porRubrica.entries()].sort((a, b) => a[1] - b[1]),
     };
-  }, [base, idsProduto, idsAcordo, idsTodos, companies, chartOfAccounts, ano, sistema]);
+  }, [base, idsProduto, idsAcordo, idsTodos, companies, chartOfAccounts, ano, sistema, rubricasDespesa]);
 
   /** Assinaturas ativas hoje: a receita recorrente que o sistema tem contratada. */
   const recorrente = useMemo(() => {

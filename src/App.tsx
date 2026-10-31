@@ -575,6 +575,7 @@ const handleAddUser = async (newUser: User) => {
             companies={companies}
             subscriptions={subscriptions}
             banks={banks}
+            chartOfAccounts={chartOfAccounts}
             currentUser={user}
             onNavigate={navigate}
           />

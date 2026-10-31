@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { FinancialRecord, Product, Company, Subscription, User, Bank } from '../types';
+import { ChartOfAccount, FinancialRecord, Product, Company, Subscription, User, Bank } from '../types';
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   BarChart, LineChart, Cell,
@@ -8,6 +8,8 @@ import { ChevronDown, Check, ArrowUp, ArrowDown, X, ExternalLink } from 'lucide-
 import { ClientMovement } from './ClientMovement';
 import { computeMovement, MOVEMENT_SCOPES, normName, shiftMes, SystemOverride } from '../lib/clientMovement';
 import { supabase } from '../lib/supabaseClient';
+import { dataDoLancamento } from '../lib/dataLancamento';
+import { abateDespesa, rubricasDeDespesa } from '../lib/abateDespesa';
 
 interface OverviewDashboardProps {
   records: FinancialRecord[];
@@ -16,6 +18,7 @@ interface OverviewDashboardProps {
   subscriptions: Subscription[];
   /** Contas bancárias: o card Saldo segue a conta do Asaas. */
   banks?: Bank[];
+  chartOfAccounts?: ChartOfAccount[];
   currentUser: User;
   onNavigate?: (page: string) => void;
 }
@@ -80,11 +83,12 @@ const monthlyFactor = (cycle?: string) => {
   }
 };
 
-export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, products, companies, subscriptions, banks = [], currentUser, onNavigate }) => {
+export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, products, companies, subscriptions, banks = [], chartOfAccounts = [], currentUser, onNavigate }) => {
   const productName = (id?: string | null) => products.find(p => p.id === id)?.name || null;
   const companyName = (id?: string) => companies.find(c => c.id === id)?.name || 'Sem cliente';
 
   // Aporte, empréstimo e transferência são caixa, não faturamento — fora daqui.
+  const rubricasDespesa = useMemo(() => rubricasDeDespesa(chartOfAccounts), [chartOfAccounts]);
   const validRecords = useMemo(
     () => records.filter(r => !r.needsValidation && !r.non_operating),
     [records],
@@ -94,7 +98,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     // O ano corrente está sempre na lista, mesmo sem lançamento — é nele que
     // a tela abre.
     const years = new Set<number>([new Date().getFullYear()]);
-    validRecords.forEach(r => { const y = (r.dueDate || '').slice(0, 4); if (y) years.add(parseInt(y)); });
+    validRecords.forEach(r => { const y = dataDoLancamento(r).slice(0, 4); if (y) years.add(parseInt(y)); });
     return Array.from(years).filter(Boolean).sort((a, b) => b - a);
   }, [validRecords]);
 
@@ -144,13 +148,16 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     const byClient = new Map<string, number>();
 
     validRecords.forEach(r => {
-      const d = r.dueDate || '';
+      const d = dataDoLancamento(r);
       if (!d.startsWith(yearStr)) return;
       const mi = parseInt(d.slice(5, 7));
       const idx = monthIndex.get(mi);
       if (idx === undefined) return;
 
-      if (r.amount >= 0) {
+      if (abateDespesa(r, rubricasDespesa)) {
+        totalExpense -= r.amount;
+        monthly[idx].despesa -= r.amount;
+      } else if (r.amount >= 0) {
         const val = incomeUnderFilter(r);
         if (val === 0) return;
         totalIncome += val;
@@ -201,15 +208,15 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
   const clientsByMonth = useMemo(() => {
     const map = new Map<string, Set<string>>();
     validRecords.forEach(r => {
-      if (r.amount < 0 || !r.companyId) return;
+      if (r.amount < 0 || !r.companyId || abateDespesa(r, rubricasDespesa)) return;
       if (!recordProductNames(r).some(pn => productSet.has(pn))) return;
-      const mk = (r.dueDate || '').slice(0, 7);
+      const mk = dataDoLancamento(r).slice(0, 7);
       if (!mk) return;
       if (!map.has(mk)) map.set(mk, new Set());
       map.get(mk)!.add(r.companyId);
     });
     return map;
-  }, [validRecords, productSet, products]);
+  }, [validRecords, productSet, products, rubricasDespesa]);
 
   // Ajustes manuais da lista de clientes (entrada, valor e situação).
   const [overrides, setOverrides] = useState<SystemOverride[]>([]);
@@ -230,9 +237,9 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     [records, subscriptions, products, overrides],
   );
 
-  const primary = useMemo(() => aggregate(year),[validRecords, year, monthsSorted, productSet, products, companies]);
+  const primary = useMemo(() => aggregate(year),[validRecords, year, monthsSorted, productSet, products, companies, rubricasDespesa]);
   const compare = useMemo(() => compareEnabled ? aggregate(compareYear) : null,
-    [validRecords, compareYear, compareEnabled, monthsSorted, productSet, products, companies]);
+    [validRecords, compareYear, compareEnabled, monthsSorted, productSet, products, companies, rubricasDespesa]);
 
   const derived = useMemo(() => {
     const now = new Date();
@@ -375,7 +382,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
       const porMes = new Map<string, number>();
       let ano = 0;
       validRecords.forEach(r => {
-        if (r.amount <= 0) return;
+        if (r.amount <= 0 || abateDespesa(r, rubricasDespesa)) return;
         const v = fatia(r);
         if (!v) return;
         const mk = (r.competenceDate || r.dueDate || '').slice(0, 7);
@@ -397,7 +404,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
       const max = Math.max(1, ...barras.map(b => b.valor));
       return { ...d, mrr, clientes: clientes.size, ano, barras: barras.map(b => ({ ...b, h: b.valor ? Math.max(4, Math.round(b.valor / max * 64)) : 2 })) };
     });
-  }, [validRecords, subscriptions, products, year]);
+  }, [validRecords, subscriptions, products, year, rubricasDespesa]);
   const ltv = derived.avgChurn > 0 ? arpu / (derived.avgChurn / 100) : null;
 
   const siglaFat = useMemo(() => buildSiglas(derived.topProductNames), [derived.topProductNames]);
@@ -407,7 +414,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
   const [drill, setDrill] = useState<null | { title: string; rows: DrillRow[]; goTo?: string; semMeses?: boolean }>(null);
 
   const inPeriod = (r: FinancialRecord) => {
-    const d = r.dueDate || '';
+    const d = dataDoLancamento(r);
     if (!d.startsWith(String(year))) return false;
     return monthsSorted.includes(parseInt(d.slice(5, 7)));
   };
@@ -416,13 +423,13 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     label: r.description || 'Lançamento',
     sub: companyName(r.companyId),
     tag: (r.split_revenue?.length ? 'Múltiplos' : productName(r.product_id)) || undefined,
-    date: r.dueDate,
-    value: r.amount >= 0 ? incomeUnderFilter(r) : -Math.abs(r.amount),
+    date: dataDoLancamento(r),
+    value: r.amount >= 0 && !abateDespesa(r, rubricasDespesa) ? incomeUnderFilter(r) : r.amount,
     status: r.status as string,
   });
   const incomeRows = (extra?: (r: FinancialRecord) => boolean) =>
-    validRecords.filter(r => r.amount >= 0 && inPeriod(r) && incomeUnderFilter(r) !== 0 && (!extra || extra(r)))
-      .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '')).map(toRow);
+    validRecords.filter(r => r.amount >= 0 && !abateDespesa(r, rubricasDespesa) && inPeriod(r) && incomeUnderFilter(r) !== 0 && (!extra || extra(r)))
+      .sort((a, b) => dataDoLancamento(b).localeCompare(dataDoLancamento(a))).map(toRow);
 
   /** semMeses: a data da linha não é competência (ex.: próximo vencimento), então não vira evolução mensal. */
   const openDrill = (title: string, rows: DrillRow[], goTo?: string, semMeses?: boolean) => setDrill({ title, rows, goTo, semMeses });
@@ -437,7 +444,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     const acordo = new Set(products.filter(p => normName(p.name) === 'acordo').map(p => p.id));
     const receita = new Map<string, number>();
     validRecords.forEach(r => {
-      if (r.amount <= 0 || !r.companyId) return;
+      if (r.amount <= 0 || !r.companyId || abateDespesa(r, rubricasDespesa)) return;
       const val = r.split_revenue?.length
         ? r.split_revenue.filter(sp => !(sp.product_id && acordo.has(sp.product_id))).reduce((a, sp) => a + (sp.amount || 0), 0)
         : (r.product_id && acordo.has(r.product_id) ? 0 : r.amount);
@@ -591,8 +598,8 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
               <Kpi compact label="Saldo" value={brl(primary.balance)} hint={`Margem ${pct(primary.margin)}`}
                 delta={compare ? deltaOf(primary.balance, compare.balance) : null} compareYear={compareYear}
                 onClick={() => openDrill('Despesas do período',
-                  validRecords.filter(r => r.amount < 0 && inPeriod(r))
-                    .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '')).map(toRow), 'entries')} />
+                  validRecords.filter(r => (r.amount < 0 || abateDespesa(r, rubricasDespesa)) && inPeriod(r))
+                    .sort((a, b) => dataDoLancamento(b).localeCompare(dataDoLancamento(a))).map(toRow), 'entries')} />
             )}
             <Kpi compact label="ARPU" value={brl(arpu)} hint={ltv !== null ? `LTV ${brl(ltv)}` : undefined}
               onClick={() => openDrill('Receita recorrente por cliente', recurring.activeClientList, 'companies')} />

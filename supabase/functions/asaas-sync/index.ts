@@ -294,6 +294,13 @@ Deno.serve(async (req: Request) => {
       return DESCRICOES_IGNORADAS.some((termo) => d.includes(termo));
     };
 
+    // Mensageria e ads são repasse: o cliente devolve parte do que a Mirai paga
+    // ao Facebook. A entrada vai para a rubrica de despesa e abate a saída; a
+    // diferença é o gasto da Mirai. Não é receita do produto.
+    const { data: rubricaRepasse } = await admin.from('chart_of_accounts')
+      .select('id, rubricName').eq('tenant_id', tenantId).eq('id', 'coa_mensageria_entrada').maybeSingle();
+    const ehRepasse = (descricao?: string) => /mensageria|\bads\b/i.test(descricao || '');
+
     // A listagem completa, antes do filtro, é a referência do que ainda existe
     // no Asaas. Cobrança apagada lá não vem nela.
     const allPayments = (await asaasList('/payments')).filter((p: any) => !p.deleted);
@@ -326,7 +333,9 @@ Deno.serve(async (req: Request) => {
 
       const rubric = manual
         ? { id: manual.rubricId, name: manual.category }
-        : rubricForProduct(productId);
+        : rubricaRepasse && ehRepasse(p.description)
+          ? { id: rubricaRepasse.id, name: rubricaRepasse.rubricName }
+          : rubricForProduct(productId);
 
       return {
         id: `fa${p.id}`,

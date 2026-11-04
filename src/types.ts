@@ -143,7 +143,10 @@ export interface FinancialRecord {
    * descrição e valor. A soma das fatias É o valor do lançamento (diferente do
    * rateio por produto, que é proporcional ao total).
    */
-  split_rubrics?: { rubric_id: string; description?: string; amount: number }[];
+  // Cada parte pode ter o seu sistema (product_id), que vale sobre o do
+  // lançamento: assim uma despesa só (ex.: o reembolso do cartão) reparte o
+  // custo entre Kaivaa, Hello Growth etc. na tela Sistemas.
+  split_rubrics?: { rubric_id: string; description?: string; amount: number; product_id?: string }[];
   /** Produto/rateio definido na mão — o sync do Asaas não sobrescreve. */
   product_manual?: boolean;
   /** Onde o dinheiro vai ser pago (chave PIX ou banco/agência/conta). */

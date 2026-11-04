@@ -234,7 +234,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
    * Rateio por rubrica no formulário. Vazio = uma rubrica só (comportamento
    * antigo). Com linhas, a soma delas é que define o valor do lançamento.
    */
-  const [rubricSplit, setRubricSplit] = useState<{ rubric_id: string; description?: string; amount: number }[]>([]);
+  const [rubricSplit, setRubricSplit] = useState<{ rubric_id: string; description?: string; amount: number; product_id?: string }[]>([]);
 
   const [newRecord, setNewRecord] = useState<Partial<FinancialRecord>>({
       description: '',
@@ -3054,6 +3054,18 @@ const newRecords: FinancialRecord[] = [];
                                                   className="w-28 px-2.5 py-2 border border-gray-200 rounded-lg text-sm text-right tabular-nums"
                                                 />
                                               </div>
+                                              {/* Sistema desta parte — vale sobre o sistema do lançamento. */}
+                                              {newRecord.type !== TransactionType.INCOME && (
+                                                <select
+                                                  value={sp.product_id || ''}
+                                                  onChange={e => setRubricSplit(rubricSplit.map((x, j) => j === i ? { ...x, product_id: e.target.value || undefined } : x))}
+                                                  className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-600"
+                                                  title="Sistema a que esta parte pertence"
+                                                >
+                                                  <option value="">Sistema: o do lançamento</option>
+                                                  {products.filter(p => p.active).map(p => <option key={p.id} value={p.id}>Sistema: {p.name}</option>)}
+                                                </select>
+                                              )}
                                             </div>
                                           ))}
 

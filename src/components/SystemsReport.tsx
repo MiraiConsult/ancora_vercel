@@ -121,12 +121,19 @@ export const SystemsReport: React.FC<SystemsReportProps> = ({
         if (k > c.ultimo) c.ultimo = k;
         porCliente.set(cid, c);
       } else if (r.amount < 0) {
-        if (r.product_id && idsTodos.has(r.product_id)) {
-          custos[k] += r.amount;
-          const nome = chartOfAccounts.find(c => c.id === r.rubricId)?.rubricName || r.category || 'Sem rubrica';
-          porRubrica.set(nome, (porRubrica.get(nome) || 0) + r.amount);
-        } else if (!r.product_id) {
-          compartilhado[k] += r.amount;
+        // Com rateio, cada parte vai para o seu sistema (ou o do lançamento);
+        // sem rateio, o lançamento inteiro é uma parte só.
+        const partes = r.split_rubrics?.length
+          ? r.split_rubrics.map(sp => ({ produto: sp.product_id || r.product_id, rubrica: sp.rubric_id, valor: Number(sp.amount) || 0 }))
+          : [{ produto: r.product_id, rubrica: r.rubricId, valor: r.amount }];
+        for (const p of partes) {
+          if (p.produto && idsTodos.has(p.produto)) {
+            custos[k] += p.valor;
+            const nome = chartOfAccounts.find(c => c.id === p.rubrica)?.rubricName || r.category || 'Sem rubrica';
+            porRubrica.set(nome, (porRubrica.get(nome) || 0) + p.valor);
+          } else if (!p.produto) {
+            compartilhado[k] += p.valor;
+          }
         }
       }
     }

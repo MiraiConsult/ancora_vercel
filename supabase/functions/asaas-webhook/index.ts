@@ -4,10 +4,94 @@
 // Configure a URL desta função no painel Asaas (Configurações > Webhooks) e o mesmo
 // token em "Token de autenticação" e na secret ASAAS_WEBHOOK_TOKEN.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import {
+  carregarClassificacao, clienteIgnorado, descricaoIgnorada, normalize,
+} from '../_shared/cobrancaAsaas.ts';
 
 const WEBHOOK_TOKEN = Deno.env.get('ASAAS_WEBHOOK_TOKEN') || '';
 // Conta Asaas única — as contas pagas não trazem tenant, então vêm daqui.
 const ASAAS_TENANT_ID = Deno.env.get('ASAAS_TENANT_ID') || '';
+const ASAAS_BASE_URL = Deno.env.get('ASAAS_BASE_URL') || 'https://api.asaas.com/v3';
+const ASAAS_API_KEY = Deno.env.get('ASAAS_API_KEY') || '';
+
+// Eventos de cobrança que não devem fazer nascer um lançamento.
+const SEM_IMPORTAR = ['PAYMENT_DELETED', 'PAYMENT_REFUNDED', 'PAYMENT_PARTIALLY_REFUNDED'];
+
+/**
+ * Cobrança que ainda não existe no sistema entra aqui, na hora em que o Asaas
+ * avisa. Antes ela só aparecia quando alguém rodava o sync (botão Sincronizar),
+ * porque o webhook apenas atualizava status de lançamento já existente.
+ * Mesmas regras do sync: ignorados, produto, rateio, rubrica (mensageria e ads
+ * vão para a rubrica de repasse).
+ */
+async function importarCobranca(admin: any, p: any) {
+  if (!p?.id || p.deleted || !ASAAS_TENANT_ID) return;
+  const tenantId = ASAAS_TENANT_ID;
+
+  const { data: existe } = await admin.from('financial_records')
+    .select('id').eq('asaas_payment_id', p.id).maybeSingle();
+  if (existe) return;
+
+  if (descricaoIgnorada(p.description)) return;
+  const ctx = await carregarClassificacao(admin, tenantId);
+  if (ctx.idsIgnorados.has(p.id)) return;
+
+  // Cliente: o que já está vinculado; senão lê o cadastro no Asaas e vincula
+  // pelo CNPJ ou cria, como o sync faria. Uma requisição só, e só para
+  // cliente novo: a chave do Asaas é a mesma da cobrança do Kaivaa e é
+  // bloqueada por excesso de chamadas.
+  let companyId: string | null = null;
+  if (p.customer) {
+    const { data: cliente } = await admin.from('clients')
+      .select('id, name').eq('tenant_id', tenantId).eq('asaas_customer_id', p.customer).maybeSingle();
+    if (cliente) {
+      if (clienteIgnorado(cliente.name)) return;
+      companyId = cliente.id;
+    } else if (ASAAS_API_KEY) {
+      const res = await fetch(`${ASAAS_BASE_URL}/customers/${p.customer}`, {
+        headers: { 'Content-Type': 'application/json', 'access_token': ASAAS_API_KEY },
+      });
+      const ac = res.ok ? await res.json().catch(() => null) : null;
+      if (ac?.id) {
+        if (clienteIgnorado(ac.name)) return;
+        const doc = String(ac.cpfCnpj || '').replace(/\D/g, '');
+        const { data: clientes } = doc
+          ? await admin.from('clients').select('id, cnpj, asaas_customer_id').eq('tenant_id', tenantId)
+          : { data: [] };
+        const peloDoc = (clientes || []).find((c: any) => String(c.cnpj || '').replace(/\D/g, '') === doc);
+        if (peloDoc) {
+          if (!peloDoc.asaas_customer_id) {
+            await admin.from('clients').update({ asaas_customer_id: ac.id }).eq('id', peloDoc.id);
+          }
+          companyId = peloDoc.id;
+        } else {
+          const row = {
+            id: `ca${ac.id}`,
+            tenant_id: tenantId,
+            name: ac.name || ac.company || 'Cliente Asaas',
+            cnpj: ac.cpfCnpj || '',
+            segment: '',
+            status: 'Active',
+            location: ac.city || '',
+            asaas_customer_id: ac.id,
+          };
+          const { error } = await admin.from('clients').upsert(row, { onConflict: 'asaas_customer_id' });
+          if (!error) companyId = row.id;
+          else console.warn('cliente asaas:', error.message);
+        }
+      }
+    }
+  }
+
+  const { data: bancos } = await admin.from('banks').select('id, name').eq('tenant_id', tenantId);
+  const asaasBankId = (bancos || []).find((b: any) => normalize(b.name) === 'asaas')?.id || null;
+
+  // ignoreDuplicates: o Asaas manda CREATED e, às vezes, RECEIVED quase juntos.
+  // Quem chegar depois não sobrescreve o que o primeiro gravou.
+  const { error } = await admin.from('financial_records')
+    .upsert(ctx.linha(p, companyId, asaasBankId), { onConflict: 'asaas_payment_id', ignoreDuplicates: true });
+  if (error) throw new Error(error.message);
+}
 
 Deno.serve(async (req: Request) => {
   try {
@@ -37,6 +121,17 @@ Deno.serve(async (req: Request) => {
     });
 
     if (payment?.id) {
+      if (!SEM_IMPORTAR.includes(event || '')) {
+        // Falha aqui não pode virar erro do webhook: o Asaas pausa a fila
+        // depois de erros seguidos, e aí nem o status das outras cobranças
+        // chega. O sync segue como rede de segurança.
+        try {
+          await importarCobranca(admin, payment);
+        } catch (e) {
+          console.warn('importar cobrança:', String((e as Error)?.message || e));
+        }
+      }
+
       let update: Record<string, unknown> | null = null;
 
       switch (event) {

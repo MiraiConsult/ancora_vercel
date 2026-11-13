@@ -73,7 +73,9 @@ export interface ClientSystemRow {
   valor: number;
   valorAuto: number;
   ativo: boolean;
-  /** Data de saída; '' se está ativo. */
+  /** Ainda não começou: a primeira cobrança é de um mês à frente. Não é saída. */
+  aEntrar: boolean;
+  /** Data de saída; '' se está ativo ou a entrar. */
   saida: string;
   ajuste?: SystemOverride;
 }
@@ -305,15 +307,20 @@ export function computeClientList(
       const meses = mesesDoCliente(finais[s], clientId).filter(m => m <= atual);
       const ativo = finais[s].get(atual)?.has(clientId) || false;
       const saidaAuto = meses.length ? `${shiftMes(meses[meses.length - 1], 1)}-01` : '';
+      const entrada = ajuste?.entry_date?.slice(0, 10) || entradaAuto;
+      // Nunca esteve ativo e a entrada é de um mês à frente: está para começar.
+      // Sem isso, cliente fechado para dezembro aparecia como "Saiu".
+      const aEntrar = !ativo && !meses.length && ajuste?.status !== 'SAIU' && entrada.slice(0, 7) > atual;
       rows.push({
         clientId,
         system: s,
-        entrada: ajuste?.entry_date?.slice(0, 10) || entradaAuto,
+        entrada,
         entradaAuto,
         valor: ajuste?.monthly_value ?? valorAuto,
         valorAuto,
         ativo,
-        saida: ativo ? '' : (ajuste?.exit_date?.slice(0, 10) || saidaAuto),
+        aEntrar,
+        saida: ativo || aEntrar ? '' : (ajuste?.exit_date?.slice(0, 10) || saidaAuto),
         ajuste,
       });
     });

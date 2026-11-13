@@ -26,7 +26,7 @@ interface Props {
 }
 
 type Ordem = 'nome' | 'entrada' | 'valor' | 'situacao';
-type FiltroSituacao = 'todos' | 'ativos' | 'sairam';
+type FiltroSituacao = 'todos' | 'ativos' | 'sairam' | 'aEntrar';
 
 const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 const hoje = () => new Date().toISOString().slice(0, 10);
@@ -51,14 +51,15 @@ export const ClientSystemList: React.FC<Props> = ({ rows, companies, nomeEscopo,
     const lista = rows.filter(r => {
       if (filtroMes && !filtroMes.ids.has(r.clientId)) return false;
       if (filtro === 'ativos' && !r.ativo) return false;
-      if (filtro === 'sairam' && r.ativo) return false;
+      if (filtro === 'sairam' && (r.ativo || r.aEntrar)) return false;
+      if (filtro === 'aEntrar' && !r.aEntrar) return false;
       return !q || nome(r.clientId).toLowerCase().includes(q);
     });
     const chave = (r: ClientSystemRow): string | number => {
       switch (ordem.key) {
         case 'entrada': return r.entrada || '9999';
         case 'valor': return r.valor;
-        case 'situacao': return r.ativo ? 0 : 1;
+        case 'situacao': return r.ativo ? 0 : r.aEntrar ? 1 : 2;
         default: return nome(r.clientId).toLowerCase();
       }
     };
@@ -70,6 +71,7 @@ export const ClientSystemList: React.FC<Props> = ({ rows, companies, nomeEscopo,
   }, [rows, busca, filtro, ordem, nomes, filtroMes]);
 
   const ativos = rows.filter(r => r.ativo);
+  const aEntrar = rows.filter(r => r.aEntrar).length;
   const totalAtivos = ativos.reduce((a, r) => a + r.valor, 0);
 
   const salvar = async (row: ClientSystemRow, patch: Partial<SystemOverride>) => {
@@ -115,7 +117,7 @@ export const ClientSystemList: React.FC<Props> = ({ rows, companies, nomeEscopo,
         <div>
           <h3 className="text-base font-semibold text-mirai-ink">Clientes · {nomeEscopo}</h3>
           <p className="text-[13px] text-mirai-muted mt-0.5">
-            {ativos.length} ativos · {rows.length - ativos.length} saíram · {brl(totalAtivos)} por mês.
+            {ativos.length} ativos · {rows.length - ativos.length - aEntrar} saíram{aEntrar ? ` · ${aEntrar} a entrar` : ''} · {brl(totalAtivos)} por mês.
             {' '}Corrija entrada, valor e situação direto na linha.
           </p>
         </div>
@@ -133,7 +135,7 @@ export const ClientSystemList: React.FC<Props> = ({ rows, companies, nomeEscopo,
               className="h-9 w-52 pl-8 pr-3 rounded-xl border border-gray-200 text-[13px] outline-none focus:border-mcsystem-500" />
           </div>
           <div className="flex gap-1 p-1 bg-mcsystem-100 rounded-full">
-            {([['todos', 'Todos'], ['ativos', 'Ativos'], ['sairam', 'Saíram']] as [FiltroSituacao, string][]).map(([k, t]) => (
+            {([['todos', 'Todos'], ['ativos', 'Ativos'], ['sairam', 'Saíram'], ...(aEntrar ? [['aEntrar', 'A entrar']] : [])] as [FiltroSituacao, string][]).map(([k, t]) => (
               <button key={k} type="button" onClick={() => setFiltro(k)}
                 className={`h-7 px-3 rounded-full text-[12px] transition-colors ${filtro === k ? 'bg-white text-mirai-ink font-semibold' : 'text-mirai-ink2 font-medium hover:bg-white/60'}`}>
                 {t}
@@ -194,6 +196,9 @@ export const ClientSystemList: React.FC<Props> = ({ rows, companies, nomeEscopo,
                       className={`${campo} w-28`} />
                   </td>
                   <td className="px-1 py-1">
+                    {r.aEntrar ? (
+                      <span className="px-2.5 font-semibold text-[#1f5fae]" title="A primeira cobrança é de um mês à frente">A entrar</span>
+                    ) : (
                     <select value={r.ativo ? 'ATIVO' : 'SAIU'} aria-label={`Situação de ${n}`}
                       onChange={e => (e.target.value === 'ATIVO'
                         ? salvar(r, { status: 'ATIVO', exit_date: null })
@@ -202,9 +207,10 @@ export const ClientSystemList: React.FC<Props> = ({ rows, companies, nomeEscopo,
                       <option value="ATIVO">Ativo</option>
                       <option value="SAIU">Saiu</option>
                     </select>
+                    )}
                   </td>
                   <td className="px-1 py-1">
-                    {!r.ativo && (
+                    {!r.ativo && !r.aEntrar && (
                       <input key={`s:${chave}:${r.saida}`} type="date" defaultValue={r.saida} aria-label={`Data de saída de ${n}`}
                         onBlur={e => {
                           const v = e.target.value;

@@ -232,9 +232,16 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     return () => { vivo = false; };
   }, [currentUser?.tenant_id]);
 
+  // Repasse (mensageria, ads) não é venda: cobrar só a mensageria não mantém o
+  // cliente ativo. Sem isso, quem cancelou seguia ativo no mês do último consumo.
+  const recordsMovimento = useMemo(
+    () => records.filter(r => !abateDespesa(r, rubricasDespesa)),
+    [records, rubricasDespesa],
+  );
+
   const movGeral = useMemo(
-    () => computeMovement(records, subscriptions, products, MOVEMENT_SCOPES[0], overrides),
-    [records, subscriptions, products, overrides],
+    () => computeMovement(recordsMovimento, subscriptions, products, MOVEMENT_SCOPES[0], overrides),
+    [recordsMovimento, subscriptions, products, overrides],
   );
 
   const primary = useMemo(() => aggregate(year),[validRecords, year, monthsSorted, productSet, products, companies, rubricasDespesa]);
@@ -616,7 +623,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
 
         {/* Entradas e saídas de clientes */}
         <section>
-          <ClientMovement records={records} subscriptions={subscriptions} products={products} companies={companies}
+          <ClientMovement records={recordsMovimento} subscriptions={subscriptions} products={products} companies={companies}
             overrides={overrides} setOverrides={setOverrides} tenantId={currentUser?.tenant_id} />
         </section>
 

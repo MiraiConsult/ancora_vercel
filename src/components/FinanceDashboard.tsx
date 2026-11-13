@@ -2325,31 +2325,39 @@ const newRecords: FinancialRecord[] = [];
        * grupo entra na posição da primeira receita dele na ordem da tabela,
        * então a ordenação continua valendo.
        */
-      type ItemTabela =
-        | { kind: 'row'; r: FinancialRecord }
-        | { kind: 'group'; key: string; nome: string; rows: FinancialRecord[] };
+      type Grupo = { kind: 'group'; key: string; nome: string; rows: FinancialRecord[]; tarifa?: boolean };
+      type ItemTabela = { kind: 'row'; r: FinancialRecord } | Grupo;
       const displayRows: ItemTabela[] = [];
-      if (groupIncomeByProduct) {
-        const grupos = new Map<string, { kind: 'group'; key: string; nome: string; rows: FinancialRecord[] }>();
-        filtered.forEach(r => {
-          if (r.amount < 0) { displayRows.push({ kind: 'row', r }); return; }
+      const grupos = new Map<string, Grupo>();
+      const agrupar = (key: string, nome: string, r: FinancialRecord, tarifa = false) => {
+        let g = grupos.get(key);
+        if (!g) {
+          g = { kind: 'group', key, rows: [], nome, tarifa };
+          grupos.set(key, g);
+          displayRows.push(g);
+        }
+        g.rows.push(r);
+      };
+      filtered.forEach(r => {
+        const dia = dataDoLancamento(r).slice(0, 10);
+        // Taxas do Asaas vêm uma por cobrança (notificação, boleto, PIX...):
+        // somadas por tipo e por dia, sempre, para não encher a lista.
+        if (r.rubricId === 'coa_tarifas_asaas' && r.amount < 0) {
+          const tipo = (r.description || 'Taxa Asaas').replace(/\s+(da cobrança|- fatura|nr\.).*$/i, '').trim() || 'Taxa Asaas';
+          agrupar(`t|${tipo}|${dia}`, tipo, r, true);
+          return;
+        }
+        if (groupIncomeByProduct && r.amount >= 0) {
           const produto = r.product_id || '__sem_produto';
-          const key = `${produto}|${dataDoLancamento(r).slice(0, 10)}`;
-          let g = grupos.get(key);
-          if (!g) {
-            g = { kind: 'group', key, rows: [], nome: produto === '__sem_produto' ? 'Sem produto' : (products.find(pr => pr.id === produto)?.name || 'Produto') };
-            grupos.set(key, g);
-            displayRows.push(g);
-          }
-          g.rows.push(r);
-        });
-        // Grupo de uma receita só não junta nada: volta a ser linha comum.
-        displayRows.forEach((it, k) => {
-          if (it.kind === 'group' && it.rows.length === 1) displayRows[k] = { kind: 'row', r: it.rows[0] };
-        });
-      } else {
-        filtered.forEach(r => displayRows.push({ kind: 'row', r }));
-      }
+          agrupar(`${produto}|${dia}`, produto === '__sem_produto' ? 'Sem produto' : (products.find(pr => pr.id === produto)?.name || 'Produto'), r);
+          return;
+        }
+        displayRows.push({ kind: 'row', r });
+      });
+      // Grupo de um lançamento só não junta nada: volta a ser linha comum.
+      displayRows.forEach((it, k) => {
+        if (it.kind === 'group' && it.rows.length === 1) displayRows[k] = { kind: 'row', r: it.rows[0] };
+      });
 
       /** Uma linha de lançamento (e o detalhe dela, se aberto). */
       const renderRow = (r: FinancialRecord, idx: number, inGroup = false) => {
@@ -2582,7 +2590,7 @@ const newRecords: FinancialRecord[] = [];
                                       <div className="flex items-center gap-2 min-w-0">
                                         <span className="flex-shrink-0 inline-flex items-center justify-center min-w-[22px] h-5 px-1.5 rounded-full bg-mcsystem-100 text-mcsystem-700 text-[11px] font-bold tabular-nums">{g.rows.length}</span>
                                         <span className="font-semibold text-gray-900 truncate" title={g.nome}>{g.nome}</span>
-                                        <span className="text-gray-500 truncate">receitas de {clientes} cliente{clientes === 1 ? '' : 's'}</span>
+                                        <span className="text-gray-500 truncate">{g.tarifa ? 'taxas do dia' : `receitas de ${clientes} cliente${clientes === 1 ? '' : 's'}`}</span>
                                       </div>
                                     </td>
                                     <td>
@@ -2591,7 +2599,7 @@ const newRecords: FinancialRecord[] = [];
                                         {todosPagos ? 'Pagas' : `${pagos} de ${g.rows.length} pagas`}
                                       </span>
                                     </td>
-                                    <td className="text-right tabular-nums font-semibold text-green-700">{fmtG(total)}</td>
+                                    <td className={`text-right tabular-nums font-semibold ${total < 0 ? 'text-red-600' : 'text-green-700'}`}>{total < 0 ? '−' : ''}{fmtG(total)}</td>
                                     <td className={`text-right tabular-nums ${saldoGrupo < 0 ? 'text-red-600' : 'text-gray-700'}`}>{saldoGrupo < 0 ? '−' : ''}{fmtG(saldoGrupo)}</td>
                                     <td className="text-center" onClick={e => e.stopPropagation()}>
                                       <button type="button" onClick={alternar} aria-label={aberto ? 'Fechar grupo' : 'Abrir grupo'} title={aberto ? 'Fechar' : 'Ver as receitas'}

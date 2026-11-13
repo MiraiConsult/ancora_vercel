@@ -200,7 +200,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
     try { return localStorage.getItem('mf.agruparReceitas') === '1'; } catch { return false; }
   });
   const [openIncomeGroups, setOpenIncomeGroups] = useState<Set<string>>(new Set());
-  // Coluna do saldo previsto (com pendentes e atrasados): dá para ocultar, e
+  // Coluna Em atraso (vencidos e não pagos): dá para ocultar, e
   // a escolha fica guardada neste navegador.
   const [mostrarPrevisto, setMostrarPrevisto] = useState<boolean>(() => {
     try { return localStorage.getItem('mf.saldoPrevisto') !== '0'; } catch { return true; }
@@ -2390,7 +2390,7 @@ const newRecords: FinancialRecord[] = [];
       let somaConta = saldoInicial;
       movConta.forEach(m => { somaConta += m.v; acumConta.push({ d: m.d, s: somaConta }); });
       const saldoRealizadoAte = (dia: string) => {
-        const ate = dia && dia < hojeISO ? dia : hojeISO;
+        const ate = dia || hojeISO;
         let lo = 0, hi = acumConta.length - 1, achado = saldoInicial;
         while (lo <= hi) {
           const meio = (lo + hi) >> 1;
@@ -2398,7 +2398,33 @@ const newRecords: FinancialRecord[] = [];
         }
         return achado;
       };
-      const saldoRealizadoFinal = saldoRealizadoAte(reconRange.to || hojeISO);
+      // O que ainda não foi pago se divide pela data. Daqui para a frente soma e
+      // subtrai no Saldo, como previsão do caixa. Com data passada, é atraso:
+      // fica fora do Saldo e vai para a coluna Em atraso.
+      const naoPagos = filtered
+        .filter(r => r.status !== TransactionStatus.PAID)
+        .map(r => ({ d: dataDoLancamento(r).slice(0, 10), v: r.amount || 0 }))
+        .filter(m => m.d)
+        .sort((a, b) => a.d.localeCompare(b.d));
+      const acumular = (lista: { d: string; v: number }[]) => {
+        let soma = 0;
+        return lista.map(m => ({ d: m.d, s: (soma += m.v) }));
+      };
+      const futuros = acumular(naoPagos.filter(m => m.d >= hojeISO));
+      const atrasados = acumular(naoPagos.filter(m => m.d < hojeISO));
+      const somaAte = (lista: { d: string; s: number }[], dia: string) => {
+        let lo = 0, hi = lista.length - 1, achado = 0;
+        while (lo <= hi) {
+          const meio = (lo + hi) >> 1;
+          if (lista[meio].d <= dia) { achado = lista[meio].s; lo = meio + 1; } else hi = meio - 1;
+        }
+        return achado;
+      };
+      const saldoAte = (dia: string) => saldoRealizadoAte(dia) + somaAte(futuros, dia);
+      const atrasoAte = (dia: string) => somaAte(atrasados, dia);
+      const fimPeriodo = reconRange.to || (naoPagos.length ? naoPagos[naoPagos.length - 1].d : hojeISO);
+      const saldoRealizadoFinal = saldoAte(fimPeriodo > hojeISO ? fimPeriodo : hojeISO);
+      const atrasoFinal = atrasoAte(fimPeriodo);
       const colunas = 9 + (mostrarPrevisto ? 1 : 0);
 
       const allSelected = filtered.length > 0 && selectedRecordIds.size === filtered.length;
@@ -2468,9 +2494,9 @@ const newRecords: FinancialRecord[] = [];
                                   <td onClick={e => e.stopPropagation()}><div className="relative inline-flex items-center"><span className={`absolute left-1.5 h-2 w-2 rounded-full pointer-events-none ${r.status === TransactionStatus.PAID ? 'bg-green-500' : r.status === TransactionStatus.OVERDUE ? 'bg-red-500' : 'bg-yellow-400'}`} /><select value={r.status} onChange={(e) => handleStatusChange(r.id, e.target.value as TransactionStatus)} className="appearance-none bg-transparent pl-5 pr-5 py-0.5 rounded text-[13px] cursor-pointer outline-none hover:bg-gray-100 focus:ring-1 focus:ring-mcsystem-500"><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.PAID}>Pago</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select><ChevronDown size={11} className="absolute right-1 pointer-events-none text-gray-400" /></div></td>
                                   {/* Saída mantém o sinal: sem ele, entrada e saída ficariam idênticas fora a cor. */}
                                   <td className={`text-right tabular-nums font-semibold ${isPositiveFlow ? 'text-green-700' : 'text-red-600'}`}>{isPositiveFlow ? '' : '−'}{fmt(realValue)}</td>
-                                  {(() => { const real = saldoRealizadoAte(dataDoLancamento(r).slice(0, 10)); return (
+                                  {(() => { const real = saldoAte(dataDoLancamento(r).slice(0, 10)); return (
                                   <td className={`text-right tabular-nums font-medium ${real < 0 ? 'text-red-600' : 'text-gray-800'}`}>{real < 0 ? '−' : ''}{fmt(real)}</td>); })()}
-                                  {mostrarPrevisto && <td className={`text-right tabular-nums text-gray-500 ${saldo < 0 ? '!text-red-500' : ''}`}>{saldo < 0 ? '−' : ''}{fmt(saldo)}</td>}
+                                  {mostrarPrevisto && (() => { const atr = atrasoAte(dataDoLancamento(r).slice(0, 10)); return <td className={`text-right tabular-nums ${atr < 0 ? 'text-red-500' : atr > 0 ? 'text-amber-600' : 'text-gray-300'}`}>{atr ? `${atr < 0 ? '−' : ''}${fmt(atr)}` : '—'}</td>; })()}
                                   <td className="text-center" onClick={e => e.stopPropagation()}><div className="flex justify-center items-center gap-0.5">{r.amount < 0 && r.status !== TransactionStatus.PAID && !r.asaas_bill_id && !r.asaas_transfer_id && isAsaasEnabled(currentUser?.tenant_id) && (<button type="button" onClick={() => setBillTarget(r)} title="Pagar pelo Asaas (boleto, PIX ou TED)" className="p-1 text-green-600 hover:bg-green-50 rounded"><Barcode size={14}/></button>)}{r.asaas_bill_id && (<span title="Boleto enviado ao Asaas" className="p-1 text-blue-600"><Barcode size={14}/></span>)}<button onClick={(e) => handleEditTransaction(e, r)} title="Editar" className="p-1 text-gray-400 hover:text-mcsystem-600 hover:bg-mcsystem-50 rounded"><Pencil size={14}/></button><button type="button" onClick={(e) => handleDeleteTransaction(e, r.id)} title="Excluir" className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"><Trash2 size={14} className="pointer-events-none" /></button></div></td>
                               </tr>
 
@@ -2602,7 +2628,7 @@ const newRecords: FinancialRecord[] = [];
 
               <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-lg border border-gray-100 shadow-sm transition-all">{selectedRecordIds.size > 0 ? (<div className="flex items-center justify-between w-full animate-in slide-in-from-top-2"><div className="flex items-center space-x-4"><div className="bg-mcsystem-500 text-white px-3 py-1.5 rounded-md text-sm font-bold flex items-center shadow-sm"><CheckSquare size={16} className="mr-2"/> {selectedRecordIds.size} Selecionados</div><button onClick={() => setSelectedRecordIds(new Set())} className="text-gray-500 hover:text-gray-700 text-sm flex items-center"><X size={14} className="mr-1"/> Cancelar</button></div><div className="flex items-center space-x-2">{reconOnlyPending && (<button onClick={handleBulkValidate} className="bg-yellow-400 text-yellow-950 hover:bg-yellow-300 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center border border-yellow-500"><CheckCircle2 size={14} className="mr-1"/> Validar</button>)}<button onClick={() => handleBulkStatusChange(TransactionStatus.PAID)} className="bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><CheckCircle2 size={14} className="mr-1"/> Marcar Pago</button><button onClick={() => handleBulkStatusChange(TransactionStatus.PENDING)} className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Clock size={14} className="mr-1"/> Marcar Pendente</button><div className="h-4 w-px bg-gray-300 mx-2"></div><button onClick={handleBulkDuplicate} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Copy size={14} className="mr-1"/> Duplicar</button><button onClick={handleBulkDelete} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center"><Trash2 size={14} className="mr-1"/> Excluir</button></div></div>) : (<><div className="flex gap-3 items-center flex-1 flex-wrap"><div className="relative flex-1 min-w-[200px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input type="text" placeholder="Buscar lançamentos..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-mcsystem-500" value={reconSearch} onChange={e => setReconSearch(e.target.value)} /></div><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterType} onChange={e => setReconFilterType(e.target.value as any)}><option value="ALL">Todas Movimentações</option><option value={TransactionType.INCOME}>Receitas</option><option value={TransactionType.EXPENSE}>Despesas</option></select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterBank} onChange={e => setReconFilterBank(e.target.value as any)}><option value="ALL">Todos os Bancos</option>{banks.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}</select><select className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={reconFilterStatus} onChange={e => setReconFilterStatus(e.target.value as any)}><option value="ALL">Todos Status</option><option value={TransactionStatus.PAID}>Realizado / Pago</option><option value={TransactionStatus.PENDING}>Pendente</option><option value={TransactionStatus.OVERDUE}>Atrasado</option></select><DateRangeFilter value={reconRange} onChange={setReconRange} />{/* Fica sempre visível: escondê-lo quando a fila zera faz o filtro parecer
     inexistente. Apagado sem pendência, amarelo com a contagem quando há. */}
-<button onClick={toggleMostrarPrevisto} title={mostrarPrevisto ? 'Ocultar a coluna de saldo previsto' : 'Mostrar a coluna de saldo previsto (com pendentes e atrasados)'} className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${mostrarPrevisto ? 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50' : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-gray-200'}`}>{mostrarPrevisto ? <Eye size={15} /> : <EyeOff size={15} />} Saldo previsto</button><button onClick={toggleGroupIncome} title="Junta numa linha só as receitas do mesmo produto no mesmo dia; clique na linha para abrir" className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${groupIncomeByProduct ? 'bg-mcsystem-500 border-mcsystem-500 text-white' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}><Package size={15} /> Agrupar receitas do dia</button><button onClick={() => { setReconOnlyPending(v => !v); setSelectedRecordIds(new Set()); }} title={pendingValidationRecords.length > 0 ? 'Lançamentos importados que ainda não entram no DRE nem no Dashboard' : 'Nenhum lançamento pendente de validação'} className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${reconOnlyPending ? 'bg-yellow-400 border-yellow-400 text-yellow-950' : pendingValidationRecords.length > 0 ? 'bg-white border-yellow-200 text-yellow-700 hover:bg-yellow-50' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}><AlertCircle size={15} /> A validar{pendingValidationRecords.length > 0 && <span className={`text-[10px] font-bold px-1.5 rounded-full ${reconOnlyPending ? 'bg-yellow-950 text-yellow-100' : 'bg-yellow-400 text-yellow-950'}`}>{pendingValidationRecords.length}</span>}</button></div><button onClick={() => { resetTransactionForm(); setIsModalOpen(true); }} className="bg-mcsystem-500 hover:bg-mcsystem-400 text-white px-4 py-2 rounded-lg font-bold flex items-center shadow-sm whitespace-nowrap"><Plus size={18} className="mr-2" /> Novo Lançamento</button></>)}</div>
+<button onClick={toggleMostrarPrevisto} title={mostrarPrevisto ? 'Ocultar a coluna Em atraso' : 'Mostrar a coluna Em atraso (vencidos e não pagos)'} className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${mostrarPrevisto ? 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50' : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-gray-200'}`}>{mostrarPrevisto ? <Eye size={15} /> : <EyeOff size={15} />} Em atraso</button><button onClick={toggleGroupIncome} title="Junta numa linha só as receitas do mesmo produto no mesmo dia; clique na linha para abrir" className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${groupIncomeByProduct ? 'bg-mcsystem-500 border-mcsystem-500 text-white' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}><Package size={15} /> Agrupar receitas do dia</button><button onClick={() => { setReconOnlyPending(v => !v); setSelectedRecordIds(new Set()); }} title={pendingValidationRecords.length > 0 ? 'Lançamentos importados que ainda não entram no DRE nem no Dashboard' : 'Nenhum lançamento pendente de validação'} className={`px-3 py-2 rounded-lg text-sm font-medium border flex items-center gap-2 whitespace-nowrap transition-colors ${reconOnlyPending ? 'bg-yellow-400 border-yellow-400 text-yellow-950' : pendingValidationRecords.length > 0 ? 'bg-white border-yellow-200 text-yellow-700 hover:bg-yellow-50' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}><AlertCircle size={15} /> A validar{pendingValidationRecords.length > 0 && <span className={`text-[10px] font-bold px-1.5 rounded-full ${reconOnlyPending ? 'bg-yellow-950 text-yellow-100' : 'bg-yellow-400 text-yellow-950'}`}>{pendingValidationRecords.length}</span>}</button></div><button onClick={() => { resetTransactionForm(); setIsModalOpen(true); }} className="bg-mcsystem-500 hover:bg-mcsystem-400 text-white px-4 py-2 rounded-lg font-bold flex items-center shadow-sm whitespace-nowrap"><Plus size={18} className="mr-2" /> Novo Lançamento</button></>)}</div>
               {/* Tabela no jeito de planilha: grade, uma linha por lançamento, cabeçalho
                   fixo ao rolar e totais no rodapé. O clique na linha abre o detalhe. */}
               <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-auto max-h-[72vh]">
@@ -2643,8 +2669,8 @@ const newRecords: FinancialRecord[] = [];
                                 </div>
                               </th>
                             ))}
-                            <th className="w-[120px] text-right" title="Saldo da conta (Asaas, se nenhum banco estiver escolhido) com o que já caiu nela até aquele dia. Pendentes e atrasados não entram. Deve bater com o extrato do Asaas.">Saldo (R$)</th>
-                            {mostrarPrevisto && <th className="w-[120px] text-right text-gray-500" title="Saldo se tudo que está na lista se confirmar, incluindo pendentes e atrasados, somado na ordem das datas.">Saldo previsto</th>}
+                            <th className="w-[120px] text-right" title="Saldo da conta (Asaas, se nenhum banco estiver escolhido): até hoje, o que já caiu nela; daqui para a frente, soma e subtrai o que está para entrar e sair. Atrasados não entram.">Saldo (R$)</th>
+                            {mostrarPrevisto && <th className="w-[120px] text-right text-gray-500" title="Soma do que venceu e não foi pago (atrasados e pendentes com data passada) até aquele dia. Fica fora do Saldo.">Em atraso</th>}
                             <th className="w-[96px] text-center">Ações</th>
                           </tr>
                       </thead>
@@ -2689,9 +2715,9 @@ const newRecords: FinancialRecord[] = [];
                                       </span>
                                     </td>
                                     <td className={`text-right tabular-nums font-semibold ${total < 0 ? 'text-red-600' : 'text-green-700'}`}>{total < 0 ? '−' : ''}{fmtG(total)}</td>
-                                    {(() => { const real = saldoRealizadoAte(datas[datas.length - 1] || ''); return (
+                                    {(() => { const real = saldoAte(datas[datas.length - 1] || ''); return (
                                     <td className={`text-right tabular-nums font-medium ${real < 0 ? 'text-red-600' : 'text-gray-800'}`}>{real < 0 ? '−' : ''}{fmtG(real)}</td>); })()}
-                                    {mostrarPrevisto && <td className={`text-right tabular-nums text-gray-500 ${saldoGrupo < 0 ? '!text-red-500' : ''}`}>{saldoGrupo < 0 ? '−' : ''}{fmtG(saldoGrupo)}</td>}
+                                    {mostrarPrevisto && (() => { const atr = atrasoAte(datas[datas.length - 1] || ''); return <td className={`text-right tabular-nums ${atr < 0 ? 'text-red-500' : atr > 0 ? 'text-amber-600' : 'text-gray-300'}`}>{atr ? `${atr < 0 ? '−' : ''}${fmtG(atr)}` : '—'}</td>; })()}
                                     <td className="text-center" onClick={e => e.stopPropagation()}>
                                       <button type="button" onClick={alternar} aria-label={aberto ? 'Fechar grupo' : 'Abrir grupo'} title={aberto ? 'Fechar' : 'Ver as receitas'}
                                         className="p-1 rounded text-gray-500 hover:text-mcsystem-700 hover:bg-mcsystem-50">
@@ -2719,7 +2745,7 @@ const newRecords: FinancialRecord[] = [];
                               </td>
                               <td className={`text-right tabular-nums ${totalPeriodo < 0 ? 'text-red-600' : 'text-green-700'}`}>{totalPeriodo < 0 ? '−' : ''}{f(totalPeriodo)}</td>
                               <td className={`text-right tabular-nums ${saldoRealizadoFinal < 0 ? 'text-red-600' : 'text-gray-800'}`}>{saldoRealizadoFinal < 0 ? '−' : ''}{f(saldoRealizadoFinal)}</td>
-                              {mostrarPrevisto && <td className={`text-right tabular-nums text-gray-500 ${finalBalance < 0 ? '!text-red-500' : ''}`}>{finalBalance < 0 ? '−' : ''}{f(finalBalance)}</td>}
+                              {mostrarPrevisto && <td className={`text-right tabular-nums ${atrasoFinal < 0 ? 'text-red-500' : atrasoFinal > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{atrasoFinal < 0 ? '−' : ''}{f(atrasoFinal)}</td>}
                               <td></td>
                             </tr>
                           </tfoot>

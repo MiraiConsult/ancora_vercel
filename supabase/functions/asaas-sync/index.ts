@@ -21,6 +21,13 @@ const corsHeaders = {
 
 const digits = (s: string) => (s || '').replace(/\D/g, '');
 
+/** O extrato entra a partir daqui; o que veio antes fica como estava. */
+const EXTRATO_DESDE = '2026-11-01';
+const diasEntre = (a: string, b: string) =>
+  Math.round((Date.parse(b.slice(0, 10)) - Date.parse(a.slice(0, 10))) / 86400000);
+const diaAntes = (iso: string, dias: number) =>
+  new Date(Date.parse(iso) - dias * 86400000).toISOString().slice(0, 10);
+
 async function asaas(path: string) {
   const res = await fetch(`${ASAAS_BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json', 'access_token': ASAAS_API_KEY },
@@ -103,6 +110,7 @@ Deno.serve(async (req: Request) => {
     const counts = {
       customers_new: 0, customers_linked: 0, payments: 0, subscriptions: 0, bills: 0,
       payments_removed: 0, subscriptions_removed: 0,
+      extrato_novos: 0, extrato_ligados: 0,
       asaas_balance: null as number | null,
     };
 
@@ -327,7 +335,99 @@ Deno.serve(async (req: Request) => {
       counts.bills = billRows.length;
     }
 
-    // ---- 5) Saldo da conta Asaas ----
+    // ---- 5) Extrato (de EXTRATO_DESDE em diante) ----
+    // Tudo que mexe no saldo do Asaas entra no sistema. Cobrança, conta paga e
+    // transferência feitas por aqui já existem e não entram de novo. Lançamento
+    // feito à mão com o mesmo valor, até 5 dias da data, é ligado à linha do
+    // extrato e vira pago nela, em vez de duplicar. Taxa do Asaas entra já
+    // classificada; o resto (PIX enviado ou recebido por fora, estorno) chega
+    // em "A validar" para ser classificado. O passado fica como estava.
+    if (asaasBankId) {
+      let extrato: any[] = [];
+      try {
+        extrato = await asaasList(`/financialTransactions?startDate=${EXTRATO_DESDE}`);
+      } catch (e) {
+        console.warn('extrato:', String((e as Error)?.message || e));
+      }
+      if (extrato.length) {
+        const { data: ligadosRows } = await admin.from('financial_records')
+          .select('asaas_transaction_id').eq('tenant_id', tenantId).not('asaas_transaction_id', 'is', null);
+        const ligados = new Set((ligadosRows || []).map((r: any) => r.asaas_transaction_id));
+
+        const { data: conhecidos } = await admin.from('financial_records')
+          .select('asaas_transfer_id, asaas_bill_id').eq('tenant_id', tenantId)
+          .or('asaas_transfer_id.not.is.null,asaas_bill_id.not.is.null');
+        const transferencias = new Set((conhecidos || []).map((r: any) => r.asaas_transfer_id).filter(Boolean));
+        const contasPagas = new Set((conhecidos || []).map((r: any) => r.asaas_bill_id).filter(Boolean));
+        // Recebimento de cobrança é a própria cobrança, inclusive as ignoradas
+        // (que são de outro negócio e ficam fora de propósito).
+        const cobrancas = new Set(allPayments.map((p: any) => p.id));
+
+        const { data: manuais } = await admin.from('financial_records')
+          .select('id, amount, dueDate').eq('tenant_id', tenantId)
+          .is('asaas_payment_id', null).is('asaas_bill_id', null).is('asaas_transfer_id', null)
+          .is('asaas_transaction_id', null).gte('dueDate', diaAntes(EXTRATO_DESDE, 15));
+        const usados = new Set<string>();
+
+        const { data: rubricaTaxa } = await admin.from('chart_of_accounts')
+          .select('id, rubricName').eq('id', 'coa_tarifas_asaas').maybeSingle();
+
+        const novos: any[] = [];
+        for (const t of extrato) {
+          if (!t?.id || ligados.has(t.id)) continue;
+          const valor = Math.round((Number(t.value) || 0) * 100) / 100;
+          if (!valor) continue;
+          const tipo = String(t.type || '');
+          const data = String(t.date || '').slice(0, 10);
+          const ehTaxa = tipo.includes('FEE');
+          if (!ehTaxa) {
+            if (t.paymentId && cobrancas.has(t.paymentId)) continue;
+            if (t.transferId && transferencias.has(t.transferId)) continue;
+            if (t.billId && contasPagas.has(t.billId)) continue;
+
+            const candidato = (manuais || [])
+              .filter((m: any) => !usados.has(m.id) && Math.abs((Number(m.amount) || 0) - valor) < 0.005
+                && m.dueDate && Math.abs(diasEntre(m.dueDate, data)) <= 5)
+              .sort((a: any, b: any) => Math.abs(diasEntre(a.dueDate, data)) - Math.abs(diasEntre(b.dueDate, data)))[0];
+            if (candidato) {
+              usados.add(candidato.id);
+              const { error } = await admin.from('financial_records')
+                .update({ status: 'Pago', paymentDate: data, bankId: asaasBankId, asaas_transaction_id: t.id })
+                .eq('id', candidato.id);
+              if (error) console.warn('extrato ligar:', error.message);
+              else counts.extrato_ligados++;
+              continue;
+            }
+          }
+          const classificada = ehTaxa && rubricaTaxa;
+          novos.push({
+            id: `fx${t.id}`,
+            tenant_id: tenantId,
+            description: t.description || tipo || 'Movimento Asaas',
+            amount: valor,
+            type: valor >= 0 ? 'Receita' : 'Despesa',
+            status: 'Pago',
+            dueDate: data,
+            competenceDate: data,
+            paymentDate: data,
+            bankId: asaasBankId,
+            asaas_transaction_id: t.id,
+            category: classificada ? rubricaTaxa.rubricName : 'A CLASSIFICAR',
+            rubricId: classificada ? rubricaTaxa.id : null,
+            needsValidation: !classificada,
+          });
+        }
+        if (novos.length) {
+          // Só insere: reescrever apagaria a classificação feita na Validação.
+          const { error } = await admin.from('financial_records')
+            .upsert(novos, { onConflict: 'id', ignoreDuplicates: true });
+          if (error) console.warn('extrato:', error.message);
+          else counts.extrato_novos = novos.length;
+        }
+      }
+    }
+
+    // ---- 6) Saldo da conta Asaas ----
     // Pagamento feito pelo Asaas (PIX, TED, boleto) nasce de um lançamento que
     // pode estar em outra conta: ele saiu do Asaas, então fica na conta Asaas.
     if (asaasBankId) {

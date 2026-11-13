@@ -43,6 +43,13 @@
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
+  /* O Recharts torna o gráfico focável: o clique numa barra acendia a borda de
+     foco em volta do gráfico inteiro. Some no clique; no teclado continua. */
+  .recharts-wrapper:focus:not(:focus-visible),
+  .recharts-wrapper *:focus:not(:focus-visible) {
+    outline: none;
+  }
+
   html {
     font-size: 100%; /* Garantir 100% do tamanho padrão do navegador */
   }

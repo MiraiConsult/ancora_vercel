@@ -726,11 +726,21 @@ const BillingList: React.FC<BillingListProps> = ({
                             <div className="font-semibold text-gray-800">{row.client}</div>
                             <div className="text-gray-400 text-xs mt-0.5 max-w-md truncate">{row.description}</div>
                             {isSub && (row.charges.length > 0 || row.projected.length > 0) && (
-                              <div className="text-[11px] text-gray-400 mt-1">
-                                {row.charges.length} emitida(s)
-                                {row.projected.length > 0 && ` · ${row.projected.length} a emitir`}
-                                {row.paid > 0 && ` · ${formatBRL(row.paid)} recebidos`}
-                              </div>
+                              (() => {
+                                const pagas = row.charges.filter(c => (c.status as string) === 'Pago').length;
+                                const abertas = row.charges.length - pagas;
+                                const total = s!.max_payments || 0;
+                                return (
+                                  <div className="text-[11px] text-gray-400 mt-1">
+                                    <b className={pagas > 0 ? 'text-green-600' : 'text-gray-500'}>
+                                      {total ? `${pagas} de ${total} paga(s)` : `${pagas} paga(s)`}
+                                    </b>
+                                    {abertas > 0 && ` · ${abertas} em aberto`}
+                                    {row.projected.length > 0 && ` · ${row.projected.length} a emitir`}
+                                    {row.paid > 0 && ` · ${formatBRL(row.paid)} recebidos`}
+                                  </div>
+                                );
+                              })()
                             )}
                           </div>
                         </div>
@@ -753,7 +763,7 @@ const BillingList: React.FC<BillingListProps> = ({
                           <span className="block text-[11px] text-gray-400 mt-0.5">{s!.max_payments}x</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-gray-600 whitespace-nowrap">{row.date || '—'}</td>
+                      <td className="px-6 py-4 text-gray-600 whitespace-nowrap">{fmtDate(row.date)}</td>
                       <td className="px-6 py-4 text-center">
                         <div className="flex flex-col items-center gap-1">
                           {isSub ? (

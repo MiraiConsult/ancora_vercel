@@ -208,7 +208,9 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({
 
   // Sorting State for Reconciliation
   type SortableKeys = keyof FinancialRecord | 'category';
-  const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({ key: 'dueDate', direction: 'descending' });
+  // Abre do dia 1 do período para a frente, como um extrato: lido de cima para
+  // baixo, o saldo acumulado vai somando na ordem em que o dinheiro se moveu.
+  const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({ key: 'dueDate', direction: 'ascending' });
 
 
   // Drill Down State

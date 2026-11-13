@@ -329,9 +329,13 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     const activeSubscribers = new Set(active.map(s => s.client_id).filter(Boolean)).size;
     const byProduct = new Map<string, Set<string>>();
     active.forEach(s => {
-      const pn = productName(s.product_id) || NO_PRODUCT;
-      if (!byProduct.has(pn)) byProduct.set(pn, new Set());
-      if (s.client_id) byProduct.get(pn)!.add(s.client_id);
+      // Assinatura dividida (ex.: Kaivaa + Hello Growth) conta o cliente nos dois produtos.
+      const ids = s.split_products?.length ? s.split_products.map(p => p.product_id) : [s.product_id];
+      ids.forEach(id => {
+        const pn = productName(id) || NO_PRODUCT;
+        if (!byProduct.has(pn)) byProduct.set(pn, new Set());
+        if (s.client_id) byProduct.get(pn)!.add(s.client_id);
+      });
     });
     const activeClientsByProduct = Array.from(byProduct.entries())
       .map(([name, set]) => ({ name, value: set.size })).sort((a, b) => b.value - a.value);
@@ -428,11 +432,21 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     if (!d.startsWith(String(year))) return false;
     return monthsSorted.includes(parseInt(d.slice(5, 7)));
   };
+  // Lançamento dividido entre produtos (ex.: Kaivaa + Hello Growth) entra em
+  // cada produto pela sua parte, respeitando o filtro de produto da tela.
+  const splitParts = (r: FinancialRecord) => (r.split_revenue?.length
+    ? r.split_revenue
+        .map(sp => ({ tag: productName(sp.product_id) || NO_PRODUCT, value: Math.abs(sp.amount) }))
+        .filter(p => productSet.has(p.tag))
+    : undefined);
   const toRow = (r: FinancialRecord): DrillRow => ({
     id: r.id,
     label: r.description || 'Lançamento',
     sub: companyName(r.companyId),
-    tag: (r.split_revenue?.length ? 'Múltiplos' : productName(r.product_id)) || undefined,
+    tag: (r.split_revenue?.length
+      ? (splitParts(r) || []).map(p => p.tag).join(' + ')
+      : productName(r.product_id)) || undefined,
+    parts: r.amount >= 0 && !abateDespesa(r, rubricasDespesa) ? splitParts(r) : undefined,
     date: dataDoLancamento(r),
     value: r.amount >= 0 && !abateDespesa(r, rubricasDespesa) ? incomeUnderFilter(r) : r.amount,
     status: r.status as string,
@@ -577,7 +591,13 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
                 .sort((a, b) => (b.value || 0) - (a.value || 0))
                 .map(s => ({
                   id: s.id, label: s.description || 'Assinatura', sub: companyName(s.client_id),
-                  tag: productName(s.product_id) || undefined, date: s.next_due_date,
+                  tag: s.split_products?.length
+                    ? s.split_products.map(p => productName(p.product_id) || NO_PRODUCT).join(' + ')
+                    : productName(s.product_id) || undefined,
+                  parts: s.split_products?.length
+                    ? s.split_products.map(p => ({ tag: productName(p.product_id) || NO_PRODUCT, value: (s.value || 0) * p.pct / 100 }))
+                    : undefined,
+                  date: s.next_due_date,
                   value: s.value || 0, status: s.cycle,
                 })), 'billing', true)} />
             <Kpi label="Receita total" value={brl(primary.totalIncome)}
@@ -766,10 +786,15 @@ interface DrillRow {
   label: string;
   sub?: string;
   tag?: string;
+  /** Partes por produto, quando o lançamento é dividido entre produtos. */
+  parts?: { tag: string; value: number }[];
   date?: string;
   value: number;
   status?: string;
 }
+
+/** Produto → valor da linha; linha dividida conta em cada produto pela sua parte. */
+const rowParts = (r: DrillRow) => (r.parts?.length ? r.parts : [{ tag: r.tag || 'Sem produto', value: r.value }]);
 
 const statusChip = (s?: string) => {
   if (!s) return null;
@@ -814,10 +839,7 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
   // Quebra por produto
   const byTag = useMemo(() => {
     const m = new Map<string, number>();
-    rows.forEach(r => {
-      const k = r.tag || 'Sem produto';
-      m.set(k, (m.get(k) || 0) + r.value);
-    });
+    rows.forEach(r => rowParts(r).forEach(p => m.set(p.tag, (m.get(p.tag) || 0) + p.value)));
     return Array.from(m.entries()).map(([name, value]) => ({ name, value }))
       .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
   }, [rows]);
@@ -833,10 +855,12 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
   const clientesDoProduto = useMemo(() => {
     if (!produtoSel) return [];
     const m = new Map<string, { value: number; n: number }>();
-    rows.filter(r => (r.tag || 'Sem produto') === produtoSel).forEach(r => {
+    rows.forEach(r => {
+      const parte = rowParts(r).filter(p => p.tag === produtoSel).reduce((s, p) => s + p.value, 0);
+      if (!rowParts(r).some(p => p.tag === produtoSel)) return;
       const k = r.sub || 'Sem cliente';
       const c = m.get(k) || { value: 0, n: 0 };
-      c.value += r.value; c.n += 1;
+      c.value += parte; c.n += 1;
       m.set(k, c);
     });
     return Array.from(m.entries()).map(([name, c]) => ({ name, ...c }))

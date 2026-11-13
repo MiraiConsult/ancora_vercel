@@ -927,9 +927,9 @@ const maskDoc = (v: string) => {
 };
 
 /**
- * Cadastro rápido de cliente sem sair da cobrança. Grava aqui e no Asaas na
- * mesma ação — CNPJ/CPF é obrigatório porque sem ele o Asaas não aceita o
- * customer, e é ele que evita cadastro duplicado.
+ * Cadastro rápido de cliente sem sair da cobrança. Nenhum campo é
+ * obrigatório: com CNPJ/CPF grava aqui e no Asaas na mesma ação; sem ele,
+ * grava só aqui.
  */
 const NewClientModal: React.FC<{
   initialName?: string; onClose: () => void; onCreated: (c: Company) => void;
@@ -940,21 +940,53 @@ const NewClientModal: React.FC<{
   const [phone, setPhone] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Nenhum campo é obrigatório. Sem CPF/CNPJ completo (ou se o Asaas recusar o
+  // documento) o cliente é gravado só aqui; o vínculo com o Asaas acontece
+  // depois, quando o documento for completado e a cobrança for emitida.
+  const saveLocal = async (finalName: string, doc: string) => {
+    const { data, error } = await supabase.from('clients').insert({
+      id: `c${Date.now()}`,
+      name: finalName,
+      cnpj: doc ? maskDoc(doc) : '',
+      segment: '',
+      status: 'Active',
+      location: '',
+      notes: [],
+    }).select().single();
+    if (error) throw error;
+    return data as Company;
+  };
+
   const save = async () => {
     const doc = cnpj.replace(/\D/g, '');
-    if (!name.trim()) return alert('Informe o nome do cliente.');
-    if (doc.length !== 11 && doc.length !== 14) return alert('Informe um CPF (11 dígitos) ou CNPJ (14 dígitos).');
+    const finalName = name.trim() || 'Cliente sem nome';
     setSaving(true);
     try {
-      const res = await asaasCreateClient({
-        name: name.trim(), cnpj: doc,
-        email: email.trim() || undefined,
-        phone: phone.trim() || undefined,
-      });
-      if (res.linked) {
-        alert('Este CNPJ/CPF já existia no Asaas — o cadastro foi vinculado ao cliente de lá.');
+      if (doc.length === 11 || doc.length === 14) {
+        try {
+          const res = await asaasCreateClient({
+            name: finalName, cnpj: doc,
+            email: email.trim() || undefined,
+            phone: phone.trim() || undefined,
+          });
+          if (res.linked) {
+            alert('Este CNPJ/CPF já existia no Asaas — o cadastro foi vinculado ao cliente de lá.');
+          }
+          onCreated(res.client as Company);
+          onClose();
+          return;
+        } catch (e: any) {
+          // Cliente repetido continua bloqueado — os demais erros (ex.: documento
+          // recusado pelo Asaas) não impedem o cadastro aqui.
+          if (/já existe um cliente/i.test(e.message || '')) throw e;
+          const client = await saveLocal(finalName, doc);
+          alert(`Cliente cadastrado só no sistema — o Asaas recusou: ${e.message}`);
+          onCreated(client);
+          onClose();
+          return;
+        }
       }
-      onCreated(res.client as Company);
+      onCreated(await saveLocal(finalName, doc));
       onClose();
     } catch (e: any) {
       alert(`Erro ao cadastrar cliente: ${e.message}`);
@@ -974,14 +1006,14 @@ const NewClientModal: React.FC<{
         </div>
         <div className="p-6 space-y-4">
           <div className="bg-mcsystem-50 border border-mcsystem-100 text-mcsystem-800 text-xs rounded-lg px-3 py-2">
-            O cliente é criado aqui e no Asaas ao mesmo tempo. Se o CNPJ/CPF já existir no Asaas, os dois cadastros são vinculados.
+            Nenhum campo é obrigatório. Com CNPJ/CPF, o cliente também é criado no Asaas (ou vinculado, se já existir lá). Sem ele, fica só aqui.
           </div>
           <div>
-            <label className={labelCls}>Nome *</label>
+            <label className={labelCls}>Nome</label>
             <input type="text" value={name} onChange={e => setName(e.target.value)} className={inputCls} placeholder="Ex: Ancóra Consultoria" autoFocus />
           </div>
           <div>
-            <label className={labelCls}>CNPJ/CPF *</label>
+            <label className={labelCls}>CNPJ/CPF</label>
             <input type="text" value={cnpj} onChange={e => setCnpj(maskDoc(e.target.value))} className={inputCls} placeholder="00.000.000/0000-00" inputMode="numeric" />
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -995,7 +1027,7 @@ const NewClientModal: React.FC<{
             </div>
           </div>
           <p className="text-xs text-gray-400">
-            E-mail e celular ficam só no Asaas — é por eles que a cobrança é enviada.
+            E-mail e celular ficam só no Asaas (quando há CNPJ/CPF) — é por eles que a cobrança é enviada.
           </p>
         </div>
         <ModalFooter submitting={saving} onClose={onClose} onSubmit={save} label="Cadastrar cliente" />

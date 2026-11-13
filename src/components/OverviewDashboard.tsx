@@ -36,6 +36,9 @@ const INK = { primary: '#111827', secondary: '#6b7280', muted: '#9ca3af', grid: 
 
 const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(v || 0);
 const brlExact = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+
+/** 2026-11-15 → 15/11/2026 */
+const fmtDate = (iso?: string) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—');
 const brlShort = (v: number) => {
   const a = Math.abs(v);
   if (a >= 1_000_000) return `${(v / 1_000_000).toFixed(1)} mi`;
@@ -1035,7 +1038,7 @@ const DrillModal: React.FC<{ title: string; rows: DrillRow[]; onClose: () => voi
                         {r.tag && <span className="text-[11px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{r.tag}</span>}
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{r.date}</td>
+                    <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{fmtDate(r.date)}</td>
                     <td className="px-3 py-3">{statusChip(r.status)}</td>
                     <td className={`px-6 py-3 text-right font-semibold tabular-nums whitespace-nowrap ${r.value < 0 ? 'text-red-600' : 'text-gray-900'}`}>
                       {brlExact(r.value)}

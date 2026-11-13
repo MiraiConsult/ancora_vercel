@@ -37,6 +37,9 @@ const BILLING_TYPES = [
   { value: 'CREDIT_CARD', label: 'Cartão de crédito' },
 ];
 
+/** 2026-11-15 → 15/11/2026 */
+const fmtDate = (iso?: string) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—');
+
 const formatBRL = (v: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 
@@ -827,7 +830,7 @@ const BillingList: React.FC<BillingListProps> = ({
                             <tbody className="divide-y divide-gray-200/70">
                               {row.charges.map(c => (
                                 <tr key={c.id}>
-                                  <td className={`py-2 whitespace-nowrap ${(c.status as string) !== 'Pago' && (c.dueDate || '') < today ? 'text-red-600 font-medium' : 'text-gray-600'}`}>{c.dueDate}</td>
+                                  <td className={`py-2 whitespace-nowrap ${(c.status as string) !== 'Pago' && (c.dueDate || '') < today ? 'text-red-600 font-medium' : 'text-gray-600'}`}>{fmtDate(c.dueDate)}</td>
                                   <td className="py-2 text-gray-500 max-w-xs truncate">{c.description}</td>
                                   <td className="py-2">
                                     {chips(c.split_revenue?.length
@@ -858,7 +861,7 @@ const BillingList: React.FC<BillingListProps> = ({
                               ))}
                               {row.projected.map(p => (
                                 <tr key={`p:${p.dueDate}`} className="text-gray-400">
-                                  <td className="py-2 whitespace-nowrap">{p.dueDate}</td>
+                                  <td className="py-2 whitespace-nowrap">{fmtDate(p.dueDate)}</td>
                                   <td className="py-2 max-w-xs truncate italic">{row.description || 'Renovação'}</td>
                                   <td className="py-2">{chips(s!.split_products?.length
                                     ? s!.split_products.map(x => ({ id: x.product_id, value: p.amount * x.pct / 100 }))

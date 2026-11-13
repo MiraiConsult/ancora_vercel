@@ -579,6 +579,29 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
           onSubmit={async (form) => {
             setSubmitting(true);
             try {
+              if (form.semAsaas) {
+                // Pagamento por fora (PIX direto): a assinatura existe só aqui,
+                // nada é criado nem cobrado no Asaas.
+                const { data, error } = await supabase.from('subscriptions').insert({
+                  id: `sm${Date.now()}`,
+                  client_id: form.clientId,
+                  product_id: form.productId || null,
+                  split_products: form.splitProducts?.length ? form.splitProducts : null,
+                  product_manual: !!form.productId || !!form.splitProducts?.length,
+                  description: form.description || '',
+                  value: Number(form.value),
+                  cycle: form.cycle || 'MONTHLY',
+                  billing_type: 'PIX',
+                  next_due_date: form.nextDueDate,
+                  end_date: form.endDate || null,
+                  max_payments: form.maxPayments || null,
+                  status: 'ACTIVE',
+                }).select().single();
+                if (error) throw new Error(error.message);
+                setSubscriptions(prev => [data as Subscription, ...prev]);
+                setModal(null);
+                return;
+              }
               const res = await asaasCreateSubscription(form);
               if (res?.row) setSubscriptions(prev => [res.row as Subscription, ...prev]);
               setModal(null);
@@ -1371,6 +1394,7 @@ const SubscriptionModal: React.FC<{
   const [splitRows, setSplitRows] = useState<SplitRow[]>([]);
   const [terms, setTerms] = useState<Terms>(emptyTerms);
   const [maxPayments, setMaxPayments] = useState<number | ''>('');
+  const [semAsaas, setSemAsaas] = useState(false);
 
   const computeEndDate = (start: string, cy: string, count: number): string => {
     const d = new Date(start + 'T00:00:00');
@@ -1410,7 +1434,8 @@ const SubscriptionModal: React.FC<{
       value, cycle, nextDueDate, description, billingType,
       endDate,
       maxPayments: maxPayments || undefined,
-      ...termsPayload(terms),
+      semAsaas,
+      ...(semAsaas ? {} : termsPayload(terms)),
     });
   };
 
@@ -1418,6 +1443,15 @@ const SubscriptionModal: React.FC<{
     <ModalShell title="Nova Assinatura" icon={<Repeat size={20} className="text-mcsystem-500" />} onClose={onClose}>
       <div className="p-6 space-y-4">
         <ClientField companies={companies} value={clientId} onChange={setClientId} onClientCreated={onClientCreated} />
+
+        <label className="flex items-start gap-2.5 p-3 rounded-xl border border-gray-200 bg-gray-50 cursor-pointer">
+          <input type="checkbox" checked={semAsaas} onChange={e => setSemAsaas(e.target.checked)}
+            className="mt-0.5 rounded border-gray-300 text-mcsystem-600 focus:ring-mcsystem-500" />
+          <span className="text-sm">
+            <b className="text-gray-800">Pagamento fora do Asaas</b>
+            <span className="block text-gray-500">O cliente paga por PIX direto (ex.: clientes da MC Castro). Fica só no sistema, sem cobrança no Asaas.</span>
+          </span>
+        </label>
 
         <div>
           <div className="flex items-center justify-between mb-1">
@@ -1464,10 +1498,10 @@ const SubscriptionModal: React.FC<{
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className={labelCls}>1º vencimento *</label>
+            <label className={labelCls}>{semAsaas ? 'Dia do 1º pagamento *' : '1º vencimento *'}</label>
             <input type="date" value={nextDueDate} onChange={e => setNextDueDate(e.target.value)} className={inputCls} />
           </div>
-          <div>
+          <div className={semAsaas ? 'hidden' : ''}>
             <label className={labelCls}>Forma de pagamento</label>
             <select value={billingType} onChange={e => setBillingType(e.target.value)} className={inputCls}>
               {BILLING_TYPES.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
@@ -1498,7 +1532,7 @@ const SubscriptionModal: React.FC<{
           <input type="text" value={description} onChange={e => setDescription(e.target.value)} className={inputCls} placeholder="Ex: Plano mensal" />
         </div>
 
-        <ChargeTermsFields terms={terms} onChange={setTerms} />
+        {!semAsaas && <ChargeTermsFields terms={terms} onChange={setTerms} />}
       </div>
       <ModalFooter submitting={submitting} onClose={onClose} onSubmit={submit} label="Criar assinatura" />
     </ModalShell>

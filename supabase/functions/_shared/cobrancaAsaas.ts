@@ -182,7 +182,10 @@ export async function carregarClassificacao(admin: any, tenantId: string): Promi
       status: mapStatus(p.status),
       dueDate: p.dueDate,
       competenceDate: p.dueDate,
-      paymentDate: p.paymentDate || null,
+      // Visão de caixa: vale o dia em que o dinheiro cai na conta. No cartão o
+      // crédito vem dias (ou meses) depois do pagamento; sem data de crédito,
+      // fica a do pagamento. Não mexe no DRE, que usa a data do lançamento.
+      paymentDate: (mapStatus(p.status) === 'Pago' ? (p.creditDate || p.estimatedCreditDate) : null) || p.paymentDate || null,
       category: rubric?.name || 'Cobrança Asaas',
       rubricId: rubric?.id || null,
       companyId,

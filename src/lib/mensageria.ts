@@ -73,3 +73,26 @@ export const custosMensageria = (records: FinancialRecord[]): Custo[] => {
 };
 
 export const emAberto = (r: FinancialRecord) => r.status !== TransactionStatus.PAID;
+
+export type ItemMensageria = { record: FinancialRecord; mes: string; valor: number };
+
+/**
+ * A linha MENSAGERIA E ADS do DRE: saída e entrada juntas, com o sinal do
+ * lançamento, no mês de consumo. O que sobra é só o gasto da Mirai; a parte
+ * repassada aos clientes se anula dentro do mesmo mês.
+ */
+export const itensMensageriaDRE = (records: FinancialRecord[]): ItemMensageria[] => {
+  const ids = [RUBRICA_SAIDA, RUBRICA_ENTRADA];
+  const out: ItemMensageria[] = [];
+  for (const r of records) {
+    if (isProjected(r)) continue;
+    if (r.split_rubrics && r.split_rubrics.length > 0) {
+      for (const f of r.split_rubrics) {
+        if (ids.includes(f.rubric_id)) out.push({ record: r, mes: mesDeConsumo(r, f.description), valor: Number(f.amount) || 0 });
+      }
+    } else if (ids.includes(r.rubricId || '')) {
+      out.push({ record: r, mes: mesDeConsumo(r), valor: r.amount });
+    }
+  }
+  return out;
+};

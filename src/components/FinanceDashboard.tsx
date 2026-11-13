@@ -9,6 +9,7 @@ import { useExcluirCobrancas } from './useExcluirCobrancas';
 import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
 import { DateRangeFilter, presetRange, inRange, type DateRange } from './DateRangeFilter';
 import { dataDoLancamento } from '../lib/dataLancamento';
+import { RUBRICA_ENTRADA, RUBRICA_SAIDA, itensMensageriaDRE } from '../lib/mensageria';
 import { abateDespesa, rubricasDeDespesa } from '../lib/abateDespesa';
 import { PayRecordModal } from './PayRecordModal';
 import { isProjected, projectSubscriptions, shiftMonthKey } from '../lib/subscriptionProjection';
@@ -1795,9 +1796,23 @@ const newRecords: FinancialRecord[] = [];
   
       // A célula pode conter renovação prevista; a lista tem que mostrar as
       // mesmas linhas, senão o detalhe não fecha com o total.
+      if (node.mensageria) {
+          const recs = [...new Set(itensMensageria.filter(i => dateKeys.includes(i.mes)).map(i => i.record))];
+          setDrillDownRecords(recs);
+          setDrillDownProductIds(undefined);
+          setDrillDownRevTypeIds(undefined);
+          setDrillDownRubricIds([RUBRICA_SAIDA, RUBRICA_ENTRADA]);
+          setDrillDownTitle(node.name);
+          setDrillDownSubtitle(`${periodoLabel || dateKeys.join(', ')} · pelo mês de consumo`);
+          setDrillDownExpected(alvo);
+          setIsDrillDownOpen(true);
+          return;
+      }
+      const consumoNoPeriodo = new Set(itensMensageria.filter(i => dateKeys.includes(i.mes)).map(i => i.record.id));
       const recordsToDisplay = [...validRecords, ...projectedRecords].filter(r => {
           const rDate = dataDoLancamento(r);
-          if (!rDate || !dateKeys.some(k => rDate.startsWith(k))) return false;
+          const noPeriodo = !!rDate && dateKeys.some(k => rDate.startsWith(k));
+          if (!noPeriodo && !consumoNoPeriodo.has(r.id)) return false;
 
           if (node.type === 'ROOT') {
               // Linha de resultado: entra tudo que passou pelo período.
@@ -1862,6 +1877,13 @@ const newRecords: FinancialRecord[] = [];
   // --- Common Calculations ---
   const validRecords = records.filter(r => !r.needsValidation);
   const rubricasDespesa = useMemo(() => rubricasDeDespesa(chartOfAccounts), [chartOfAccounts]);
+  /**
+   * Mensageria no DRE é uma linha só, no mês de consumo: o cliente paga e o
+   * Facebook é reembolsado um mês depois do uso, e em caixa a saída e a
+   * entrada do mesmo consumo caíam em meses diferentes.
+   */
+  const itensMensageria = useMemo(() => itensMensageriaDRE(records.filter(r => !r.needsValidation)), [records]);
+  const ehRubricaMensageria = (id?: string) => id === RUBRICA_SAIDA || id === RUBRICA_ENTRADA;
 
   /**
    * Renovações previstas das assinaturas ativas.
@@ -2115,6 +2137,12 @@ const newRecords: FinancialRecord[] = [];
         }); 
         return vals; 
       };
+
+      const valoresMensageria = (keys: string[]) => {
+        const vals: Record<string, number> = {};
+        keys.forEach(key => { vals[key] = itensMensageria.filter(i => i.mes === key).reduce((acc, i) => acc + i.valor, 0); });
+        return vals;
+      };
       
       /**
        * Por qual dimensão a receita abre.
@@ -2195,6 +2223,14 @@ const newRecords: FinancialRecord[] = [];
                   const centerNode: any = { code: centerCode, name: centerName, type: 'CENTER', values: {}, prevValues: {}, children: [] };
                   const rubrics = chartOfAccounts.filter(c => c.centerCode === centerCode).sort((a,b) => a.rubricCode.localeCompare(b.rubricCode, undefined, { numeric: true }));
                   rubrics.forEach(rubric => { 
+                      // A entrada de mensageria some como linha: ela já está
+                      // descontada na de saída, que mostra só o gasto da Mirai.
+                      if (rubric.id === RUBRICA_ENTRADA) return;
+                      if (rubric.id === RUBRICA_SAIDA) {
+                          centerNode.children.push({ code: rubric.rubricCode, name: 'MENSAGERIA E ADS', type: 'RUBRIC', mensageria: true,
+                            values: valoresMensageria(primaryKeys), prevValues: valoresMensageria(compareKeys) });
+                          return;
+                      }
                       const rubricNode = { code: rubric.rubricCode, name: rubric.rubricName, type: 'RUBRIC', values: calculateValueForNode([rubric.id], primaryKeys, isExpense), prevValues: calculateValueForNode([rubric.id], compareKeys, isExpense) }; 
                       centerNode.children.push(rubricNode);
                   });

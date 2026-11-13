@@ -10,6 +10,7 @@ import { CashEvolutionByBank } from './finance/CashEvolutionByBank';
 import { DateRangeFilter, presetRange, inRange, type DateRange } from './DateRangeFilter';
 import { dataDoLancamento } from '../lib/dataLancamento';
 import { RUBRICA_ENTRADA, RUBRICA_SAIDA, itensMensageriaDRE } from '../lib/mensageria';
+import { paraDRE, RUBRICA_REPASSE_CREDOR } from '../lib/acordoDRE';
 import { abateDespesa, rubricasDeDespesa } from '../lib/abateDespesa';
 import { PayRecordModal } from './PayRecordModal';
 import { isProjected, projectSubscriptions, shiftMonthKey } from '../lib/subscriptionProjection';
@@ -1809,7 +1810,7 @@ const newRecords: FinancialRecord[] = [];
           return;
       }
       const consumoNoPeriodo = new Set(itensMensageria.filter(i => dateKeys.includes(i.mes)).map(i => i.record.id));
-      const recordsToDisplay = [...validRecords, ...projectedRecords].filter(r => {
+      const recordsToDisplay = paraDRE([...validRecords, ...projectedRecords], idsAcordo).filter(r => {
           const rDate = dataDoLancamento(r);
           const noPeriodo = !!rDate && dateKeys.some(k => rDate.startsWith(k));
           if (!noPeriodo && !consumoNoPeriodo.has(r.id)) return false;
@@ -1877,6 +1878,8 @@ const newRecords: FinancialRecord[] = [];
   // --- Common Calculations ---
   const validRecords = records.filter(r => !r.needsValidation);
   const rubricasDespesa = useMemo(() => rubricasDeDespesa(chartOfAccounts), [chartOfAccounts]);
+  // Produto Acordo: no DRE entra só a parte da Mirai (lib/acordoDRE).
+  const idsAcordo = useMemo(() => new Set(products.filter(p => (p.name || '').trim().toLowerCase() === 'acordo').map(p => p.id)), [products]);
   /**
    * Mensageria no DRE é uma linha só, no mês de consumo: o cliente paga e o
    * Facebook é reembolsado um mês depois do uso, e em caixa a saída e a
@@ -2107,7 +2110,7 @@ const newRecords: FinancialRecord[] = [];
        * meses à frente do último lote do Asaas pareciam uma queda de faturamento
        * que não existe.
        */
-      const baseRecords = [...validRecords, ...projectedRecords];
+      const baseRecords = paraDRE([...validRecords, ...projectedRecords], idsAcordo);
       const hierarchy: any[] = []; const netResult: Record<string, number> = {}; const prevNetResult: Record<string, number> = {};
       
       /**
@@ -2226,6 +2229,8 @@ const newRecords: FinancialRecord[] = [];
                       // A entrada de mensageria some como linha: ela já está
                       // descontada na de saída, que mostra só o gasto da Mirai.
                       if (rubric.id === RUBRICA_ENTRADA) return;
+                      // Repasse ao credor também some: o acordo já entra só com os 20% da Mirai.
+                      if (rubric.id === RUBRICA_REPASSE_CREDOR) return;
                       if (rubric.id === RUBRICA_SAIDA) {
                           centerNode.children.push({ code: rubric.rubricCode, name: 'MENSAGERIA E ADS', type: 'RUBRIC', mensageria: true,
                             values: valoresMensageria(primaryKeys), prevValues: valoresMensageria(compareKeys) });

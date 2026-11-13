@@ -2311,10 +2311,24 @@ const newRecords: FinancialRecord[] = [];
         // Ordenada por outra coluna, a leitura linha a linha não existe: cai no
         // saldo por data mesmo, preservando a ordem da tela dentro do mesmo dia.
         : [...filtered].sort((a, b) => dataDoLancamento(a).localeCompare(dataDoLancamento(b)));
-      let acc = 0;
+      // O saldo parte do saldo real da conta no início do período: saldo
+      // inicial dela mais tudo que foi pago nela antes. Sem banco escolhido, é a
+      // conta Asaas, a única em uso. A conta é a mesma do sync, que ancora o
+      // saldo inicial no saldo do Asaas na virada para novembro.
+      const contaSaldo = reconFilterBank === 'ALL'
+        ? banks.find(b => (b.name || '').trim().toLowerCase() === 'asaas')
+        : banks.find(b => b.id === reconFilterBank);
+      const saldoInicial = contaSaldo
+        ? (Number(contaSaldo.initialBalance) || 0) + records
+            .filter(r => r.bankId === contaSaldo.id && r.status === TransactionStatus.PAID
+              && !!reconRange.from && (r.paymentDate || r.dueDate || '') < reconRange.from)
+            .reduce((a, r) => a + (r.amount || 0), 0)
+        : 0;
+      let acc = saldoInicial;
       chronological.forEach(r => { acc += (r.amount || 0); runningBalance.set(r.id, acc); });
       const chronoPos = new Map(chronological.map((r, i) => [r.id, i]));
       const finalBalance = acc;
+      const totalPeriodo = acc - saldoInicial;
 
       const allSelected = filtered.length > 0 && selectedRecordIds.size === filtered.length;
 
@@ -2555,7 +2569,7 @@ const newRecords: FinancialRecord[] = [];
                                 </div>
                               </th>
                             ))}
-                            <th className="w-[120px] text-right" title="Saldo dos lançamentos filtrados acumulado por data, incluindo os ainda não pagos. Ordene por Data para ler a coluna de cima a baixo.">Saldo acum. (R$)</th>
+                            <th className="w-[120px] text-right" title="Parte do saldo real da conta (Asaas, se nenhum banco estiver escolhido) no início do período e soma os lançamentos filtrados por data, incluindo os ainda não pagos. Ordene por Data para ler a coluna de cima a baixo.">Saldo acum. (R$)</th>
                             <th className="w-[96px] text-center">Ações</th>
                           </tr>
                       </thead>
@@ -2626,7 +2640,7 @@ const newRecords: FinancialRecord[] = [];
                                 <span className="ml-4 font-normal text-gray-500">Entradas <b className="text-green-700 tabular-nums">{f(entradas)}</b></span>
                                 <span className="ml-4 font-normal text-gray-500">Saídas <b className="text-red-600 tabular-nums">−{f(saidas)}</b></span>
                               </td>
-                              <td className={`text-right tabular-nums ${finalBalance < 0 ? 'text-red-600' : 'text-green-700'}`}>{finalBalance < 0 ? '−' : ''}{f(finalBalance)}</td>
+                              <td className={`text-right tabular-nums ${totalPeriodo < 0 ? 'text-red-600' : 'text-green-700'}`}>{totalPeriodo < 0 ? '−' : ''}{f(totalPeriodo)}</td>
                               <td className={`text-right tabular-nums ${finalBalance < 0 ? 'text-red-600' : 'text-gray-700'}`}>{finalBalance < 0 ? '−' : ''}{f(finalBalance)}</td>
                               <td></td>
                             </tr>

@@ -341,8 +341,8 @@ Deno.serve(async (req: Request) => {
     // classificada; o resto (PIX enviado ou recebido por fora, estorno) chega
     // em "A validar" para ser classificado. O passado fica como estava: só
     // lançamento de EXTRATO_DESDE em diante pode ser ligado ao extrato.
+    let extrato: any[] = [];
     if (asaasBankId) {
-      let extrato: any[] = [];
       try {
         extrato = await asaasList(`/financialTransactions?startDate=${EXTRATO_DESDE}`);
       } catch (e) {
@@ -441,23 +441,32 @@ Deno.serve(async (req: Request) => {
       }
 
       // O saldo da conta no sistema é saldo inicial + lançamentos pagos dela.
-      // Taxa do Asaas, antecipação e estorno não viram lançamento, então ele
-      // nunca fechava. O saldo inicial passa a ser o que faz o saldo de hoje
-      // bater com o do Asaas — a diferença acumulada fica nele.
+      // Antes do extrato, taxa, PIX por fora e estorno não viravam lançamento,
+      // e a diferença acumulada fica no saldo inicial. A âncora é o saldo real
+      // do Asaas na véspera de EXTRATO_DESDE: o saldo de hoje menos tudo que o
+      // extrato movimentou desde então. Assim o fim de outubro bate com o
+      // Asaas e novembro segue dali, movimento a movimento. Sem extrato, vale
+      // o jeito antigo: o saldo de hoje fecha com o do Asaas.
       try {
         const bal = await asaas('/finance/balance');
         const saldoAsaas = Number(bal?.balance);
         if (Number.isFinite(saldoAsaas)) {
+          const ancora = extrato.length
+            ? saldoAsaas - extrato.reduce((a: number, t: any) => a + (Number(t.value) || 0), 0)
+            : null;
+
           let soma = 0;
           for (let from = 0; ; from += 1000) {
-            const { data, error } = await admin.from('financial_records').select('amount')
+            const { data, error } = await admin.from('financial_records').select('amount, paymentDate, dueDate')
               .eq('tenant_id', tenantId).eq('bankId', asaasBankId).eq('status', 'Pago')
               .order('id').range(from, from + 999);
             if (error) throw new Error(error.message);
-            soma += (data || []).reduce((a: number, r: any) => a + (Number(r.amount) || 0), 0);
+            soma += (data || [])
+              .filter((r: any) => ancora === null || String(r.paymentDate || r.dueDate || '') < EXTRATO_DESDE)
+              .reduce((a: number, r: any) => a + (Number(r.amount) || 0), 0);
             if (!data || data.length < 1000) break;
           }
-          const inicial = Math.round((saldoAsaas - soma) * 100) / 100;
+          const inicial = Math.round(((ancora ?? saldoAsaas) - soma) * 100) / 100;
           const { error } = await admin.from('banks')
             .update({ initialBalance: inicial, asaas_balance: saldoAsaas, asaas_balance_at: new Date().toISOString() })
             .eq('id', asaasBankId);

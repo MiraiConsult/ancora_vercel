@@ -25,8 +25,6 @@ const digits = (s: string) => (s || '').replace(/\D/g, '');
 const EXTRATO_DESDE = '2026-11-01';
 const diasEntre = (a: string, b: string) =>
   Math.round((Date.parse(b.slice(0, 10)) - Date.parse(a.slice(0, 10))) / 86400000);
-const diaAntes = (iso: string, dias: number) =>
-  new Date(Date.parse(iso) - dias * 86400000).toISOString().slice(0, 10);
 
 async function asaas(path: string) {
   const res = await fetch(`${ASAAS_BASE_URL}${path}`, {
@@ -341,7 +339,8 @@ Deno.serve(async (req: Request) => {
     // feito à mão com o mesmo valor, até 5 dias da data, é ligado à linha do
     // extrato e vira pago nela, em vez de duplicar. Taxa do Asaas entra já
     // classificada; o resto (PIX enviado ou recebido por fora, estorno) chega
-    // em "A validar" para ser classificado. O passado fica como estava.
+    // em "A validar" para ser classificado. O passado fica como estava: só
+    // lançamento de EXTRATO_DESDE em diante pode ser ligado ao extrato.
     if (asaasBankId) {
       let extrato: any[] = [];
       try {
@@ -366,7 +365,7 @@ Deno.serve(async (req: Request) => {
         const { data: manuais } = await admin.from('financial_records')
           .select('id, amount, dueDate').eq('tenant_id', tenantId)
           .is('asaas_payment_id', null).is('asaas_bill_id', null).is('asaas_transfer_id', null)
-          .is('asaas_transaction_id', null).gte('dueDate', diaAntes(EXTRATO_DESDE, 15));
+          .is('asaas_transaction_id', null).gte('dueDate', EXTRATO_DESDE);
         const usados = new Set<string>();
 
         const { data: rubricaTaxa } = await admin.from('chart_of_accounts')

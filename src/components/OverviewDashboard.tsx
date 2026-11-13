@@ -10,6 +10,7 @@ import { computeMovement, MOVEMENT_SCOPES, normName, shiftMes, SystemOverride } 
 import { supabase } from '../lib/supabaseClient';
 import { dataDoLancamento } from '../lib/dataLancamento';
 import { abateDespesa, rubricasDeDespesa } from '../lib/abateDespesa';
+import { paraDRE } from '../lib/acordoDRE';
 
 interface OverviewDashboardProps {
   records: FinancialRecord[];
@@ -92,9 +93,15 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
 
   // Aporte, empréstimo e transferência são caixa, não faturamento — fora daqui.
   const rubricasDespesa = useMemo(() => rubricasDeDespesa(chartOfAccounts), [chartOfAccounts]);
+  // Mesma conta do DRE: acordo só com os 20% da Mirai e sem o repasse ao
+  // credor. O saldo da conta Asaas, mais abaixo, segue com os valores cheios.
+  const idsAcordo = useMemo(
+    () => new Set(products.filter(p => (p.name || '').trim().toLowerCase() === 'acordo').map(p => p.id)),
+    [products],
+  );
   const validRecords = useMemo(
-    () => records.filter(r => !r.needsValidation && !r.non_operating),
-    [records],
+    () => paraDRE(records.filter(r => !r.needsValidation && !r.non_operating), idsAcordo),
+    [records, idsAcordo],
   );
 
   const availableYears = useMemo(() => {

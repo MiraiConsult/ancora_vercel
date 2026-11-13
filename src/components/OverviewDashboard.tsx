@@ -464,7 +464,8 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
     }).sort((a, b) => b.value - a.value);
   }, [movGeral, validRecords, products, companies]);
 
-  const monthsLabel = monthsSorted.length === 12 ? 'Ano cheio'
+  const monthsLabel = monthsSorted.length === 0 ? 'Nenhum'
+    : monthsSorted.length === 12 ? 'Ano cheio'
     : monthsSorted.length === 1 ? MONTHS[monthsSorted[0] - 1]
     : isContiguous(monthsSorted) ? `${MONTHS[monthsSorted[0] - 1]}–${MONTHS[monthsSorted[monthsSorted.length - 1] - 1]}`
     : `${monthsSorted.length} meses`;
@@ -492,7 +493,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
 
             <Pill label="Meses" value={monthsLabel}>
               {() => (
-                <div className="p-3 w-64">
+                <div className="p-3 w-72">
                   <div className="grid grid-cols-4 gap-1.5 mb-3">
                     {MONTHS.map((m, i) => {
                       const on = selectedMonths.includes(i + 1);
@@ -509,6 +510,8 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ records, p
                     <button onClick={() => setSelectedMonths(ALL_MONTHS)} className="text-gray-700 font-medium hover:underline">Ano cheio</button>
                     <button onClick={() => setSelectedMonths([new Date().getMonth() + 1])} className="text-gray-700 font-medium hover:underline">Mês atual</button>
                     <button onClick={() => setSelectedMonths(ALL_MONTHS.slice(0, new Date().getMonth() + 1))} className="text-gray-700 font-medium hover:underline">Até hoje</button>
+                    {/* Desmarca tudo, para escolher só os meses que interessam. */}
+                    <button onClick={() => setSelectedMonths([])} className="text-red-600 font-medium hover:underline">Limpar</button>
                   </div>
                 </div>
               )}
